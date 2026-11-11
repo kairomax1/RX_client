@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">RX Client</string>
+    <string name="app_name" translatable="false">RX VPN</string>
     <string name="app_widget_name">Switch</string>
     <string name="app_tile_name">Switch</string>
     <string name="app_tile_first_use">Add a profile in the app before using this feature.</string>
@@ -14,7 +14,7 @@
     <string name="pull_down_to_refresh">Please pull down to refresh!</string>
 
     <!-- Notifications -->
-    <string name="notification_channel_service">RX Client service</string>
+    <string name="notification_channel_service">RX VPN service</string>
     <string name="notification_channel_subscription_updates">Subscription updates</string>
     <string name="notification_channel_connection_checks">Connection checks</string>
     <string name="notification_action_stop_v2ray">Stop</string>
@@ -28,7 +28,7 @@
 
     <!--ServerActivity-->
     <string name="empty_state_title">No configuration yet</string>
-    <string name="empty_state_hint">Tap + to add a config, paste a subscription link or scan a QR code to get started.</string>
+    <string name="empty_state_hint">Import a configuration file or paste a copied link. Then select a server and connect.</string>
     <string name="title_server">Config</string>
     <string name="menu_item_add_config">Add config</string>
     <string name="menu_item_save_config">Save config</string>
@@ -293,9 +293,7 @@
     <string name="title_source_code">Source code</string>
     <string name="title_oss_license">Open-source licenses</string>
     <string name="title_translators">Translators</string>
-    <string name="title_tg_channel">Telegram channel</string>
 
-    <string name="title_pref_promotion">Promotion</string>
 
     <string name="title_pref_auto_update_subscription">Automatically update subscriptions</string>
     <string name="summary_pref_auto_update_subscription">Update your subscriptions automatically at set intervals in the background. Depending on the device, this feature may not always work</string>
@@ -304,7 +302,6 @@
     <string name="title_core_loglevel">Log Level</string>
     <string name="title_outbound_domain_resolve_method">Outbound domain resolution</string>
     <string name="title_mode">Mode</string>
-    <string name="title_mode_help">Click me for more help</string>
     <string name="title_language">Language</string>
     <string name="title_ui_settings">UI settings</string>
     <string name="title_pref_ui_mode_night">UI mode settings</string>
@@ -407,7 +404,7 @@
     <string name="connection_test_error">Connection test failed: %s</string>
     <string name="connection_test_fail">Internet unavailable</string>
     <string name="connection_test_error_status_code">Error code: #%d</string>
-    <string name="connection_connected">Connected. Tap to check connection.</string>
+    <string name="connection_connected">Connected</string>
     <string name="connection_not_connected">Not connected</string>
     <string name="connection_running_task_left">Tests running: %s</string>
 
@@ -567,4 +564,100 @@
     <string name="sub_info_traffic" translatable="false">%1$s / %2$s</string>
     <string name="sub_info_unlimited">Unlimited</string>
 
+    <!-- RX VPN connection and per-app routing UI -->
+    <string name="rx_connect">Connect</string>
+    <string name="rx_disconnect">Disconnect</string>
+    <string name="rx_connect_hint">Add and select a configuration to connect.</string>
+    <string name="rx_app_routing">App routing</string>
+    <string name="rx_routing_all">All apps</string>
+    <string name="rx_routing_all_hint">Route all apps through VPN, except RX VPN itself.</string>
+    <string name="rx_routing_only">Selected apps only</string>
+    <string name="rx_routing_only_hint">Only checked apps use VPN. Other apps connect directly.</string>
+    <string name="rx_routing_except">All except selected</string>
+    <string name="rx_routing_except_hint">Checked apps connect directly. All other apps use VPN.</string>
+    <string name="rx_routing_save_failed">Could not save app routing. Try again.</string>
+    <string name="rx_search_apps">Search apps</string>
+    <string name="rx_no_apps">No matching apps</string>
+    <string name="rx_routing_change_hint">Changes apply when the VPN reconnects.</string>
+    <string name="rx_select_apps_hint">Select at least one app before connecting.</string>
+    <string name="rx_ping_tap_hint">Tap to check ping</string>
+    <string name="onboarding_language_title">Choose the app language</string>
+    <string name="onboarding_language_hint">You can change it later in Settings.</string>
+    <string name="onboarding_language_persian" translatable="false">فارسی</string>
+    <string name="onboarding_language_english" translatable="false">English</string>
+    <string name="onboarding_language_system">Use the device language</string>
+    <string name="backup_group_backup">Backup</string>
+    <string name="backup_group_restore">Restore</string>
+    <string name="backup_password_backup_title">Password for this backup</string>
+    <string name="backup_password_backup_hint">Optional. A protected backup can only be restored with this password.</string>
+    <string name="backup_password_restore_title">This backup is protected</string>
+    <string name="backup_password_restore_hint">Enter the password that was set when the backup was created.</string>
+    <string name="backup_password_label">Password</string>
+    <string name="backup_password_none">No password</string>
+    <string name="backup_password_continue">Continue</string>
+    <string name="toast_backup_wrong_password">Wrong password.</string>
+    <string name="toast_backup_protect_failed">Could not create the backup.</string>
+    <string name="toast_restore_failed">Could not restore this backup.</string>
+    <string name="summary_backup_contents">Includes settings, servers, subscriptions and routing rules.</string>
+    <string name="notification_channel_daily_maintenance">Daily updates</string>
+    <string name="title_pref_daily_maintenance">Automatic daily maintenance</string>
+    <string name="summary_pref_daily_maintenance">Once a day the app looks for a new version, refreshes automatic subscriptions and tidies local data, in the background.</string>
+    <string name="title_daily_maintenance_run_now">Run maintenance now</string>
+    <string name="summary_daily_maintenance_run_now">Checks for a new version and refreshes subscriptions right away.</string>
+    <string name="daily_update_title">New version ready</string>
+    <string name="daily_update_text">Version %1$s was downloaded. Tap to install.</string>
+    <string name="cloudflare_title">Cloudflare</string>
+    <string name="cloudflare_active_config">Active config</string>
+    <string name="cloudflare_no_config">No config is selected.</string>
+    <string name="cloudflare_detected">This config goes through Cloudflare.</string>
+    <string name="cloudflare_group_unblock">Unblock</string>
+    <string name="cloudflare_antibloc_title">Unblock (TLS fragmentation)</string>
+    <string name="cloudflare_antibloc_summary">Splits the TLS handshake and keeps the tunnel multiplexed, which gets a blocked or slow config working again on most networks.</string>
+    <string name="cloudflare_group_best_ip">Best Cloudflare IP</string>
+    <string name="cloudflare_scan">Scan edges</string>
+    <string name="cloudflare_latency">%1$d ms</string>
+    <string name="cloudflare_apply">Use this IP</string>
+    <string name="cloudflare_group_test">Test</string>
+    <string name="cloudflare_test">Test the config</string>
+    <string name="cloudflare_test_ok">Answered in %1$d ms.</string>
+    <string name="cloudflare_test_failed">No answer: the config is blocked, or the address is dead.</string>
+    <string name="toast_cloudflare_applied">The Cloudflare config was created in its own tab.</string>
+    <string name="toast_cloudflare_scan_failed">No Cloudflare edge answered.</string>
+    <string name="toast_cloudflare_no_config">Select a config first.</string>
+    <string name="cloudflare_auto_title">Automatic repair</string>
+    <string name="cloudflare_auto_summary">When the selected Cloudflare config stops answering, the app unblocks it and picks a faster edge by itself — when this screen opens and once a day.</string>
+    <string name="cloudflare_auto_healthy">The config answered; nothing was changed.</string>
+    <string name="cloudflare_auto_unblocked">No answer, so TLS fragmentation and mux were switched on.</string>
+    <string name="cloudflare_auto_switched">A faster Cloudflare edge was selected automatically.</string>
+    <string name="speedtest_title">Test and suggestions</string>
+    <string name="speedtest_network">Network: %1$s</string>
+    <string name="speedtest_ping_all">Ping all configs</string>
+    <string name="speedtest_speed">Test upload/download</string>
+    <string name="speedtest_speed_hint">Upload and download are measured through the tunnel, so connect first; the numbers are stored for the network you are on.</string>
+    <string name="speedtest_suggestions">Suggested for this network</string>
+    <string name="speedtest_all_configs">All configs, lowest ping first</string>
+    <string name="speedtest_no_results">Nothing measured on this network yet. Run a ping test.</string>
+    <string name="speedtest_no_configs">No configs yet.</string>
+    <string name="speedtest_ping_value">%1$d ms</string>
+    <string name="speedtest_not_measured">not measured</string>
+    <string name="speedtest_mbps_down">↓ %1$s Mbps</string>
+    <string name="speedtest_mbps_up">↑ %1$s Mbps</string>
+    <string name="speedtest_no_speed">no speed yet</string>
+    <string name="speedtest_needs_connection">Connect first, then test the speed.</string>
+    <string name="speedtest_done">Speed recorded.</string>
+    <string name="splash_tagline">Got your back</string>
+    <string name="cloudflare_group_name">Cloudflare</string>
+    <string name="cloudflare_copy_suffix">· CF</string>
+    <string name="cloudflare_group_result">Cloudflare config</string>
+    <string name="cloudflare_result_empty">Nothing has been fixed yet. Pick an edge above and press "Use this IP": the result is saved as a new config in this tab, never over your own.</string>
+    <string name="cloudflare_real_ping">Real ping: %1$d ms</string>
+    <string name="cloudflare_real_ping_pending">Saved. The real ping is being measured…</string>
+    <string name="cloudflare_group_count">Configs in this tab: %1$d</string>
+    <string name="cloudflare_scan_note">These numbers are TLS handshake latency to the edge, not a config ping. The config ping is measured through the core after the config is built.</string>
+    <string name="cloudflare_other_config">Another config</string>
+    <string name="cloudflare_other_summary">Anything that is not in the app: paste a vless / vmess / trojan / ss link and it lands in this tab.</string>
+    <string name="cloudflare_other_field">Config link</string>
+    <string name="cloudflare_other_add">Add</string>
+    <string name="cloudflare_other_saved">Added to the Cloudflare tab.</string>
+    <string name="cloudflare_other_failed">Nothing was added: the link was not a valid config.</string>
 </resources>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">RX Client</string>
+    <string name="app_name" translatable="false">RX VPN</string>
     <string name="app_widget_name">تعویض</string>
     <string name="app_tile_name">تعویض</string>
     <string name="app_tile_first_use">برای اولین استفاده از این قابلیت، لطفاً ابتدا از داخل برنامه یک سرور اضافه کنید</string>
@@ -14,7 +14,7 @@
     <string name="pull_down_to_refresh">برای بروزرسانی، صفحه را به پایین بکشید!</string>
 
     <!-- Notifications -->
-    <string name="notification_channel_service">سرویس RX Client</string>
+    <string name="notification_channel_service">سرویس RX VPN</string>
     <string name="notification_channel_subscription_updates">به‌روزرسانی اشتراک‌ها</string>
     <string name="notification_channel_connection_checks">بررسی اتصال</string>
     <string name="notification_action_stop_v2ray">توقف</string>
@@ -28,7 +28,7 @@
 
     <!--ServerActivity-->
     <string name="empty_state_title">هنوز کانفیگی اضافه نشده</string>
-    <string name="empty_state_hint">برای شروع دکمه‌ی + را بزنید تا کانفیگ اضافه کنید، لینک اشتراک بچسبانید یا کد QR را اسکن کنید.</string>
+    <string name="empty_state_hint">فایل کانفیگ را وارد کن یا لینک کپی‌شده را بچسبان؛ بعد یک سرور انتخاب کن و متصل شو.</string>
     <string name="title_server">فایل کانفیگ</string>
     <string name="menu_item_add_config">افزودن کانفیگ</string>
     <string name="menu_item_save_config">ذخیره کانفیگ</string>
@@ -293,9 +293,7 @@
     <string name="title_source_code">کد منبع</string>
     <string name="title_oss_license">مجوز های منبع باز</string>
     <string name="title_translators">مترجمان</string>
-    <string name="title_tg_channel">کانال تلگرام</string>
 
-    <string name="title_pref_promotion">تبلیغات</string>
 
     <string name="title_pref_auto_update_subscription">به‌ روزرسانی خودکار اشتراک ها</string>
     <string name="summary_pref_auto_update_subscription">اشتراک های خود را به طور خودکار با فاصله زمانی در پس زمینه به روز کنید. بسته به دستگاه، این ویژگی ممکن است همیشه کار نکند.</string>
@@ -304,7 +302,6 @@
     <string name="title_core_loglevel">سطح گزارشات</string>
     <string name="title_outbound_domain_resolve_method">روش نام‌گشایی دامنهٔ خروجی (outbound)</string>
     <string name="title_mode">حالت</string>
-    <string name="title_mode_help">برای اطلاعات و راهنمایی بیشتر، روی این متن کلیک کنید</string>
     <string name="title_language">زبان</string>
     <string name="title_ui_settings">تنظیمات رابط کاربری</string>
     <string name="title_pref_ui_mode_night">تنظیمات حالت رابط کاربری</string>
@@ -407,7 +404,7 @@
     <string name="connection_test_error">آزمایش اتصال ناموفق بود: %s</string>
     <string name="connection_test_fail">اینترنت در دسترس نیست</string>
     <string name="connection_test_error_status_code">کد خطا: #%d</string>
-    <string name="connection_connected">متصل است.\nبرای بررسی اتصال ضربه بزنید.</string>
+    <string name="connection_connected">متصل</string>
     <string name="connection_not_connected">متصل نیست</string>
     <string name="connection_running_task_left">آزمایش‌های در حال اجرا: %s</string>
 
@@ -566,4 +563,98 @@
     <string name="sub_info_open_page">باز کردن صفحه اطلاعات اشتراک</string>
     <string name="sub_info_unlimited">نامحدود</string>
 
+    <!-- RX VPN connection and per-app routing UI -->
+    <string name="rx_connect">اتصال</string>
+    <string name="rx_disconnect">قطع اتصال</string>
+    <string name="rx_connect_hint">برای اتصال، یک کانفیگ اضافه و انتخاب کن.</string>
+    <string name="rx_app_routing">مسیردهی برنامه‌ها</string>
+    <string name="rx_routing_all">همهٔ برنامه‌ها</string>
+    <string name="rx_routing_all_hint">همهٔ برنامه‌ها به‌جز خود RX VPN از VPN عبور می‌کنند.</string>
+    <string name="rx_routing_only">فقط برنامه‌های انتخاب‌شده</string>
+    <string name="rx_routing_only_hint">فقط برنامه‌های تیک‌خورده از VPN استفاده می‌کنند؛ بقیه مستقیم متصل می‌شوند.</string>
+    <string name="rx_routing_except">همه به‌جز انتخاب‌شده‌ها</string>
+    <string name="rx_routing_except_hint">برنامه‌های تیک‌خورده مستقیم متصل می‌شوند؛ بقیه از VPN عبور می‌کنند.</string>
+    <string name="rx_routing_save_failed">ذخیرهٔ مسیردهی برنامه‌ها انجام نشد؛ دوباره تلاش کن.</string>
+    <string name="rx_search_apps">جست‌وجوی برنامه‌ها</string>
+    <string name="rx_no_apps">برنامه‌ای پیدا نشد</string>
+    <string name="rx_routing_change_hint">تغییرات با اتصال دوبارهٔ VPN اعمال می‌شوند.</string>
+    <string name="rx_select_apps_hint">پیش از اتصال دست‌کم یک برنامه انتخاب کن.</string>
+    <string name="rx_ping_tap_hint">برای بررسی پینگ بزن</string>
+    <string name="onboarding_language_title">زبان برنامه را انتخاب کنید</string>
+    <string name="onboarding_language_hint">بعداً هم می‌توانید از تنظیمات تغییرش دهید.</string>
+    <string name="onboarding_language_system">زبان گوشی</string>
+    <string name="backup_group_backup">پشتیبان‌گیری</string>
+    <string name="backup_group_restore">بازیابی</string>
+    <string name="backup_password_backup_title">رمز برای این پشتیبان</string>
+    <string name="backup_password_backup_hint">اختیاری. فایل رمزدار فقط با همین رمز بازیابی می‌شود.</string>
+    <string name="backup_password_restore_title">این پشتیبان رمز دارد</string>
+    <string name="backup_password_restore_hint">رمزی را که هنگام ساخت پشتیبان گذاشته شده وارد کن.</string>
+    <string name="backup_password_label">رمز</string>
+    <string name="backup_password_none">بدون رمز</string>
+    <string name="backup_password_continue">ادامه</string>
+    <string name="toast_backup_wrong_password">رمز اشتباه است.</string>
+    <string name="toast_backup_protect_failed">ساخت فایل پشتیبان ممکن نشد.</string>
+    <string name="toast_restore_failed">بازیابی این فایل ممکن نشد.</string>
+    <string name="summary_backup_contents">شامل تنظیمات، سرورها، اشتراک‌ها و قواعد مسیریابی.</string>
+    <string name="notification_channel_daily_maintenance">به‌روزرسانی روزانه</string>
+    <string name="title_pref_daily_maintenance">نگهداری خودکار روزانه</string>
+    <string name="summary_pref_daily_maintenance">روزی یک‌بار، در پس‌زمینه: بررسی نسخه‌ی جدید، رفرش اشتراک‌های خودکار و مرتب‌سازی داده‌های محلی.</string>
+    <string name="title_daily_maintenance_run_now">همین حالا اجرا کن</string>
+    <string name="summary_daily_maintenance_run_now">همین حالا نسخه‌ی جدید و اشتراک‌ها را بررسی می‌کند.</string>
+    <string name="daily_update_title">نسخه‌ی جدید آماده است</string>
+    <string name="daily_update_text">نسخه‌ی %1$s دانلود شد. برای نصب بزن.</string>
+    <string name="cloudflare_title">کلادفلر</string>
+    <string name="cloudflare_active_config">کانفیگ فعال</string>
+    <string name="cloudflare_no_config">هیچ کانفیگی انتخاب نشده.</string>
+    <string name="cloudflare_detected">این کانفیگ از کلادفلر می‌گذرد.</string>
+    <string name="cloudflare_group_unblock">رفع فیلتر</string>
+    <string name="cloudflare_antibloc_title">رفع فیلتر (قطعه‌بندی TLS)</string>
+    <string name="cloudflare_antibloc_summary">هندشیک TLS را تکه‌تکه می‌کند و تونل را مالتی‌پلکس نگه می‌دارد؛ روی بیشتر شبکه‌ها کانفیگ بلاک‌شده یا کند دوباره کار می‌کند.</string>
+    <string name="cloudflare_group_best_ip">بهترین IP کلادفلر</string>
+    <string name="cloudflare_scan">اسکن لبه‌ها</string>
+    <string name="cloudflare_latency">%1$d میلی‌ثانیه</string>
+    <string name="cloudflare_apply">اعمال این IP</string>
+    <string name="cloudflare_group_test">تست</string>
+    <string name="cloudflare_test">تست کانفیگ</string>
+    <string name="cloudflare_test_ok">در %1$d میلی‌ثانیه پاسخ داد.</string>
+    <string name="cloudflare_test_failed">پاسخی نداد: کانفیگ بلاک است یا آدرس مرده.</string>
+    <string name="toast_cloudflare_applied">کانفیگ کلادفلر در تب خودش ساخته شد.</string>
+    <string name="toast_cloudflare_scan_failed">هیچ لبه‌ی کلادفلری پاسخ نداد.</string>
+    <string name="toast_cloudflare_no_config">اول یک کانفیگ انتخاب کن.</string>
+    <string name="cloudflare_auto_title">تعمیر خودکار</string>
+    <string name="cloudflare_auto_summary">اگر کانفیگ کلادفلرِ انتخاب‌شده جواب ندهد، برنامه خودش رفع فیلتر می‌کند و لبه‌ی سریع‌تر را انتخاب می‌کند — هنگام باز کردن این صفحه و روزی یک‌بار.</string>
+    <string name="cloudflare_auto_healthy">کانفیگ جواب داد؛ چیزی تغییر نکرد.</string>
+    <string name="cloudflare_auto_unblocked">جواب نداد، پس قطعه‌بندی TLS و مالتی‌پلکس روشن شد.</string>
+    <string name="cloudflare_auto_switched">لبه‌ی سریع‌تر کلادفلر خودکار انتخاب شد.</string>
+    <string name="speedtest_title">تست و پیشنهاد کانفیگ</string>
+    <string name="speedtest_network">شبکه: %1$s</string>
+    <string name="speedtest_ping_all">پینگ همه‌ی کانفیگ‌ها</string>
+    <string name="speedtest_speed">تست آپلود/دانلود</string>
+    <string name="speedtest_speed_hint">آپلود و دانلود از داخل تونل اندازه‌گیری می‌شود، پس اول وصل شو؛ اعداد برای همین شبکه ذخیره می‌شوند.</string>
+    <string name="speedtest_suggestions">پیشنهاد برای همین شبکه</string>
+    <string name="speedtest_all_configs">همه‌ی کانفیگ‌ها، از کمترین پینگ</string>
+    <string name="speedtest_no_results">روی این شبکه هنوز چیزی اندازه‌گیری نشده؛ تست پینگ بزن.</string>
+    <string name="speedtest_no_configs">هنوز کانفیگی نداری.</string>
+    <string name="speedtest_ping_value">%1$d میلی‌ثانیه</string>
+    <string name="speedtest_not_measured">اندازه‌گیری نشده</string>
+    <string name="speedtest_mbps_down">↓ %1$s مگابیت</string>
+    <string name="speedtest_mbps_up">↑ %1$s مگابیت</string>
+    <string name="speedtest_no_speed">بدون سرعت ثبت‌شده</string>
+    <string name="speedtest_needs_connection">اول وصل شو، بعد سرعت را تست کن.</string>
+    <string name="speedtest_done">سرعت ثبت شد.</string>
+    <string name="splash_tagline">هواتو داره</string>
+    <string name="cloudflare_group_name">کلادفلر</string>
+    <string name="cloudflare_copy_suffix">· کلادفلر</string>
+    <string name="cloudflare_group_result">کانفیگ کلادفلر</string>
+    <string name="cloudflare_result_empty">هنوز چیزی درست نشده. از بالا یک لبه انتخاب کنید و «این آی‌پی را بگذار» را بزنید؛ نتیجه به‌صورت یک کانفیگ تازه در همین تب ذخیره می‌شود، نه روی کانفیگ خودتان.</string>
+    <string name="cloudflare_real_ping">پینگ واقعی: %1$d میلی‌ثانیه</string>
+    <string name="cloudflare_real_ping_pending">ذخیره شد؛ پینگ واقعی در حال اندازه‌گیری است…</string>
+    <string name="cloudflare_group_count">کانفیگ‌های این تب: %1$d</string>
+    <string name="cloudflare_scan_note">این اعداد تأخیرِ دست‌دادن TLS به لبه هستند، نه پینگ کانفیگ. پینگ هر کانفیگ بعد از ساخته‌شدن، از خودِ هسته اندازه‌گیری می‌شود.</string>
+    <string name="cloudflare_other_config">کانفیگ دیگر</string>
+    <string name="cloudflare_other_summary">هر کانفیگی که در برنامه نیست: لینک vless / vmess / trojan / ss را بچسبانید تا در همین تب بنشیند.</string>
+    <string name="cloudflare_other_field">لینک کانفیگ</string>
+    <string name="cloudflare_other_add">افزودن</string>
+    <string name="cloudflare_other_saved">به تب کلادفلر اضافه شد.</string>
+    <string name="cloudflare_other_failed">چیزی اضافه نشد: لینک، کانفیگ معتبری نبود.</string>
 </resources>

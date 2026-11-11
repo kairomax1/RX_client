@@ -1,4 +1,4 @@
-name: Build RX Client APK
+name: Build RX VPN APK
 
 on:
   workflow_dispatch:
@@ -7,6 +7,11 @@ on:
         description: "If set (e.g. v1.0.0), the APKs are published as a GitHub Release"
         required: false
         type: string
+      draft:
+        description: "Create the release as a draft, visible only to you (test builds)"
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - master
@@ -105,23 +110,46 @@ jobs:
             "https://github.com/2dust/AndroidLibXrayLite/releases/download/${CORE_TAG}/libv2ray.aar"
           ls -lh V2rayNG/app/libs/
 
-      # NOTE: the keystore alias/passwords keep their legacy "mobix" names so that
-      # updates are still signed with the same key as previous releases of the app.
+      - name: Validate UI, resources, and both distribution flavors
+        run: |
+          cd V2rayNG
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew --no-daemon \
+            :app:testPlaystoreDebugUnitTest \
+            :app:compilePlaystoreDebugKotlin \
+            :app:assemblePlaystoreDebug \
+            :app:assembleFdroidDebug 2>&1 | tee "$RUNNER_TEMP/rx-validation.log"
+
+      - name: Surface validation errors
+        if: failure()
+        run: |
+          python3 - <<'PYEOF'
+          import os, re
+          path = os.path.join(os.environ["RUNNER_TEMP"], "rx-validation.log")
+          if os.path.exists(path):
+              for line in open(path, encoding="utf-8", errors="replace"):
+                  if line.startswith("e:") or "FAILED" in line or line.startswith("Caused by:"):
+                      print("::error::" + line.strip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
+          PYEOF
+
       - name: Create signing key
         run: |
+          # Android only installs an update when the signature is unchanged, so the key must be
+          # stable: the checked-in V2rayNG/signing/rxclient.p12 (or the same key as a secret).
+          KEYSTORE="$RUNNER_TEMP/rxclient.p12"
           if [ -n "${{ secrets.APP_KEYSTORE_BASE64 }}" ]; then
-            printf '%s' "${{ secrets.APP_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/rxclient.jks"
-            echo "Using repository signing key"
+            printf '%s' "${{ secrets.APP_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE"
+            echo "Using the signing key from APP_KEYSTORE_BASE64"
           else
-            keytool -genkeypair -v \
-              -keystore "$RUNNER_TEMP/rxclient.jks" \
-              -alias mobix \
-              -keyalg RSA -keysize 2048 -validity 10950 \
-              -storepass mobixvpn -keypass mobixvpn \
-              -dname "CN=RX Client, OU=Mobile, O=RX Client, L=Tehran, C=IR"
-            echo "Generated a development signing key (set APP_KEYSTORE_BASE64 to reuse a stable key)"
+            test -f V2rayNG/signing/rxclient.p12 || {
+              echo "::error::V2rayNG/signing/rxclient.p12 is missing; updates would get a new signature"
+              exit 1
+            }
+            cp V2rayNG/signing/rxclient.p12 "$KEYSTORE"
+            echo "Using the checked-in release key V2rayNG/signing/rxclient.p12"
           fi
-          echo "KEYSTORE_PATH=$RUNNER_TEMP/rxclient.jks" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
       - name: Build release APKs
         env:
@@ -132,20 +160,105 @@ jobs:
           cd V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           chmod +x gradlew
-          ./gradlew --no-daemon assemblePlaystoreRelease \
-            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
-            -Pandroid.injected.signing.store.password="$STORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+          # The debug variant is built too: it carries the same code but a well-known debug key,
+          # which makes it a useful A/B test when a device refuses to install the release file.
+          ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
+            -Prx.storeFile="$KEYSTORE_PATH" \
+            -Prx.storePassword="$STORE_PASSWORD" \
+            -Prx.keyAlias="$KEY_ALIAS" \
+            -Prx.keyPassword="$KEY_PASSWORD"
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
+      - name: Verify signing certificate
+        env:
+          EXPECTED_SHA256: "52864c67af63074ab2a613643a4b09434e3d320b87dc9c1d6bef514d881a5c83"
+        run: |
+          # Guards the in-place-update promise: a different certificate means every user would
+          # have to uninstall before installing this build.
+          APK=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*arm64-v8a.apk | head -1)
+          echo "Checking $APK"
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
+          grep -qi "$EXPECTED_SHA256" "$RUNNER_TEMP/certs.txt" || {
+            echo "::error::APK is not signed with the RX VPN release key; in-place updates would fail"
+            exit 1
+          }
+          echo "Signing certificate matches the RX VPN release key."
+
+      - name: Report APK facts
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # Every fact that decides whether a phone accepts the package is printed as an
+          # annotation, so a failed install can be diagnosed without downloading the APK.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in *.apk; do
+            "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
+              | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
+              | while read -r line; do echo "::notice title=$apk::$line"; done
+            "$BUILD_TOOLS/apksigner" verify --print-certs "$apk" 2>&1 \
+              | grep -E "Verified using|Signer #1 certificate SHA-256" \
+              | while read -r line; do echo "::notice title=signature::$line"; done
+          done
+
+      - name: Verify APK structure and write checksums
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # apksigner proves the signature; these prove the file is a readable, aligned APK and
+          # give the tester a hash to compare against what actually landed on the phone.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in *.apk; do
+            echo "== $apk"
+            "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
+              | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
+              || { echo "::error::$apk is not a readable APK"; exit 1; }
+            "$BUILD_TOOLS/zipalign" -c -v 4 "$apk" > /dev/null \
+              || { echo "::error::$apk is not zip-aligned"; exit 1; }
+          done
+          sha256sum *.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Collect APK facts
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # These lines are copied into the release notes so the exact packaging of the shipped file
+          # can be inspected later without downloading anything.
+          set +e
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APK=RXVPN_1.0.2_arm64-v8a.apk
+          {
+            echo '```'
+            echo "== badging =="
+            "$BUILD_TOOLS/aapt2" dump badging "$APK" | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:"
+            echo "== manifest flags =="
+            "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$APK" | grep -iE "extractNativeLibs|isFeatureSplit|split="
+            echo "== signature schemes =="
+            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" 2>&1 | head -25
+            echo "== zipalign -c -v 4 =="
+            "$BUILD_TOOLS/zipalign" -c -v 4 "$APK" | tail -3
+            echo "== archive entries =="
+            unzip -v "$APK" | grep -E "resources.arsc|classes.dex|lib/arm64-v8a/" | head -12
+            echo "== end =="
+            echo '```'
+          } > APK-FACTS.txt 2>&1
+          cat APK-FACTS.txt
+
+      - name: Stage a debug APK for device tests
+        run: |
+          # Same code, different signing key: if this installs where the release build does not,
+          # the refusal is about the signature, not about the app itself.
+          cp V2rayNG/app/build/outputs/apk/playstore/debug/*arm64-v8a.apk \
+             V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_1.0.2_test-debug_arm64-v8a.apk
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: RXClient-apk
-          path: V2rayNG/app/build/outputs/apk/playstore/release/*.apk
+          name: RXVPN-apk
+          path: |
+            V2rayNG/app/build/outputs/apk/playstore/release/*.apk
+            V2rayNG/app/build/outputs/apk/playstore/release/SHA256SUMS.txt
+            V2rayNG/app/build/outputs/apk/playstore/release/APK-FACTS.txt
           if-no-files-found: error
 
   release:
@@ -162,7 +275,7 @@ jobs:
       - name: Download APKs
         uses: actions/download-artifact@v4
         with:
-          name: RXClient-apk
+          name: RXVPN-apk
           path: apk
 
       - name: List downloaded APKs
@@ -176,7 +289,7 @@ jobs:
           VERSION_NAME=$(grep -oP 'versionName = "\K[^"]+' V2rayNG/app/build.gradle.kts | head -1)
           TAG="${INPUT_TAG:-v${VERSION_NAME}}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Publishing RX Client $TAG"
+          echo "Publishing RX VPN $TAG"
 
       - name: Write release notes
         env:
@@ -184,20 +297,33 @@ jobs:
         run: |
           sed -e "s|@TAG@|${TAG}|g" -e "s|@SHA@|${GITHUB_SHA}|g" \
             .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          if [ -f apk/APK-FACTS.txt ]; then
+            { echo ""; echo "### APK packaging"; echo ""; cat apk/APK-FACTS.txt; } >> "$RUNNER_TEMP/notes.md"
+          fi
           head -5 "$RUNNER_TEMP/notes.md"
 
       - name: Publish APKs to GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release.outputs.tag }}
+          DRAFT: ${{ inputs.draft }}
         run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" apk/*.apk --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          # A draft stays private to the repository owner, so a test build never becomes public.
+          if [ "$DRAFT" = "true" ]; then
+            DRAFT_FLAG="--draft"
+            LATEST_FLAG=""
           else
-            gh release create "$TAG" apk/*.apk \
+            DRAFT_FLAG=""
+            LATEST_FLAG="--latest"
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" apk/*.apk apk/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md" $DRAFT_FLAG
+          else
+            gh release create "$TAG" apk/*.apk apk/SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" \
-              --title "RX Client $TAG" \
+              --target "$GITHUB_SHA" \
+              --title "RX VPN $TAG" \
               --notes-file "$RUNNER_TEMP/notes.md" \
-              --latest
+              $DRAFT_FLAG $LATEST_FLAG
           fi

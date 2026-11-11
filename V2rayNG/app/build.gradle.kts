@@ -13,8 +13,8 @@ android {
         applicationId = "com.mobix.vpn"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "1.0.2"
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
@@ -38,13 +38,41 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("rxRelease") {
+            // Supplied by CI (or by a maintainer) with -Prx.storeFile=... and friends. Without it the
+            // release build simply stays unsigned instead of failing on a missing keystore.
+            val storePath = (project.findProperty("rx.storeFile") as String?)?.takeIf { it.isNotBlank() }
+            if (storePath != null) {
+                storeFile = file(storePath)
+                storePassword = project.findProperty("rx.storePassword") as String?
+                keyAlias = project.findProperty("rx.keyAlias") as String?
+                keyPassword = project.findProperty("rx.keyPassword") as String?
+            }
+            // A JAR signature as well as v2/v3: installers on older Android rejects v2-only packages
+            // with "package appears to be invalid", which is exactly the report we are chasing.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("rxRelease").takeIf { it.storeFile != null }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Compressed, extract-at-install native libraries. The alternative (uncompressed, mapped
+            // straight out of the APK) is refused by some device installers as an invalid package.
+            useLegacyPackaging = true
         }
     }
 
@@ -91,7 +119,7 @@ android {
                 .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
                 .forEach { output ->
                     val abi = output.getFilter("ABI") ?: "universal"
-                    output.outputFileName = "RXClient_${variant.versionName}-fdroid_${abi}.apk"
+                    output.outputFileName = "RXVPN_${variant.versionName}-fdroid_${abi}.apk"
                     if (versionCodes.containsKey(abi)) {
                         output.versionCodeOverride =
                             (100 * variant.versionCode + versionCodes[abi]!!).plus(5000000)
@@ -111,7 +139,7 @@ android {
                     else
                         "universal"
 
-                    output.outputFileName = "RXClient_${variant.versionName}_${abi}.apk"
+                    output.outputFileName = "RXVPN_${variant.versionName}_${abi}.apk"
                     if (versionCodes.containsKey(abi)) {
                         output.versionCodeOverride =
                             (1000000 * versionCodes[abi]!!).plus(variant.versionCode)

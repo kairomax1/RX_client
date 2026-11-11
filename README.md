@@ -1,38 +1,101 @@
-## RX Client v1.0.0
+# RX VPN
 
-Built automatically from `4e02ba9597055a30dd0156ece95470d497507640` with the **Xray core** engine and native
-**tun2socks** support. Works on every Iranian operator (MCI, Irancell, Rightel,
-Wi-Fi) and on every Android 7.0+ device.
+<div align="center">
+  <img src="branding/rx-vpn-logo.png" width="128" alt="RX VPN monogram" />
 
-| APK | Devices |
-| --- | --- |
-| `*_arm64-v8a.apk` | Almost all modern phones (recommended) |
-| `*_armeabi-v7a.apk` | Older 32-bit phones |
-| `*_x86_64.apk`, `*_x86.apk` | Emulators and Intel tablets |
-| `*_universal.apk` | One APK for every device |
+  **کلاینت اندرویدی VPN با هستهٔ Xray — رابط گرافیتی، مسیردهی به تفکیک برنامه و بخش اختصاصی کلادفلر**
 
-### Install
+  ![release](https://img.shields.io/badge/release-1.0.2-f59e0b)
+  ![platform](https://img.shields.io/badge/Android-7.0%2B%20(API%2024)-3ddc84)
+  ![core](https://img.shields.io/badge/core-Xray-4b5563)
+  ![license](https://img.shields.io/badge/license-GPL--3.0-blue)
 
-1. Download the APK that matches your phone (or the `universal` one).
-2. Allow "install unknown apps" if Android asks.
-3. Open **RX Client**, add your config with `+` (scan QR, paste link, import file or subscription), select it, then press the round button to connect.
+  **[⬇️ دریافت آخرین نسخه](https://github.com/kairomax1/RX_client/releases/latest)** · [امکانات](#امکانات) · [شروع استفاده](#شروع-استفاده)
+</div>
 
-## فارسی
+RX VPN یک کلاینت اندرویدی مبتنی بر [v2rayNG](https://github.com/2dust/v2rayNG) و هستهٔ Xray است. این مخزن نسخهٔ اختصاصی برند RX را نگه می‌دارد؛ سرور VPN یا کانفیگ پولی داخل برنامه ارائه نمی‌شود.
 
-نسخه‌ی `v1.0.0` آر ایکس کلاینت، ساخته‌شده با هسته‌ی **Xray** و پشتیبانی بومی از **tun2socks**.
-روی همه‌ی اپراتورها (همراه اول، ایرانسل، رایتل، وای‌فای) و همه‌ی گوشی‌های اندروید ۷ به بالا کار می‌کند.
+## ⬇️ دریافت آخرین نسخه — `v1.0.2`
 
-| فایل | مناسب برای |
-| --- | --- |
-| `*_arm64-v8a.apk` | تقریباً همه‌ی گوشی‌های امروزی (پیشنهادی) |
-| `*_armeabi-v7a.apk` | گوشی‌های قدیمی ۳۲ بیتی |
-| `*_x86_64.apk` / `*_x86.apk` | شبیه‌سازها و تبلت‌های اینتل |
-| `*_universal.apk` | یک فایل برای همه‌ی دستگاه‌ها |
+| فایل | معماری | مناسب برای | دانلود |
+| --- | --- | --- | --- |
+| `RXVPN_1.0.2_arm64-v8a.apk` | arm64-v8a | تقریباً همهٔ گوشی‌های امروزی (پیشنهادی) | [دانلود](https://github.com/kairomax1/RX_client/releases/download/v1.0.2/RXVPN_1.0.2_arm64-v8a.apk) |
+| `RXVPN_1.0.2_armeabi-v7a.apk` | armeabi-v7a | گوشی‌های قدیمی ۳۲ بیتی | [دانلود](https://github.com/kairomax1/RX_client/releases/download/v1.0.2/RXVPN_1.0.2_armeabi-v7a.apk) |
+| `RXVPN_1.0.2_x86_64.apk` | x86_64 | شبیه‌سازها و تبلت‌های اینتل | [دانلود](https://github.com/kairomax1/RX_client/releases/download/v1.0.2/RXVPN_1.0.2_x86_64.apk) |
+| `RXVPN_1.0.2_x86.apk` | x86 | شبیه‌سازهای ۳۲ بیتی | [دانلود](https://github.com/kairomax1/RX_client/releases/download/v1.0.2/RXVPN_1.0.2_x86.apk) |
+| `RXVPN_1.0.2_universal.apk` | همهٔ معماری‌ها | یک فایل برای هر دستگاه | [دانلود](https://github.com/kairomax1/RX_client/releases/download/v1.0.2/RXVPN_1.0.2_universal.apk) |
 
-### نصب
+صحت فایل‌ها با [`SHA256SUMS.txt`](https://github.com/kairomax1/RX_client/releases/download/v1.0.2/SHA256SUMS.txt) قابل بررسی است. اندروید ۷٫۰ (API 24) به بالا.
 
-۱. فایل APK مناسب گوشی‌تان (یا نسخه‌ی `universal`) را دانلود کنید.
-۲. اگر اندروید اجازه خواست، «نصب برنامه‌های ناشناس» را فعال کنید.
-۳. برنامه‌ی **RX Client** را باز کنید، با دکمه‌ی `+` کانفیگ خود را اضافه کنید (اسکن QR،
-   لینک، فایل یا لینک اشتراک)، سرور را انتخاب کنید و دکمه‌ی گرد را بزنید تا وصل شوید.
-   
+## ✨ تازه در نسخهٔ ۱٫۰٫۲
+
+- **بخش اختصاصی «کلادفلر»** — تب تازه‌ای که کانفیگ‌های کلادفلری در آن جمع می‌شوند:
+  - بازسازی کانفیگ شما با آی‌پی‌های لبهٔ کلادفلر، در یک کانفیگ **جداگانه**؛ کانفیگ و انتخاب فعلی شما هرگز بازنویسی نمی‌شود.
+  - **پینگ واقعی**: تأخیر هر کانفیگ ساخته‌شده با اندازه‌گیری روی همان کانفیگ به دست می‌آید، نه عدد نمایشی.
+  - گزینهٔ **«(کانفیگ دیگر)»** برای افزودن کانفیگ‌هایی که مربوط به این برنامه نیستند — آن‌ها هم در همین تب قرار می‌گیرند.
+- **تست کانفیگ و پیشنهاد هوشمند** — آزمایش تک‌تک کانفیگ‌ها و پیشنهاد چند کانفیگ برتر، مرتب‌شده از کمترین پینگ به بیشترین.
+- **پشتیبان‌گیری و بازیابی رمزدار** — خروجی رمزنگاری‌شده با رمز دلخواه شما، قابل بازیابی فقط با همان رمز.
+- **به‌روزرسانی روزانهٔ هسته** — بررسی و به‌روزرسانی خودکار هسته در پس‌زمینه.
+- **انتخاب زبان در اولین اجرا** و صفحهٔ آغازین تازه با نشان RX و شعار «هواتو داره».
+- **بازطراحی رابط کاربری** — تب‌بندی گروه‌ها، کارت‌های تازه، نوار پایین مرتب‌تر و چیدمان درست راست‌به‌چپ.
+
+## امکانات
+
+- نام و آیکون اختصاصی RX VPN، با مونوکرام هندسی قابل بازتولید
+- تم پیش‌فرض گرافیتی تیره با رنگ تأکیدی کهربایی؛ تم روشن و رنگ پویا همچنان قابل انتخاب‌اند
+- دکمه‌های شیشه‌ای با لایه‌های نیمه‌شفاف و حاشیهٔ کنترل‌شده، بدون وابستگی به بلور پس‌زمینه در نسخه‌های جدید اندروید
+- صفحهٔ اتصال با وضعیت واقعی سرویس، دکمهٔ اتصال/قطع، آزمایش اتصال و دسترسی مستقیم به مسیردهی برنامه‌ها
+- سه حالت مسیردهی در حالت VPN معمولی:
+  1. همهٔ برنامه‌ها به‌جز خود RX VPN
+  2. فقط برنامه‌های انتخاب‌شده
+  3. همهٔ برنامه‌ها به‌جز انتخاب‌شده‌ها
+- ورود کانفیگ از فایل، کلیپ‌بورد، QR یا لینک اشتراک
+- پشتیبانی از پروتکل‌های موجود در هسته، از جمله VLESS، VMess، Trojan، Shadowsocks و WireGuard
+
+**تغییر مسیردهی با اتصال دوبارهٔ VPN اعمال می‌شود.** حالت‌های پروکسی و روت رفتار جداگانهٔ خود را دارند. کیفیت و امکان اتصال به سرور، شبکه و تنظیمات دستگاه بستگی دارد؛ هیچ تضمین «اتصال روی همهٔ اپراتورها» داده نمی‌شود.
+
+## شروع استفاده
+
+۱. کانفیگ معتبر سرور خود را وارد کنید.
+۲. یک سرور را از فهرست انتخاب کنید.
+۳. در «مسیردهی برنامه‌ها» مشخص کنید کدام برنامه‌ها از VPN عبور کنند.
+۴. «اتصال» را بزنید و مجوز VPN اندروید را تأیید کنید.
+
+بدون کانفیگ، صفحهٔ اصلی ورود فایل و کلیپ‌بورد را نشان می‌دهد و اتصال موفقِ ساختگی نمایش داده نمی‌شود. برای حفظ داده‌ها و امکان به‌روزرسانی، شناسهٔ نصب فعلی `com.mobix.vpn` تغییر نکرده است؛ نام و فایل‌های خروجی RX VPN هستند.
+
+## ساخت و انتشار
+
+گردش‌کار [Build RX VPN APK](.github/workflows/build.yml) در هر push روی `master` و شاخه‌های `arena/**` اجرا می‌شود و APKها را به‌عنوان artifact می‌گذارد. برای انتشار، همان گردش‌کار را دستی با ورودی `release_tag` اجرا کنید (مثلاً `release_tag=v1.0.2` و `draft=false`)؛ در این حالت فایل‌ها به‌همراه `SHA256SUMS.txt` به همان ریلیز متصل می‌شوند.
+
+هر APK پیش از انتشار با `aapt2`، `zipalign -c -v 4`، `apksigner verify --print-certs` و `sha256sum` بررسی می‌شود و مشخصات بسته در بخش «APK packaging» توضیحات ریلیز ثبت می‌گردد. کلید امضای پایدار در `V2rayNG/signing/rxclient.p12` نگه‌داری می‌شود؛ برای انتشار به‌روزرسانی‌های قابل اعتماد باید همین کلید استفاده شود.
+
+## ساخت محلی
+
+نسخه‌های ابزار از `V2rayNG/gradle/libs.versions.toml` و `.github/workflows/build.yml` خوانده می‌شوند. کتابخانه‌های بومی ورودی ساخت هستند و در Git ذخیره نمی‌شوند.
+
+```bash
+git submodule update --init --recursive
+# NDK مطابق گردش‌کار ساخت را نصب و NDK_HOME را تنظیم کنید.
+bash compile-hevtun.sh
+mkdir -p V2rayNG/app/libs
+cp -r libs/* V2rayNG/app/libs/
+# libv2ray.aar را مطابق revision زیرماژول AndroidLibXrayLite تهیه کنید.
+cd V2rayNG
+./gradlew :app:testPlaystoreDebugUnitTest :app:compilePlaystoreDebugKotlin
+./gradlew :app:assemblePlaystoreDebug :app:assembleFdroidDebug
+```
+
+جزئیات تهیهٔ AAR و امضای خروجی در [گردش‌کار ساخت](.github/workflows/build.yml) قرار دارد. ساخت موفق جای آزمایش اتصال روی دستگاه واقعی را نمی‌گیرد.
+
+## هویت بصری
+
+فایل‌های برند در [`branding/`](branding/) هستند. مونوکرام، آیکون‌های لانچر و آیکون اعلان با اسکریپت زیر بازتولید می‌شوند:
+
+```bash
+python3 -m pip install pillow
+python3 branding/render_brand.py
+```
+
+## مجوز
+
+این پروژه بر پایهٔ کار متن‌باز v2rayNG و Xray است و تحت **GPL-3.0** توزیع می‌شود؛ [LICENSE](LICENSE) را ببینید. فهرست مجوز کتابخانه‌ها در بخش «دربارهٔ برنامه» حفظ شده است.
