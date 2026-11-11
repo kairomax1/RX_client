@@ -591,4 +591,7 @@
     <string name="toast_warp_failed">无法注册 WARP。请先连接后再试。</string>
     <string name="toast_warp_chain_created">已在 Cloudflare 标签页创建链式代理</string>
     <string name="toast_warp_chain_invalid">此配置无法加入链（复合类型，或名称中含有逗号）</string>
+    <string name="title_pref_single_dns_enabled">单一 DNS</string>
+    <string name="summary_pref_single_dns_enabled">用一个 DNS 服务器取代远程 DNS、直连 DNS 和 VPN DNS：所有查询得到相同的结果，代理站点经隧道查询，直连站点直接查询。地址无效时仍使用各自的列表。</string>
+    <string name="title_pref_single_dns">单一 DNS 地址（一个 IP，或 https/tcp/quic；留空 = 1.1.1.1）</string>
 </resources>

@@ -591,4 +591,7 @@
     <string name="toast_warp_failed">Không đăng ký được WARP. Hãy kết nối trước rồi thử lại.</string>
     <string name="toast_warp_chain_created">Đã tạo chuỗi trong thẻ Cloudflare</string>
     <string name="toast_warp_chain_invalid">Không thể nối chuỗi cấu hình này (loại phức hợp hoặc tên có dấu phẩy)</string>
+    <string name="title_pref_single_dns_enabled">DNS đơn</string>
+    <string name="summary_pref_single_dns_enabled">Một máy chủ DNS thay thế DNS từ xa, DNS trực tiếp và DNS của VPN: mọi truy vấn nhận cùng một câu trả lời, qua đường hầm cho trang đi qua proxy và trực tiếp cho trang đi thẳng. Địa chỉ không hợp lệ thì các danh sách riêng vẫn được dùng.</string>
+    <string name="title_pref_single_dns">Địa chỉ DNS đơn (một IP, hoặc https/tcp/quic; để trống = 1.1.1.1)</string>
 </resources>

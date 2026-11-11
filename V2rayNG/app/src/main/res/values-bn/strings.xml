@@ -593,4 +593,7 @@
     <string name="toast_warp_failed">WARP নিবন্ধন করা যায়নি। আগে সংযুক্ত হয়ে আবার চেষ্টা করুন।</string>
     <string name="toast_warp_chain_created">Cloudflare ট্যাবে চেইন তৈরি হয়েছে</string>
     <string name="toast_warp_chain_invalid">এই কনফিগ চেইন করা যাবে না (জটিল ধরন, অথবা নামে কমা আছে)</string>
+    <string name="title_pref_single_dns_enabled">একক DNS</string>
+    <string name="summary_pref_single_dns_enabled">একটি DNS সার্ভার রিমোট, ডাইরেক্ট ও VPN DNS-এর জায়গা নেয়: সব অনুসন্ধান একই উত্তর পায় — প্রক্সি করা সাইটের জন্য টানেলের মধ্য দিয়ে, ডাইরেক্ট সাইটের জন্য সরাসরি। ঠিকানা অবৈধ হলে আলাদা তালিকাগুলোই ব্যবহৃত হয়।</string>
+    <string name="title_pref_single_dns">একক DNS ঠিকানা (একটি IP, অথবা https/tcp/quic; ফাঁকা = 1.1.1.1)</string>
 </resources>

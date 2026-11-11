@@ -173,6 +173,8 @@ fun SettingsScreen(
     var sniffingEnabled by rememberMmkvBool(AppConfig.PREF_SNIFFING_ENABLED, true)
     var routeOnlyEnabled by rememberMmkvBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
     var remoteDns by rememberMmkvString(AppConfig.PREF_REMOTE_DNS, "")
+    var singleDnsEnabled by rememberMmkvBool(AppConfig.PREF_SINGLE_DNS_ENABLED, false)
+    var singleDns by rememberMmkvString(AppConfig.PREF_SINGLE_DNS, "")
     var domesticDns by rememberMmkvString(AppConfig.PREF_DOMESTIC_DNS, "")
     var dnsHosts by rememberMmkvString(AppConfig.PREF_DNS_HOSTS, "")
     var coreLogLevel by rememberMmkvString(AppConfig.PREF_LOGLEVEL, "warning")
@@ -476,14 +478,28 @@ fun SettingsScreen(
                     enabled = effectiveLocalProxy,
                     onCheckedChange = { socksEnableUdp = it }
                 )
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_single_dns_enabled),
+                    summary = stringResource(R.string.summary_pref_single_dns_enabled),
+                    checked = singleDnsEnabled,
+                    onCheckedChange = { singleDnsEnabled = it }
+                )
+                SettingsEditItem(
+                    title = stringResource(R.string.title_pref_single_dns),
+                    value = singleDns,
+                    enabled = singleDnsEnabled,
+                    onValueChanged = { singleDns = it }
+                )
                 SettingsEditItem(
                     title = stringResource(R.string.title_pref_remote_dns),
                     value = remoteDns,
+                    enabled = !singleDnsEnabled,
                     onValueChanged = { remoteDns = it }
                 )
                 SettingsEditItem(
                     title = stringResource(R.string.title_pref_domestic_dns),
                     value = domesticDns,
+                    enabled = !singleDnsEnabled,
                     onValueChanged = { domesticDns = it }
                 )
                 SettingsEditItem(

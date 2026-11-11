@@ -594,4 +594,7 @@
     <string name="toast_warp_failed">WARP qeydiyyatı alınmadı. Əvvəlcə qoşulun, sonra yenidən cəhd edin.</string>
     <string name="toast_warp_chain_created">Zəncir Cloudflare tabında yaradıldı</string>
     <string name="toast_warp_chain_invalid">Bu konfiqurasiya zəncirlənə bilməz (mürəkkəb növdür və ya adında vergül var)</string>
+    <string name="title_pref_single_dns_enabled">Tək DNS</string>
+    <string name="summary_pref_single_dns_enabled">Bir DNS serveri uzaq, birbaşa və VPN DNS-i əvəz edir: bütün sorğular eyni cavabı alır — proksi ilə gedən saytlar üçün tunel vasitəsilə, birbaşa saytlar üçün birbaşa. Yanlış ünvan olduqda ayrı siyahılar istifadə olunur.</string>
+    <string name="title_pref_single_dns">Tək DNS ünvanı (bir IP və ya https/tcp/quic; boş = 1.1.1.1)</string>
 </resources>

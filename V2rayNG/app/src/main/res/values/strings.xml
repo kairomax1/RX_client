@@ -676,4 +676,7 @@
     <string name="toast_warp_failed">Could not register WARP. Connect first, then try again.</string>
     <string name="toast_warp_chain_created">Chain created in the Cloudflare tab</string>
     <string name="toast_warp_chain_invalid">This config cannot be chained (complex type, or a comma in its name)</string>
+    <string name="title_pref_single_dns_enabled">Single DNS</string>
+    <string name="summary_pref_single_dns_enabled">One DNS server replaces the remote, direct and VPN DNS: every lookup gets the same answer, through the tunnel for proxied sites and directly for direct ones. An invalid address leaves the separate lists in use.</string>
+    <string name="title_pref_single_dns">Single DNS address (one IP, or https/tcp/quic; empty = 1.1.1.1)</string>
 </resources>

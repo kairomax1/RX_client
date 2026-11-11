@@ -72,6 +72,10 @@ object AppConfig {
     const val PREF_REMOTE_DNS = "pref_remote_dns"
     const val PREF_DOMESTIC_DNS = "pref_domestic_dns"
     const val PREF_DNS_HOSTS = "pref_dns_hosts"
+
+    /** Single DNS mode: one server replaces the remote, direct and VPN DNS lists. */
+    const val PREF_SINGLE_DNS_ENABLED = "pref_single_dns_enabled"
+    const val PREF_SINGLE_DNS = "pref_single_dns"
     const val PREF_DELAY_TEST_URL = "pref_delay_test_url"
     const val PREF_IP_API_URL = "pref_ip_api_url"
     const val PREF_LOGLEVEL = "pref_core_loglevel"

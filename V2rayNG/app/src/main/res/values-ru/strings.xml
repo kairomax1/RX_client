@@ -597,4 +597,7 @@
     <string name="toast_warp_failed">Не удалось зарегистрировать WARP. Сначала подключитесь и повторите попытку.</string>
     <string name="toast_warp_chain_created">Цепочка создана на вкладке Cloudflare</string>
     <string name="toast_warp_chain_invalid">Эту конфигурацию нельзя добавить в цепочку (составной тип или запятая в имени)</string>
+    <string name="title_pref_single_dns_enabled">Единый DNS</string>
+    <string name="summary_pref_single_dns_enabled">Один DNS-сервер заменяет удалённый, прямой и VPN DNS: все запросы получают одинаковый ответ — через туннель для сайтов через прокси и напрямую для прямых. При неверном адресе используются отдельные списки.</string>
+    <string name="title_pref_single_dns">Адрес единого DNS (один IP или https/tcp/quic; пусто = 1.1.1.1)</string>
 </resources>

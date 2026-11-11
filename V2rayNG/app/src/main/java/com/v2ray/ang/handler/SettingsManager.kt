@@ -327,10 +327,22 @@ object SettingsManager {
     }
 
     /**
+     * The server of the single DNS mode, or null when the mode is off or its address is unusable.
+     * When set, it replaces the remote and the direct DNS list, and the VPN DNS when it is an IP.
+     */
+    fun getSingleDnsServer(): String? = SingleDnsPolicy.pick(
+        enabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_SINGLE_DNS_ENABLED, false),
+        value = MmkvManager.decodeSettingsString(AppConfig.PREF_SINGLE_DNS),
+        default = AppConfig.DNS_VPN,
+        isSupported = { Utils.isPureIpAddress(it) || Utils.isCoreDNSAddress(it) },
+    )
+
+    /**
      * Get domestic DNS servers from preference.
      * @return A list of domestic DNS servers.
      */
     fun getDomesticDnsServers(): List<String> {
+        getSingleDnsServer()?.let { return listOf(it) }
         val domesticDns =
             MmkvManager.decodeSettingsString(AppConfig.PREF_DOMESTIC_DNS) ?: AppConfig.DNS_DIRECT
         val ret = domesticDns.split(",").filter { Utils.isPureIpAddress(it) || Utils.isCoreDNSAddress(it) }
@@ -345,6 +357,7 @@ object SettingsManager {
      * @return A list of remote DNS servers.
      */
     fun getRemoteDnsServers(): List<String> {
+        getSingleDnsServer()?.let { return listOf(it) }
         val remoteDns =
             MmkvManager.decodeSettingsString(AppConfig.PREF_REMOTE_DNS) ?: AppConfig.DNS_PROXY
         val ret = remoteDns.split(",").filter { Utils.isPureIpAddress(it) || Utils.isCoreDNSAddress(it) }
@@ -359,6 +372,8 @@ object SettingsManager {
      * @return A list of VPN DNS servers.
      */
     fun getVpnDnsServers(): List<String> {
+        // The VPN interface only takes IP addresses; a DoH or DoT single DNS leaves this setting.
+        getSingleDnsServer()?.takeIf { Utils.isPureIpAddress(it) }?.let { return listOf(it) }
         val vpnDns = MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_DNS) ?: AppConfig.DNS_VPN
         return vpnDns.split(",").filter { Utils.isPureIpAddress(it) }
     }

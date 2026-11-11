@@ -601,4 +601,7 @@
     <string name="toast_warp_failed">تعذّر تسجيل WARP. اتصل أولًا ثم أعد المحاولة.</string>
     <string name="toast_warp_chain_created">تم إنشاء السلسلة في تبويب Cloudflare</string>
     <string name="toast_warp_chain_invalid">لا يمكن ربط هذا الإعداد (نوع مركّب أو فاصلة في اسمه)</string>
+    <string name="title_pref_single_dns_enabled">DNS واحد</string>
+    <string name="summary_pref_single_dns_enabled">خادم DNS واحد يحل محل DNS البعيد والمباشر وDNS الخاص بالـVPN: كل الاستعلامات تحصل على الجواب نفسه، عبر النفق للمواقع الموجّهة عبر الوكيل ومباشرةً للمواقع المباشرة. العنوان غير الصالح يُبقي القوائم المنفصلة مستخدمة.</string>
+    <string name="title_pref_single_dns">عنوان DNS الواحد (عنوان IP واحد أو https/tcp/quic؛ فارغ = 1.1.1.1)</string>
 </resources>

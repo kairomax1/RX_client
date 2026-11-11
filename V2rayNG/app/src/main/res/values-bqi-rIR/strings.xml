@@ -593,4 +593,7 @@
     <string name="toast_warp_failed">ثبت WARP انجام نشد. اول وصل شوید و دوباره امتحان کنید.</string>
     <string name="toast_warp_chain_created">زنجیره در تب کلادفلر ساخته شد</string>
     <string name="toast_warp_chain_invalid">این کانفیگ قابل زنجیر شدن نیست (نوع ترکیبی است یا در نامش ویرگول دارد)</string>
+    <string name="title_pref_single_dns_enabled">DNS تکی</string>
+    <string name="summary_pref_single_dns_enabled">یک سرور DNS جای DNS راه دور، مستقیم و VPN را می‌گیرد: همهٔ پرس‌وجوها یک جواب می‌گیرند؛ برای سایت‌های پروکسی‌شده از داخل تونل و برای سایت‌های مستقیم به‌طور مستقیم. اگر آدرس نامعتبر باشد، همان فهرست‌های جدا استفاده می‌شوند.</string>
+    <string name="title_pref_single_dns">آدرس DNS تکی (یک آی‌پی یا https/tcp/quic؛ خالی = 1.1.1.1)</string>
 </resources>

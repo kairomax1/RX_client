@@ -591,4 +591,7 @@
     <string name="toast_warp_failed">無法註冊 WARP。請先連線後再試。</string>
     <string name="toast_warp_chain_created">已在 Cloudflare 分頁建立鏈式代理</string>
     <string name="toast_warp_chain_invalid">此設定無法加入鏈（複合類型，或名稱中含有逗號）</string>
+    <string name="title_pref_single_dns_enabled">單一 DNS</string>
+    <string name="summary_pref_single_dns_enabled">以一個 DNS 伺服器取代遠端 DNS、直連 DNS 與 VPN DNS：所有查詢得到相同的結果，代理網站經通道查詢，直連網站直接查詢。位址無效時仍使用各自的清單。</string>
+    <string name="title_pref_single_dns">單一 DNS 位址（一個 IP，或 https/tcp/quic；留空 = 1.1.1.1）</string>
 </resources>

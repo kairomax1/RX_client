@@ -90,3 +90,6 @@ Working branch: `arena/d739235f-rx-client` (App repo: `kairomax1/RX_client`).
   The registration call itself has never been run against the real API.
 - **Tor / Psiphon are not in the app**: their Android libraries (IPtProxy for Snowflake, Psiphon
   tunnel core) are gomobile AARs like `libv2ray.aar`, and Psiphon also needs Psiphon-issued IDs.
+- **Single DNS**: `PREF_SINGLE_DNS_ENABLED` / `PREF_SINGLE_DNS` (default off, empty = 1.1.1.1).
+  `SettingsManager.getSingleDnsServer()` overrides the remote, direct and (IP only) VPN DNS getters,
+  so every run mode follows; the rule is in `handler/SingleDnsPolicy.kt`.
