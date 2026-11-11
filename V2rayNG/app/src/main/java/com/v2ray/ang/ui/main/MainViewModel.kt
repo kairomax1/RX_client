@@ -146,6 +146,11 @@ class MainViewModel(
             }
 
             MainServiceEvent.StateStopSuccess -> updateRunningState(false)
+            is MainServiceEvent.ServerSwitched -> {
+                // The daemon already moved the selection; the list only has to show it.
+                refreshSelectedGuid()
+                toast(dataSource.getString(R.string.toast_failover_switched, event.serverName))
+            }
             is MainServiceEvent.MeasureDelayResult -> {
                 if (!uiState.value.isRunning || !testRequests.completeCurrent(event.requestId)) return
                 _uiState.update { it.copy(isTesting = testRequests.isTesting, status = MainStatus.ConnectionTest(event.result)) }

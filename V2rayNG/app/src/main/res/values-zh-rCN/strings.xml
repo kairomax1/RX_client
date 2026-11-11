@@ -575,4 +575,8 @@
     <string name="rx_no_apps">没有匹配的应用</string>
     <string name="rx_routing_change_hint">更改将在 VPN 重新连接后生效。</string>
     <string name="rx_select_apps_hint">连接前请至少选择一个应用。</string>
+    <string name="cloudflare_deep_scan">深度扫描</string>
+    <string name="title_pref_auto_failover">连接中断时自动切换</string>
+    <string name="summary_pref_auto_failover">连接期间会定期检查隧道。隧道无响应时，自动选择同一分组中可用且最快的配置。若没有配置响应，则不做任何更改。</string>
+    <string name="toast_failover_switched">连接中断，已切换到 %s</string>
 </resources>

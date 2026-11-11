@@ -20,6 +20,7 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.BrowserDialerMode
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.ConfigBenchmark
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.NotificationManager
@@ -34,9 +35,12 @@ import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
@@ -54,6 +58,17 @@ object CoreServiceManager {
     private var browserDialer: IDialerService? = null
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Owns the failover watch. Separate from [connectionTestScope] on purpose: a ping requested
+     * from the screen cancels that scope's children and must not end the watch with it.
+     */
+    private val failoverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var failoverJob: Job? = null
+
+    /** Last screen state seen by [ReceiveMessageHandler]; the watch probes less often when off. */
+    @Volatile
+    private var screenOn = true
 
     @Volatile
     private var isReloading = false
@@ -125,6 +140,7 @@ object CoreServiceManager {
         currentVpnInterface = vpnInterface
         launchCore(service, vpnInterface)
         startNetworkMonitor(service)
+        startFailoverWatch(service)
     }
 
     @Throws(Exception::class)
@@ -193,6 +209,9 @@ object CoreServiceManager {
      * @return True if the core was stopped successfully, false otherwise.
      */
     fun stopCoreLoop(): Boolean {
+        // Before anything is released: a search that is still measuring must not reload a core
+        // that is being stopped.
+        stopFailoverWatch()
         connectionTestScope.coroutineContext.cancelChildren()
         val service = getService() ?: return false
 
@@ -281,6 +300,109 @@ object CoreServiceManager {
         } finally {
             isReloading = false
         }
+    }
+
+    /**
+     * Starts the automatic failover when the user enabled it: the running tunnel is probed at
+     * intervals and, once it stopped answering, replaced by the fastest config of the same group
+     * that still answers. Shared by the VPN, proxy only and root run modes.
+     *
+     * The setting is read once per start; changing it restarts the service, which re-reads it.
+     */
+    private fun startFailoverWatch(service: Service) {
+        stopFailoverWatch()
+        if (!MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_FAILOVER, false)) return
+
+        screenOn = true
+        failoverJob = failoverScope.launch {
+            var failuresInRow = 0
+            var emptySearches = 0
+            while (isActive) {
+                delay(FailoverPolicy.nextProbeDelayMs(screenOn, emptySearches))
+                if (!isRunning() || isReloading) continue
+
+                failuresInRow = FailoverPolicy.nextFailureCount(failuresInRow, probeTunnel())
+                if (failuresInRow == 0) {
+                    emptySearches = 0
+                    continue
+                }
+                if (!FailoverPolicy.shouldSearch(failuresInRow)) continue
+
+                failuresInRow = 0
+                val switched = try {
+                    switchToWorkingConfig(service)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failover search failed", e)
+                    false
+                }
+                emptySearches = if (switched) 0 else emptySearches + 1
+            }
+        }
+    }
+
+    private fun stopFailoverWatch() {
+        failoverJob?.cancel()
+        failoverJob = null
+    }
+
+    /** True when a request through the running tunnel reached either test URL. */
+    private fun probeTunnel(): Boolean {
+        for (second in listOf(false, true)) {
+            val delayMillis = try {
+                coreController.measureDelay(SettingsManager.getDelayTestUrl(second))
+            } catch (e: Exception) {
+                -1L
+            }
+            if (delayMillis >= 0L) return true
+        }
+        return false
+    }
+
+    /**
+     * Measures the other configs of the running config's group and moves to the fastest one that
+     * answers. Nothing changes when none answers, which is what an offline phone looks like.
+     *
+     * @return True when the core now runs another config.
+     */
+    private suspend fun switchToWorkingConfig(service: Service): Boolean {
+        val currentGuid = MmkvManager.getSelectServer() ?: return false
+        val current = MmkvManager.decodeServerConfig(currentGuid) ?: return false
+        val candidates = FailoverPolicy.orderCandidates(
+            currentGuid = currentGuid,
+            group = MmkvManager.decodeServerList(current.subscriptionId).map { guid ->
+                FailoverPolicy.Candidate(
+                    guid = guid,
+                    lastDelayMs = MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L,
+                )
+            },
+        )
+        if (candidates.isEmpty()) return false
+
+        LogUtil.i(AppConfig.TAG, "StartCore-Manager: Failover, $currentGuid stopped answering, testing ${candidates.size} configs")
+        val results = ConfigBenchmark.pingConfigs(service, candidates)
+        results.forEach { (guid, delayMillis) -> MmkvManager.encodeServerTestDelayMillis(guid, delayMillis) }
+        val best = FailoverPolicy.pickBest(results)
+        if (best == null) {
+            LogUtil.i(AppConfig.TAG, "StartCore-Manager: Failover, no config of the group answers, keeping $currentGuid")
+            return false
+        }
+
+        // The search took a while: the service may be stopping, or the user picked another config.
+        currentCoroutineContext().ensureActive()
+        if (!isRunning() || MmkvManager.getSelectServer() != currentGuid) return false
+
+        MmkvManager.setSelectServer(best)
+        if (!reloadCore()) {
+            MmkvManager.setSelectServer(currentGuid)
+            LogUtil.w(AppConfig.TAG, "StartCore-Manager: Failover, reload for $best failed, selection restored to $currentGuid")
+            return false
+        }
+
+        LogUtil.i(AppConfig.TAG, "StartCore-Manager: Failover, switched from $currentGuid to $best")
+        MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_SERVER_SWITCHED, getRunningServerName())
+        return true
     }
 
     /**
@@ -514,11 +636,13 @@ object CoreServiceManager {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen off")
+                    screenOn = false
                     NotificationManager.stopSpeedNotification()
                 }
 
                 Intent.ACTION_SCREEN_ON -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen on")
+                    screenOn = true
                     NotificationManager.startSpeedNotification()
                 }
             }

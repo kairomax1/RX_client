@@ -575,4 +575,8 @@
     <string name="rx_no_apps">Không có ứng dụng phù hợp</string>
     <string name="rx_routing_change_hint">Thay đổi áp dụng khi VPN kết nối lại.</string>
     <string name="rx_select_apps_hint">Chọn ít nhất một ứng dụng trước khi kết nối.</string>
+    <string name="cloudflare_deep_scan">Quét sâu</string>
+    <string name="title_pref_auto_failover">Tự động chuyển khi mất kết nối</string>
+    <string name="summary_pref_auto_failover">Khi đang kết nối, đường hầm được kiểm tra định kỳ. Nếu không còn phản hồi, cấu hình hoạt động nhanh nhất trong cùng nhóm sẽ được chọn tự động. Không có gì thay đổi nếu không cấu hình nào phản hồi.</string>
+    <string name="toast_failover_switched">Mất kết nối, đã chuyển sang %s</string>
 </resources>

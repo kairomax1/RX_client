@@ -75,7 +75,8 @@ class CloudflareActivity : BaseComponentActivity() {
             onBack = { finish() },
             onToggleAntiBlock = viewModel::setAntiBlock,
             onToggleAuto = viewModel::setAutoEnabled,
-            onScan = viewModel::scan,
+            onScan = { viewModel.scan() },
+            onDeepScan = { viewModel.deepScan() },
             onChoose = viewModel::choose,
             onApply = viewModel::applyChosen,
             onProbe = viewModel::probeSelected,
@@ -92,6 +93,7 @@ fun CloudflareScreen(
     onToggleAntiBlock: (Boolean) -> Unit,
     onToggleAuto: (Boolean) -> Unit,
     onScan: () -> Unit,
+    onDeepScan: () -> Unit,
     onChoose: (String) -> Unit,
     onApply: () -> Unit,
     onProbe: () -> Unit,
@@ -149,6 +151,9 @@ fun CloudflareScreen(
             ) {
                 RxGlassButton(onClick = onScan, enabled = !state.scanning) {
                     Text(stringResource(R.string.cloudflare_scan))
+                }
+                RxGlassButton(onClick = onDeepScan, enabled = !state.scanning) {
+                    Text(stringResource(R.string.cloudflare_deep_scan))
                 }
             }
 

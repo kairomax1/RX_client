@@ -1,8 +1,10 @@
 package com.v2ray.ang.handler
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.random.Random
 
 class CloudflareAssistantTest {
 
@@ -34,5 +36,34 @@ class CloudflareAssistantTest {
         assertFalse(CloudflareAssistant.isCloudflareIpv4("104.16.0"))
         assertFalse(CloudflareAssistant.isCloudflareIpv4("example.com"))
         assertFalse(CloudflareAssistant.isCloudflareIpv4("104.16.0.999"))
+    }
+
+    @Test
+    fun sampledAddressesAreDistinctAndInsideTheAnnouncedBlocks() {
+        val sample = CloudflareAssistant.sampleEdgeAddresses(200, Random(7))
+
+        assertEquals(200, sample.size)
+        assertEquals(200, sample.toSet().size)
+        assertTrue(sample.all { CloudflareAssistant.isCloudflareIpv4(it) })
+        assertTrue(sample.none { it.endsWith(".0") || it.endsWith(".255") })
+    }
+
+    @Test
+    fun samplingIsRepeatableForTheSameSeedAndEmptyForNoCount() {
+        assertEquals(
+            CloudflareAssistant.sampleEdgeAddresses(40, Random(3)),
+            CloudflareAssistant.sampleEdgeAddresses(40, Random(3)),
+        )
+        assertTrue(CloudflareAssistant.sampleEdgeAddresses(0, Random(3)).isEmpty())
+    }
+
+    @Test
+    fun deepScanKeepsTheFixedSampleAndAddsRandomAddresses() {
+        val addresses = CloudflareAssistant.deepScanAddresses(Random(11))
+
+        assertTrue(addresses.contains("104.16.0.1"))
+        assertEquals(addresses.size, addresses.toSet().size)
+        assertTrue(addresses.size > 150)
+        assertTrue(addresses.all { CloudflareAssistant.isCloudflareIpv4(it) })
     }
 }

@@ -585,4 +585,8 @@
     <string name="rx_no_apps">لا توجد تطبيقات مطابقة</string>
     <string name="rx_routing_change_hint">تُطبق التغييرات عند إعادة اتصال VPN.</string>
     <string name="rx_select_apps_hint">حدد تطبيقًا واحدًا على الأقل قبل الاتصال.</string>
+    <string name="cloudflare_deep_scan">فحص عميق</string>
+    <string name="title_pref_auto_failover">التبديل التلقائي عند انقطاع الاتصال</string>
+    <string name="summary_pref_auto_failover">أثناء الاتصال يُفحص النفق بانتظام. إذا توقف عن الاستجابة يُختار تلقائيًا أسرع إعداد يعمل من المجموعة نفسها. لا يتغير شيء إذا لم يستجب أي إعداد.</string>
+    <string name="toast_failover_switched">انقطع الاتصال، تم التبديل إلى %s</string>
 </resources>

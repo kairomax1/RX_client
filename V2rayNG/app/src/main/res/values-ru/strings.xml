@@ -581,4 +581,8 @@
     <string name="rx_no_apps">Подходящих приложений нет</string>
     <string name="rx_routing_change_hint">Изменения применятся при переподключении VPN.</string>
     <string name="rx_select_apps_hint">Перед подключением выберите хотя бы одно приложение.</string>
+    <string name="cloudflare_deep_scan">Глубокое сканирование</string>
+    <string name="title_pref_auto_failover">Автопереключение при обрыве связи</string>
+    <string name="summary_pref_auto_failover">Во время подключения туннель регулярно проверяется. Если он перестаёт отвечать, автоматически выбирается самая быстрая рабочая конфигурация из той же группы. Если не отвечает ни одна, ничего не меняется.</string>
+    <string name="toast_failover_switched">Связь прервалась, выполнено переключение на %s</string>
 </resources>

@@ -105,7 +105,12 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
         _state.value = _state.value.copy(antiBlock = enabled)
     }
 
-    fun scan() {
+    fun scan() = runScan(deep = false)
+
+    /** Same scan over the fixed sample plus random addresses of the Cloudflare blocks. */
+    fun deepScan() = runScan(deep = true)
+
+    private fun runScan(deep: Boolean) {
         if (_state.value.scanning) return
         val config = CloudflareAssistant.selectedConfig()
         // Present the same name the config uses, so the edge answers for the right zone.
@@ -114,7 +119,15 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
 
         _state.value = _state.value.copy(scanning = true, results = emptyList(), chosenAddress = null)
         launchLoading {
-            val results = CloudflareAssistant.scan(sni)
+            val results = if (deep) {
+                CloudflareAssistant.scan(
+                    sni = sni,
+                    concurrency = CloudflareAssistant.DEEP_SCAN_CONCURRENCY,
+                    addresses = CloudflareAssistant.deepScanAddresses(),
+                )
+            } else {
+                CloudflareAssistant.scan(sni)
+            }
             _state.value = _state.value.copy(
                 scanning = false,
                 results = results.take(MAX_RESULTS),

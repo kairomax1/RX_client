@@ -577,4 +577,8 @@
     <string name="rx_no_apps">মিলে যাওয়া অ্যাপ নেই</string>
     <string name="rx_routing_change_hint">VPN পুনরায় সংযুক্ত হলে পরিবর্তনগুলো প্রযোজ্য হবে।</string>
     <string name="rx_select_apps_hint">সংযোগের আগে অন্তত একটি অ্যাপ নির্বাচন করুন.</string>
+    <string name="cloudflare_deep_scan">গভীর স্ক্যান</string>
+    <string name="title_pref_auto_failover">সংযোগ বিচ্ছিন্ন হলে স্বয়ংক্রিয় পরিবর্তন</string>
+    <string name="summary_pref_auto_failover">সংযুক্ত থাকা অবস্থায় টানেল নিয়মিত পরীক্ষা করা হয়। সাড়া না দিলে একই গ্রুপের সবচেয়ে দ্রুত সচল কনফিগ স্বয়ংক্রিয়ভাবে নির্বাচিত হয়। কোনো কনফিগ সাড়া না দিলে কিছুই পরিবর্তন হয় না।</string>
+    <string name="toast_failover_switched">সংযোগ বিচ্ছিন্ন হয়েছে, %s-এ পরিবর্তন করা হয়েছে</string>
 </resources>

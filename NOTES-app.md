@@ -74,3 +74,12 @@ Working branch: `arena/d739235f-rx-client` (App repo: `kairomax1/RX_client`).
   overlay is skipped when `ServiceRuntimeState.isRunning()` is true, i.e. the tunnel is up.
 - `ServiceRuntimeState` mirrors the core state into MMKV (`pref_service_running`) from the
   `:daemon` process and verifies the daemon process is alive before trusting it.
+
+## Staying connected (after 1.0.2, unreleased)
+- **Automatic failover**: `PREF_AUTO_FAILOVER` (default off, Settings > Advanced). The loop lives in
+  `CoreServiceManager` (`startFailoverWatch`, daemon process, all three run modes); every decision
+  is in the pure `core/FailoverPolicy.kt` with `FailoverPolicyTest`. It only switches to a config of
+  the same group that just answered a real ping, then reloads the core in place and tells the UI
+  with `MSG_STATE_SERVER_SWITCHED`. Not yet checked on a device.
+- **Cloudflare deep scan**: `CloudflareAssistant.deepScanAddresses()` = fixed sample + 160 random
+  addresses drawn from `CLOUDFLARE_RANGES`; second button on the Cloudflare screen.

@@ -578,4 +578,8 @@
     <string name="rx_no_apps">Uyğun tətbiq yoxdur</string>
     <string name="rx_routing_change_hint">Dəyişikliklər VPN yenidən qoşulanda tətbiq olunur.</string>
     <string name="rx_select_apps_hint">Qoşulmadan əvvəl ən azı bir tətbiq seçin.</string>
+    <string name="cloudflare_deep_scan">Dərin skan</string>
+    <string name="title_pref_auto_failover">Bağlantı kəsiləndə avtomatik keçid</string>
+    <string name="summary_pref_auto_failover">Qoşulu olarkən tunel müntəzəm yoxlanılır. Cavab vermədikdə eyni qrupdan işləyən ən sürətli konfiqurasiya avtomatik seçilir. Heç bir konfiqurasiya cavab vermirsə, heç nə dəyişmir.</string>
+    <string name="toast_failover_switched">Bağlantı kəsildi, %s konfiqurasiyasına keçildi</string>
 </resources>

@@ -179,6 +179,7 @@ fun SettingsScreen(
     var outboundResolveMethod by rememberMmkvString(AppConfig.PREF_OUTBOUND_DOMAIN_RESOLVE_METHOD, AppConfig.DEFAULT_OUTBOUND_DOMAIN_RESOLVE_METHOD)
 
     var isBooted by rememberMmkvBool(AppConfig.PREF_IS_BOOTED, false)
+    var autoFailover by rememberMmkvBool(AppConfig.PREF_AUTO_FAILOVER, false)
     var delayTestUrl by rememberMmkvString(AppConfig.PREF_DELAY_TEST_URL, "")
     var realPingConcurrency by rememberMmkvString(AppConfig.PREF_REAL_PING_CONCURRENCY, "16")
     var ipApiUrl by rememberMmkvString(AppConfig.PREF_IP_API_URL, "")
@@ -645,6 +646,12 @@ fun SettingsScreen(
                     summary = stringResource(R.string.summary_pref_is_booted),
                     checked = isBooted,
                     onCheckedChange = { isBooted = it }
+                )
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_auto_failover),
+                    summary = stringResource(R.string.summary_pref_auto_failover),
+                    checked = autoFailover,
+                    onCheckedChange = { autoFailover = it }
                 )
                 if (systemVpnSettingsAvailable) {
                     SettingsMenuItem(

@@ -18,6 +18,7 @@ import java.net.Socket
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
+import kotlin.random.Random
 
 /**
  * Repairs Cloudflare-fronted configs that behave badly on a restrictive network.
@@ -137,14 +138,19 @@ object CloudflareAssistant {
     // Scanning
     // -------------------------------------------------------------------------
 
-    /** Measures every candidate edge and returns the reachable ones, fastest first. */
+    /**
+     * Measures every candidate edge and returns the reachable ones, fastest first.
+     *
+     * [addresses] defaults to the fixed sample; the deep scan passes [deepScanAddresses] instead.
+     */
     suspend fun scan(
         sni: String?,
         timeoutMs: Int = 2_000,
-        concurrency: Int = 10
+        concurrency: Int = 10,
+        addresses: List<String> = EDGE_IPS,
     ): List<ScanResult> = coroutineScope {
         val gate = Semaphore(concurrency)
-        EDGE_IPS.map { ip ->
+        addresses.map { ip ->
             async(Dispatchers.IO) {
                 gate.withPermit {
                     val latency = measure(ip, sni, timeoutMs)
@@ -152,6 +158,47 @@ object CloudflareAssistant {
                 }
             }
         }.awaitAll().filterNotNull().sortedBy { it.latencyMs }
+    }
+
+    /**
+     * The fixed sample plus [DEEP_SCAN_RANDOM_ADDRESSES] random addresses of the announced blocks.
+     *
+     * The fixed sample is the same on every phone, so those are the addresses an operator is most
+     * likely to have throttled already. Random ones differ per run and reach edges nobody else is
+     * crowding; the ones that do not answer simply drop out of the scan result.
+     */
+    fun deepScanAddresses(random: Random = Random.Default): List<String> =
+        (EDGE_IPS + sampleEdgeAddresses(DEEP_SCAN_RANDOM_ADDRESSES, random)).distinct()
+
+    /**
+     * [count] distinct random addresses inside [CLOUDFLARE_RANGES]. A block is drawn in proportion
+     * to the number of /24 networks it covers, so the large blocks are not under-sampled.
+     */
+    internal fun sampleEdgeAddresses(count: Int, random: Random): List<String> {
+        if (count <= 0) return emptyList()
+        val weights = CLOUDFLARE_RANGES.map { block ->
+            (block.secondTo - block.secondFrom + 1) * (block.thirdTo - block.thirdFrom + 1)
+        }
+        val totalWeight = weights.sum()
+        val picked = LinkedHashSet<String>()
+        // Duplicates are redrawn; the attempt bound only exists so the loop provably ends.
+        var attempts = 0
+        while (picked.size < count && attempts < count * 20) {
+            attempts++
+            var ticket = random.nextInt(totalWeight)
+            var index = 0
+            while (ticket >= weights[index]) {
+                ticket -= weights[index]
+                index++
+            }
+            val block = CLOUDFLARE_RANGES[index]
+            val second = random.nextInt(block.secondFrom, block.secondTo + 1)
+            val third = random.nextInt(block.thirdFrom, block.thirdTo + 1)
+            // .0 and .255 are skipped: network and broadcast style addresses rarely answer.
+            val fourth = random.nextInt(1, 255)
+            picked.add("${block.first}.$second.$third.$fourth")
+        }
+        return picked.toList()
     }
 
     /** Latency of one edge address, or null when it is unreachable within [timeoutMs]. */
@@ -424,6 +471,12 @@ object CloudflareAssistant {
     // -------------------------------------------------------------------------
 
     private const val PORT = 443
+
+    /** Random addresses a deep scan adds: with [DEEP_SCAN_CONCURRENCY] it ends within half a minute. */
+    private const val DEEP_SCAN_RANDOM_ADDRESSES = 160
+
+    /** Handshakes a deep scan runs at once. */
+    const val DEEP_SCAN_CONCURRENCY = 16
 
     /** Up to this, a config counts as working and is left untouched. */
     private const val HEALTHY_LATENCY_MS = 1_200L

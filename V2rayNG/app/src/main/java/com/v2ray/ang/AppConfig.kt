@@ -90,6 +90,9 @@ object AppConfig {
     /** Maps a source profile to the Cloudflare copy made from it, so a repair refreshes it. */
     const val PREF_CLOUDFLARE_COPY_PREFIX = "pref_cloudflare_copy_"
     const val PREF_SERVICE_RUNNING = "pref_service_running"
+
+    /** Lets the running service move to another config of the group when the tunnel dies. */
+    const val PREF_AUTO_FAILOVER = "pref_auto_failover"
     const val PREF_BENCHMARK_PREFIX = "pref_benchmark_"
     const val PREF_GEO_FILES_SOURCES = "pref_geo_files_sources"
     const val PREF_USE_HEV_TUNNEL = "pref_use_hev_tunnel_v2"
@@ -188,6 +191,9 @@ object AppConfig {
     const val MSG_REGISTER_CLIENT = 1
     const val MSG_STATE_RUNNING = 11
     const val MSG_STATE_NOT_RUNNING = 12
+
+    /** Daemon to UI: the failover replaced the running config; content is its display name. */
+    const val MSG_STATE_SERVER_SWITCHED = 13
     const val MSG_UNREGISTER_CLIENT = 2
     const val MSG_STATE_START = 3
     const val MSG_STATE_START_SUCCESS = 31

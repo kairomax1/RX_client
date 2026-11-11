@@ -657,4 +657,8 @@
     <string name="cloudflare_other_add">افزودن</string>
     <string name="cloudflare_other_saved">به تب کلادفلر اضافه شد.</string>
     <string name="cloudflare_other_failed">چیزی اضافه نشد: لینک، کانفیگ معتبری نبود.</string>
+    <string name="cloudflare_deep_scan">اسکن عمیق</string>
+    <string name="title_pref_auto_failover">جابه‌جایی خودکار هنگام قطعی</string>
+    <string name="summary_pref_auto_failover">هنگام اتصال، تونل مرتب بررسی می‌شود. اگر پاسخ ندهد، سریع‌ترین کانفیگ سالم همان گروه خودکار انتخاب می‌شود. اگر هیچ کانفیگی پاسخ ندهد، چیزی تغییر نمی‌کند.</string>
+    <string name="toast_failover_switched">اتصال قطع شد؛ به %s جابه‌جا شد</string>
 </resources>

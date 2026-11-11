@@ -58,6 +58,9 @@ class MainRepository(
                 )
 
                 AppConfig.MSG_STATE_STOP_SUCCESS -> MainServiceEvent.StateStopSuccess
+                AppConfig.MSG_STATE_SERVER_SWITCHED -> MainServiceEvent.ServerSwitched(
+                    safeIntent.getStringExtra("content").orEmpty()
+                )
                 AppConfig.MSG_MEASURE_DELAY_RESULT -> safeIntent
                     .serializable<ConnectionTestResult>("content")
                     ?.let { MainServiceEvent.MeasureDelayResult(it, requestId) }
