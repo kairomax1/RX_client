@@ -585,4 +585,16 @@
     <string name="title_pref_auto_failover">Автопереключение при обрыве связи</string>
     <string name="summary_pref_auto_failover">Во время подключения туннель регулярно проверяется. Если он перестаёт отвечать, автоматически выбирается самая быстрая рабочая конфигурация из той же группы. Если не отвечает ни одна, ничего не меняется.</string>
     <string name="toast_failover_switched">Связь прервалась, выполнено переключение на %s</string>
+    <string name="warp_group">WARP и туннель в туннеле</string>
+    <string name="warp_note">WARP — бесплатный туннель WireGuard от Cloudflare. Он подключается только там, где его UDP-трафик не блокируется; в цепочке за рабочей конфигурацией он меняет выходной адрес.</string>
+    <string name="warp_create">Создать бесплатную конфигурацию WARP</string>
+    <string name="warp_create_summary">Регистрирует новый аккаунт и сохраняет его на этой вкладке под именем «WARP»</string>
+    <string name="warp_chain_exit">Выбранная конфигурация → WARP</string>
+    <string name="warp_chain_exit_summary">Вход через выбранную конфигурацию, выход через WARP</string>
+    <string name="warp_chain_entry">WARP → выбранная конфигурация</string>
+    <string name="warp_chain_entry_summary">Вход через WARP, выход через выбранную конфигурацию</string>
+    <string name="toast_warp_created">Конфигурация WARP создана</string>
+    <string name="toast_warp_failed">Не удалось зарегистрировать WARP. Сначала подключитесь и повторите попытку.</string>
+    <string name="toast_warp_chain_created">Цепочка создана на вкладке Cloudflare</string>
+    <string name="toast_warp_chain_invalid">Эту конфигурацию нельзя добавить в цепочку (составной тип или запятая в имени)</string>
 </resources>

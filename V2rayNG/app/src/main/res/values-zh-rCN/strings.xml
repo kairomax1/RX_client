@@ -579,4 +579,16 @@
     <string name="title_pref_auto_failover">连接中断时自动切换</string>
     <string name="summary_pref_auto_failover">连接期间会定期检查隧道。隧道无响应时，自动选择同一分组中可用且最快的配置。若没有配置响应，则不做任何更改。</string>
     <string name="toast_failover_switched">连接中断，已切换到 %s</string>
+    <string name="warp_group">WARP 与隧道套隧道</string>
+    <string name="warp_note">WARP 是 Cloudflare 的免费 WireGuard 隧道。只有在其 UDP 流量未被封锁的网络上才能连接；链接在可用配置之后时，它会更换出口地址。</string>
+    <string name="warp_create">创建免费 WARP 配置</string>
+    <string name="warp_create_summary">注册新账户并以“WARP”为名保存在此标签页</string>
+    <string name="warp_chain_exit">所选配置 → WARP</string>
+    <string name="warp_chain_exit_summary">从所选配置进入，从 WARP 出口</string>
+    <string name="warp_chain_entry">WARP → 所选配置</string>
+    <string name="warp_chain_entry_summary">从 WARP 进入，从所选配置出口</string>
+    <string name="toast_warp_created">已创建 WARP 配置</string>
+    <string name="toast_warp_failed">无法注册 WARP。请先连接后再试。</string>
+    <string name="toast_warp_chain_created">已在 Cloudflare 标签页创建链式代理</string>
+    <string name="toast_warp_chain_invalid">此配置无法加入链（复合类型，或名称中含有逗号）</string>
 </resources>

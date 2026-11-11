@@ -83,3 +83,10 @@ Working branch: `arena/d739235f-rx-client` (App repo: `kairomax1/RX_client`).
   with `MSG_STATE_SERVER_SWITCHED`. Not yet checked on a device.
 - **Cloudflare deep scan**: `CloudflareAssistant.deepScanAddresses()` = fixed sample + 160 random
   addresses drawn from `CLOUDFLARE_RANGES`; second button on the Cloudflare screen.
+- **WARP**: `handler/WarpAssistant.kt` registers a free account (`api.cloudflareclient.com`, TLS 1.2
+  only, direct first then through the local proxy) and stores a WireGuard profile named `WARP`
+  (`PREF_WARP_PROFILE`). Keys come from `util/Curve25519.kt` (RFC 7748 vectors in its test).
+  `createChain` builds a PROXYCHAIN profile; members are names in traffic order, entry first.
+  The registration call itself has never been run against the real API.
+- **Tor / Psiphon are not in the app**: their Android libraries (IPtProxy for Snowflake, Psiphon
+  tunnel core) are gomobile AARs like `libv2ray.aar`, and Psiphon also needs Psiphon-issued IDs.

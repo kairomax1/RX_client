@@ -4,10 +4,14 @@ import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.LOOPBACK
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.dto.UrlContentRequest
+import okhttp3.ConnectionSpec
 import okhttp3.Credentials
 import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.TlsVersion
 import java.io.File
 import java.io.IOException
 import java.net.IDN
@@ -209,6 +213,45 @@ object HttpUtil {
             }
         }
         throw IOException("Too many redirects")
+    }
+
+    /**
+     * Posts a JSON [body] and returns the answer body of a successful response.
+     *
+     * @param httpPort Local HTTP proxy port, 0 for a direct request.
+     * @param tls12Only Offers TLS 1.2 only, for servers that reject other client handshakes.
+     * @throws IOException When the request fails or the status is not successful.
+     */
+    @Throws(IOException::class)
+    fun postJson(
+        url: String,
+        body: String,
+        headers: Map<String, String>,
+        timeout: Int,
+        httpPort: Int = 0,
+        proxyUsername: String? = null,
+        proxyPassword: String? = null,
+        tls12Only: Boolean = false,
+    ): String {
+        var client = buildOkHttpClient(timeout, httpPort, proxyUsername, proxyPassword, followRedirects = false)
+        if (tls12Only) {
+            val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+                .tlsVersions(TlsVersion.TLS_1_2)
+                .build()
+            client = client.newBuilder().connectionSpecs(listOf(spec)).build()
+        }
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+        for ((key, value) in headers) {
+            requestBuilder.header(key, value)
+        }
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("Request failed with status code ${response.code}")
+            }
+            return response.body?.string() ?: ""
+        }
     }
 
     private fun applyEmbeddedBasicAuthHeader(rawUrl: String, requestBuilder: Request.Builder) {

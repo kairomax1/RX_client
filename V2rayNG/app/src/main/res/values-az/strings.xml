@@ -582,4 +582,16 @@
     <string name="title_pref_auto_failover">Bağlantı kəsiləndə avtomatik keçid</string>
     <string name="summary_pref_auto_failover">Qoşulu olarkən tunel müntəzəm yoxlanılır. Cavab vermədikdə eyni qrupdan işləyən ən sürətli konfiqurasiya avtomatik seçilir. Heç bir konfiqurasiya cavab vermirsə, heç nə dəyişmir.</string>
     <string name="toast_failover_switched">Bağlantı kəsildi, %s konfiqurasiyasına keçildi</string>
+    <string name="warp_group">WARP və tunel içində tunel</string>
+    <string name="warp_note">WARP Cloudflare-in pulsuz WireGuard tunelidir. Yalnız UDP trafiki bloklanmayan yerdə qoşulur; işləyən konfiqurasiyanın arxasına zəncirlənəndə çıxış ünvanını dəyişir.</string>
+    <string name="warp_create">Pulsuz WARP konfiqurasiyası yarat</string>
+    <string name="warp_create_summary">Yeni hesab qeydiyyatdan keçirir və bu tabda «WARP» adı ilə saxlayır</string>
+    <string name="warp_chain_exit">Seçilmiş konfiqurasiya → WARP</string>
+    <string name="warp_chain_exit_summary">Seçilmiş konfiqurasiyadan giriş, WARP-dan çıxış</string>
+    <string name="warp_chain_entry">WARP → seçilmiş konfiqurasiya</string>
+    <string name="warp_chain_entry_summary">WARP-dan giriş, seçilmiş konfiqurasiyadan çıxış</string>
+    <string name="toast_warp_created">WARP konfiqurasiyası yaradıldı</string>
+    <string name="toast_warp_failed">WARP qeydiyyatı alınmadı. Əvvəlcə qoşulun, sonra yenidən cəhd edin.</string>
+    <string name="toast_warp_chain_created">Zəncir Cloudflare tabında yaradıldı</string>
+    <string name="toast_warp_chain_invalid">Bu konfiqurasiya zəncirlənə bilməz (mürəkkəb növdür və ya adında vergül var)</string>
 </resources>

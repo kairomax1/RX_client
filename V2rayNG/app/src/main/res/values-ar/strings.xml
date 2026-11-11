@@ -589,4 +589,16 @@
     <string name="title_pref_auto_failover">التبديل التلقائي عند انقطاع الاتصال</string>
     <string name="summary_pref_auto_failover">أثناء الاتصال يُفحص النفق بانتظام. إذا توقف عن الاستجابة يُختار تلقائيًا أسرع إعداد يعمل من المجموعة نفسها. لا يتغير شيء إذا لم يستجب أي إعداد.</string>
     <string name="toast_failover_switched">انقطع الاتصال، تم التبديل إلى %s</string>
+    <string name="warp_group">WARP ونفق داخل نفق</string>
+    <string name="warp_note">WARP هو نفق WireGuard المجاني من Cloudflare. يتصل فقط حيث لا تُحجب حركة UDP الخاصة به؛ وعند ربطه خلف إعداد يعمل يغيّر عنوان الخروج.</string>
+    <string name="warp_create">إنشاء إعداد WARP مجاني</string>
+    <string name="warp_create_summary">يسجّل حسابًا جديدًا ويحفظه في هذا التبويب باسم «WARP»</string>
+    <string name="warp_chain_exit">الإعداد المحدد ← WARP</string>
+    <string name="warp_chain_exit_summary">الدخول عبر الإعداد المحدد والخروج عبر WARP</string>
+    <string name="warp_chain_entry">WARP ← الإعداد المحدد</string>
+    <string name="warp_chain_entry_summary">الدخول عبر WARP والخروج عبر الإعداد المحدد</string>
+    <string name="toast_warp_created">تم إنشاء إعداد WARP</string>
+    <string name="toast_warp_failed">تعذّر تسجيل WARP. اتصل أولًا ثم أعد المحاولة.</string>
+    <string name="toast_warp_chain_created">تم إنشاء السلسلة في تبويب Cloudflare</string>
+    <string name="toast_warp_chain_invalid">لا يمكن ربط هذا الإعداد (نوع مركّب أو فاصلة في اسمه)</string>
 </resources>

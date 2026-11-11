@@ -581,4 +581,16 @@
     <string name="title_pref_auto_failover">সংযোগ বিচ্ছিন্ন হলে স্বয়ংক্রিয় পরিবর্তন</string>
     <string name="summary_pref_auto_failover">সংযুক্ত থাকা অবস্থায় টানেল নিয়মিত পরীক্ষা করা হয়। সাড়া না দিলে একই গ্রুপের সবচেয়ে দ্রুত সচল কনফিগ স্বয়ংক্রিয়ভাবে নির্বাচিত হয়। কোনো কনফিগ সাড়া না দিলে কিছুই পরিবর্তন হয় না।</string>
     <string name="toast_failover_switched">সংযোগ বিচ্ছিন্ন হয়েছে, %s-এ পরিবর্তন করা হয়েছে</string>
+    <string name="warp_group">WARP এবং টানেলের ভেতরে টানেল</string>
+    <string name="warp_note">WARP হলো Cloudflare-এর বিনামূল্যের WireGuard টানেল। এর UDP ট্র্যাফিক অবরুদ্ধ না থাকলেই এটি সংযুক্ত হয়; সচল কনফিগের পেছনে চেইন করলে এটি বহির্গমন ঠিকানা বদলে দেয়।</string>
+    <string name="warp_create">বিনামূল্যের WARP কনফিগ তৈরি করুন</string>
+    <string name="warp_create_summary">নতুন অ্যাকাউন্ট নিবন্ধন করে এই ট্যাবে «WARP» নামে সংরক্ষণ করে</string>
+    <string name="warp_chain_exit">নির্বাচিত কনফিগ → WARP</string>
+    <string name="warp_chain_exit_summary">নির্বাচিত কনফিগ দিয়ে প্রবেশ, WARP দিয়ে বের হওয়া</string>
+    <string name="warp_chain_entry">WARP → নির্বাচিত কনফিগ</string>
+    <string name="warp_chain_entry_summary">WARP দিয়ে প্রবেশ, নির্বাচিত কনফিগ দিয়ে বের হওয়া</string>
+    <string name="toast_warp_created">WARP কনফিগ তৈরি হয়েছে</string>
+    <string name="toast_warp_failed">WARP নিবন্ধন করা যায়নি। আগে সংযুক্ত হয়ে আবার চেষ্টা করুন।</string>
+    <string name="toast_warp_chain_created">Cloudflare ট্যাবে চেইন তৈরি হয়েছে</string>
+    <string name="toast_warp_chain_invalid">এই কনফিগ চেইন করা যাবে না (জটিল ধরন, অথবা নামে কমা আছে)</string>
 </resources>

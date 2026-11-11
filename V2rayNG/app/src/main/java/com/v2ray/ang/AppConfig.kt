@@ -89,6 +89,8 @@ object AppConfig {
 
     /** Maps a source profile to the Cloudflare copy made from it, so a repair refreshes it. */
     const val PREF_CLOUDFLARE_COPY_PREFIX = "pref_cloudflare_copy_"
+    /** GUID of the WireGuard profile that holds the WARP account created in the app. */
+    const val PREF_WARP_PROFILE = "pref_warp_profile"
     const val PREF_SERVICE_RUNNING = "pref_service_running"
 
     /** Lets the running service move to another config of the group when the tunnel dies. */

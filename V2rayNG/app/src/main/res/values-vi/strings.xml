@@ -579,4 +579,16 @@
     <string name="title_pref_auto_failover">Tự động chuyển khi mất kết nối</string>
     <string name="summary_pref_auto_failover">Khi đang kết nối, đường hầm được kiểm tra định kỳ. Nếu không còn phản hồi, cấu hình hoạt động nhanh nhất trong cùng nhóm sẽ được chọn tự động. Không có gì thay đổi nếu không cấu hình nào phản hồi.</string>
     <string name="toast_failover_switched">Mất kết nối, đã chuyển sang %s</string>
+    <string name="warp_group">WARP và đường hầm lồng đường hầm</string>
+    <string name="warp_note">WARP là đường hầm WireGuard miễn phí của Cloudflare. Nó chỉ kết nối được ở nơi lưu lượng UDP của nó không bị chặn; khi nối chuỗi sau một cấu hình đang hoạt động, nó thay đổi địa chỉ đầu ra.</string>
+    <string name="warp_create">Tạo cấu hình WARP miễn phí</string>
+    <string name="warp_create_summary">Đăng ký tài khoản mới và lưu vào thẻ này với tên “WARP”</string>
+    <string name="warp_chain_exit">Cấu hình đã chọn → WARP</string>
+    <string name="warp_chain_exit_summary">Vào qua cấu hình đã chọn, ra qua WARP</string>
+    <string name="warp_chain_entry">WARP → cấu hình đã chọn</string>
+    <string name="warp_chain_entry_summary">Vào qua WARP, ra qua cấu hình đã chọn</string>
+    <string name="toast_warp_created">Đã tạo cấu hình WARP</string>
+    <string name="toast_warp_failed">Không đăng ký được WARP. Hãy kết nối trước rồi thử lại.</string>
+    <string name="toast_warp_chain_created">Đã tạo chuỗi trong thẻ Cloudflare</string>
+    <string name="toast_warp_chain_invalid">Không thể nối chuỗi cấu hình này (loại phức hợp hoặc tên có dấu phẩy)</string>
 </resources>

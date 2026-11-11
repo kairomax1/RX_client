@@ -6,6 +6,7 @@ import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.CloudflareAssistant
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
+import com.v2ray.ang.handler.WarpAssistant
 import com.v2ray.ang.ui.base.BaseViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,8 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
         val fixedName: String? = null,
         val fixedGuid: String? = null,
         val fixedPingMs: Long? = null,
+        /** True once a WARP profile exists, which is what the chain buttons need. */
+        val hasWarp: Boolean = false,
     )
 
     /** What the hands-off pass decided, so the screen can explain itself. */
@@ -58,7 +61,43 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
             antiBlock = CloudflareAssistant.isAntiBlockEnabled(),
             autoEnabled = CloudflareAssistant.isAutoEnabled(),
             groupCount = CloudflareAssistant.groupSize(groupName),
+            hasWarp = WarpAssistant.warpGuid() != null,
         )
+    }
+
+    /** Registers a free WARP account and stores it as a WireGuard profile in the Cloudflare tab. */
+    fun createWarp() {
+        val app = getApplication<Application>()
+        launchLoading {
+            val groupId = CloudflareAssistant.ensureGroup(groupName)
+            val guid = WarpAssistant.createProfile(app, groupId)
+            if (guid == null) {
+                toastError(R.string.toast_warp_failed)
+            } else {
+                toastSuccess(R.string.toast_warp_created)
+            }
+            refresh()
+        }
+    }
+
+    /** Tunnel in tunnel: a proxy chain of the selected config and WARP, saved as a new profile. */
+    fun chainWithWarp(order: WarpAssistant.ChainOrder) {
+        val selected = CloudflareAssistant.selectedGuid()
+        if (selected == null) {
+            toastError(R.string.toast_cloudflare_no_config)
+            return
+        }
+        launchLoading {
+            val guid = withContext(Dispatchers.IO) {
+                WarpAssistant.createChain(selected, order, CloudflareAssistant.ensureGroup(groupName))
+            }
+            if (guid == null) {
+                toastError(R.string.toast_warp_chain_invalid)
+            } else {
+                toastSuccess(R.string.toast_warp_chain_created)
+            }
+            refresh()
+        }
     }
 
     fun setAutoEnabled(enabled: Boolean) {

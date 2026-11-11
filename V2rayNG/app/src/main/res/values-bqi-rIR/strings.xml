@@ -581,4 +581,16 @@
     <string name="title_pref_auto_failover">جابه‌جایی خودکار هنگام قطعی</string>
     <string name="summary_pref_auto_failover">هنگام اتصال، تونل مرتب بررسی می‌شود. اگر پاسخ ندهد، سریع‌ترین کانفیگ سالم همان گروه خودکار انتخاب می‌شود. اگر هیچ کانفیگی پاسخ ندهد، چیزی تغییر نمی‌کند.</string>
     <string name="toast_failover_switched">اتصال قطع شد؛ به %s جابه‌جا شد</string>
+    <string name="warp_group">WARP و تونل در تونل</string>
+    <string name="warp_note">WARP تونل وایرگارد رایگان کلادفلر است. فقط جایی وصل می‌شود که ترافیک UDP آن بسته نباشد؛ ولی اگر پشت یک کانفیگ سالم زنجیر شود، آی‌پی خروجی را عوض می‌کند.</string>
+    <string name="warp_create">ساخت کانفیگ رایگان WARP</string>
+    <string name="warp_create_summary">یک حساب تازه ثبت می‌کند و با نام «WARP» در همین تب ذخیره می‌شود</string>
+    <string name="warp_chain_exit">کانفیگ انتخابی ← WARP</string>
+    <string name="warp_chain_exit_summary">ورود از کانفیگ انتخابی، خروج از WARP</string>
+    <string name="warp_chain_entry">WARP ← کانفیگ انتخابی</string>
+    <string name="warp_chain_entry_summary">ورود از WARP، خروج از کانفیگ انتخابی</string>
+    <string name="toast_warp_created">کانفیگ WARP ساخته شد</string>
+    <string name="toast_warp_failed">ثبت WARP انجام نشد. اول وصل شوید و دوباره امتحان کنید.</string>
+    <string name="toast_warp_chain_created">زنجیره در تب کلادفلر ساخته شد</string>
+    <string name="toast_warp_chain_invalid">این کانفیگ قابل زنجیر شدن نیست (نوع ترکیبی است یا در نامش ویرگول دارد)</string>
 </resources>

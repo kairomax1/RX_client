@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.WarpAssistant
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
 import com.v2ray.ang.ui.compose.InputDialog
@@ -80,7 +81,9 @@ class CloudflareActivity : BaseComponentActivity() {
             onChoose = viewModel::choose,
             onApply = viewModel::applyChosen,
             onProbe = viewModel::probeSelected,
-            onAddOther = viewModel::addOtherConfig
+            onAddOther = viewModel::addOtherConfig,
+            onCreateWarp = { viewModel.createWarp() },
+            onChainWarp = { order -> viewModel.chainWithWarp(order) }
         )
     }
 }
@@ -97,7 +100,9 @@ fun CloudflareScreen(
     onChoose: (String) -> Unit,
     onApply: () -> Unit,
     onProbe: () -> Unit,
-    onAddOther: (String) -> Unit
+    onAddOther: (String) -> Unit,
+    onCreateWarp: () -> Unit,
+    onChainWarp: (WarpAssistant.ChainOrder) -> Unit
 ) {
     var showOtherDialog by remember { mutableStateOf(false) }
     var otherText by remember { mutableStateOf("") }
@@ -195,6 +200,31 @@ fun CloudflareScreen(
                 subtitle = stringResource(R.string.cloudflare_other_summary),
                 onClick = { showOtherDialog = true }
             )
+
+            PreferenceGroupHeader(title = stringResource(R.string.warp_group))
+            Text(
+                text = stringResource(R.string.warp_note),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.5.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+            SettingsMenuItem(
+                title = stringResource(R.string.warp_create),
+                subtitle = stringResource(R.string.warp_create_summary),
+                onClick = onCreateWarp
+            )
+            if (state.hasWarp) {
+                SettingsMenuItem(
+                    title = stringResource(R.string.warp_chain_exit),
+                    subtitle = stringResource(R.string.warp_chain_exit_summary),
+                    onClick = { onChainWarp(WarpAssistant.ChainOrder.ExitThroughWarp) }
+                )
+                SettingsMenuItem(
+                    title = stringResource(R.string.warp_chain_entry),
+                    subtitle = stringResource(R.string.warp_chain_entry_summary),
+                    onClick = { onChainWarp(WarpAssistant.ChainOrder.EnterThroughWarp) }
+                )
+            }
 
             PreferenceGroupHeader(title = stringResource(R.string.cloudflare_group_test))
             Row(

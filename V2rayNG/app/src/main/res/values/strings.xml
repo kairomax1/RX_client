@@ -664,4 +664,16 @@
     <string name="title_pref_auto_failover">Auto-switch on connection loss</string>
     <string name="summary_pref_auto_failover">While connected, the tunnel is checked regularly. If it stops responding, the fastest working config of the same group is selected automatically. Nothing changes when no config responds.</string>
     <string name="toast_failover_switched">Connection dropped, switched to %s</string>
+    <string name="warp_group">WARP and tunnel in tunnel</string>
+    <string name="warp_note">WARP is Cloudflare\'s free WireGuard tunnel. It only connects where its UDP traffic is not blocked; chained with a working config it still changes the exit address.</string>
+    <string name="warp_create">Create free WARP config</string>
+    <string name="warp_create_summary">Registers a new account and saves it in this tab as “WARP”</string>
+    <string name="warp_chain_exit">Selected config → WARP</string>
+    <string name="warp_chain_exit_summary">Enter through the selected config, exit through WARP</string>
+    <string name="warp_chain_entry">WARP → selected config</string>
+    <string name="warp_chain_entry_summary">Enter through WARP, exit through the selected config</string>
+    <string name="toast_warp_created">WARP config created</string>
+    <string name="toast_warp_failed">Could not register WARP. Connect first, then try again.</string>
+    <string name="toast_warp_chain_created">Chain created in the Cloudflare tab</string>
+    <string name="toast_warp_chain_invalid">This config cannot be chained (complex type, or a comma in its name)</string>
 </resources>
