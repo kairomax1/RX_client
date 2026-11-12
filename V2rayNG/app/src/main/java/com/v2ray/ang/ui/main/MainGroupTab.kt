@@ -19,6 +19,7 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,7 +51,8 @@ import com.v2ray.ang.dto.GroupMapItem
 import com.v2ray.ang.dto.entities.ServersCache
 import kotlinx.coroutines.flow.StateFlow
 
-private val TAB_BAR_PADDING = 3.dp
+private val TAB_BAR_PADDING = 4.dp
+private val TAB_BAR_SHAPE = RoundedCornerShape(22.dp)
 private val TAB_SPACING = 2.dp
 private val TAB_HEIGHT = 34.dp
 private val SELECTED_TAB_MARGIN = 12.dp
@@ -79,11 +81,11 @@ fun GroupTabBar(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        shape = CircleShape,
+            .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
+        shape = TAB_BAR_SHAPE,
         color = if (dark) colors.surfaceContainerHigh else colors.surface,
-        border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = if (dark) 0.6f else 0.35f)),
-        shadowElevation = 3.dp
+        border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = if (dark) 1f else 0.35f)),
+        shadowElevation = if (dark) 0.dp else 3.dp
     ) {
         BoxWithConstraints {
             val barPaddingPx = with(LocalDensity.current) { TAB_BAR_PADDING.roundToPx() }

@@ -4,16 +4,19 @@ import android.content.Context
 import android.provider.Settings
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,56 +29,97 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.ui.compose.rxLetterR
 import com.v2ray.ang.ui.compose.rxLetterX
 import com.v2ray.ang.util.LogUtil
+import kotlin.math.max
 import kotlin.math.min
 
+// The intro is a fixed brand plate, black with brushed silver, so it does not read the color
+// scheme: it looks the same over the dark, light and dynamic themes it opens into.
+private val IntroBackground = Color(0xFF000000)
+private val IntroMuted = Color(0xFF8B919C)
+private val IntroRing = Color(0xFFDCE6FA)
+private val IntroGlow = Color(0xFFBECDEB)
+private val IntroTileTop = Color(0xFF17181C)
+private val IntroTileBottom = Color(0xFF060607)
+private val IntroLine = Color(0x1AFFFFFF)
+private val IntroBarStart = Color(0xFF6C7280)
+
+private val MetalStops = arrayOf(
+    0f to Color(0xFFFFFFFF),
+    0.38f to Color(0xFFAEB4C0),
+    0.52f to Color(0xFFF6F8FB),
+    1f to Color(0xFF7D838F),
+)
+
+private const val SLASH_A_DEGREES = -24f
+private const val SLASH_B_DEGREES = 28f
+private const val BRAND_FONT_SP = 30f
+
 /**
- * Startup brand animation: the RX tile pops in, its two letters are revealed left to right, a warm
- * sheen sweeps across the tile and the app name and a progress line follow, then the whole overlay
- * fades into [MainScreen].
+ * Startup brand animation: echo rings pulse while the RX mark spins in out of a blur, two light
+ * slashes cut across it, a sheen sweeps the tile, the name and tagline rise and a loading line
+ * fills; then the plate zooms out and fades while [MainScreen] scales in underneath.
  *
- * Presentation only: it owns no durable state and performs no repository, settings, or native work.
- * It draws with the active color scheme, so dark, light, and dynamic color are all covered. The
- * animation is skipped when the system animation scale is off and can be dismissed with a tap; the
- * caller hides the overlay exactly once through [onFinished].
+ * Presentation only: it owns no durable state and performs no repository, settings, or native
+ * work. The animation is skipped when the system animation scale is off, and a tap jumps straight
+ * to the exit. [onLeaving] fires exactly once when the exit begins (the caller starts revealing the
+ * home screen) and [onFinished] exactly once when the overlay can be removed.
  */
 @Composable
 fun MainSplashOverlay(
+    onLeaving: () -> Unit,
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val colors = MaterialTheme.colorScheme
     val motionDisabled = remember(context) { animationsDisabled(context) }
+    val currentOnLeaving by rememberUpdatedState(onLeaving)
     val currentOnFinished by rememberUpdatedState(onFinished)
 
     // Negative until the first frame, so nothing is painted when the animation is skipped.
     var elapsedMs by remember { mutableFloatStateOf(-1f) }
+    // Time added by a tap, so skipping plays the exit instead of cutting to the home screen.
+    var skippedMs by remember { mutableFloatStateOf(0f) }
+    var leaving by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
 
+    val leave = {
+        if (!leaving) {
+            leaving = true
+            currentOnLeaving()
+        }
+    }
     val finish = {
+        leave()
         if (!finished) {
             finished = true
             currentOnFinished()
@@ -90,8 +134,9 @@ fun MainSplashOverlay(
         val startNs = withFrameNanos { it }
         while (true) {
             val frameNs = withFrameNanos { it }
-            val elapsed = (frameNs - startNs) / 1_000_000f
+            val elapsed = (frameNs - startNs) / 1_000_000f + skippedMs
             elapsedMs = min(elapsed, MainSplashTimeline.TOTAL_MS)
+            if (MainSplashTimeline.isLeaving(elapsed)) leave()
             if (MainSplashTimeline.isFinished(elapsed)) break
         }
         finish()
@@ -102,147 +147,134 @@ fun MainSplashOverlay(
     if (motionDisabled) return
     val elapsed = elapsedMs.coerceAtLeast(0f)
 
-    val tileScale = MainSplashTimeline.tileScale(elapsed)
-    val rProgress = MainSplashTimeline.progress(
-        elapsed, MainSplashTimeline.R_START_MS, MainSplashTimeline.R_END_MS
-    )
-    val xProgress = MainSplashTimeline.progress(
-        elapsed, MainSplashTimeline.X_START_MS, MainSplashTimeline.X_END_MS
-    )
-    val glowAlpha = MainSplashTimeline.progress(
-        elapsed, MainSplashTimeline.GLOW_START_MS, MainSplashTimeline.GLOW_END_MS
-    )
-    val sweepProgress = MainSplashTimeline.progress(
-        elapsed, MainSplashTimeline.SWEEP_START_MS, MainSplashTimeline.SWEEP_END_MS
-    )
-    val wordProgress = MainSplashTimeline.progress(
-        elapsed, MainSplashTimeline.WORD_START_MS, MainSplashTimeline.WORD_END_MS
-    )
-    val barProgress = MainSplashTimeline.progress(
-        elapsed, MainSplashTimeline.BAR_START_MS, MainSplashTimeline.BAR_END_MS
-    )
-    val taglineProgress = MainSplashTimeline.taglineAlpha(elapsed)
+    val logo = MainSplashTimeline.logoProgress(elapsed)
+    val logoScale = MainSplashTimeline.logoScale(logo)
+    val logoRotation = MainSplashTimeline.logoRotation(logo)
+    val logoBlur = MainSplashTimeline.logoBlurDp(logo)
+    val slashA = MainSplashTimeline.slashProgress(elapsed, MainSplashTimeline.SLASH_A_START_MS)
+    val slashB = MainSplashTimeline.slashProgress(elapsed, MainSplashTimeline.SLASH_B_START_MS)
+    val sweep = MainSplashTimeline.sweepProgress(elapsed)
+    val brand = MainSplashTimeline.brandProgress(elapsed)
+    val brandSpacingEm = MainSplashTimeline.brandLetterSpacingEm(brand)
+    val tagline = MainSplashTimeline.taglineProgress(elapsed)
+    val bar = MainSplashTimeline.barProgress(elapsed)
     val overlayAlpha = MainSplashTimeline.overlayAlpha(elapsed)
-    val ringOne = MainSplashTimeline.ringProgress(elapsed, 0f)
-    val ringTwo = MainSplashTimeline.ringProgress(elapsed, MainSplashTimeline.RING_STEP_MS)
+    val overlayScale = MainSplashTimeline.overlayScale(elapsed)
+    val overlayBlur = MainSplashTimeline.overlayBlurDp(elapsed)
 
     val letterR = remember { rxLetterR() }
     val letterX = remember { rxLetterX() }
+    val density = LocalDensity.current
+    val risePx = with(density) { 14.dp.toPx() }
+    // Tracking adds a gap after the last letter too. The name is Latin, so that gap is always on
+    // the physical right; the same amount on the physical left keeps the word optically centred
+    // in right-to-left locales as well.
+    val brandBalance = with(density) { (BRAND_FONT_SP * brandSpacingEm).sp.toDp() }
+    val barFromRight = LocalLayoutDirection.current == LayoutDirection.Rtl
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .graphicsLayer { alpha = overlayAlpha }
-            .background(Brush.verticalGradient(listOf(colors.surfaceContainerLow, colors.background)))
-            .pointerInput(Unit) { detectTapGestures { finish() } },
+            .graphicsLayer {
+                alpha = overlayAlpha
+                scaleX = overlayScale
+                scaleY = overlayScale
+            }
+            .blur(overlayBlur.dp)
+            .background(IntroBackground)
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    val now = max(elapsedMs, 0f)
+                    if (!MainSplashTimeline.isLeaving(now)) {
+                        skippedMs += MainSplashTimeline.OUT_START_MS - now
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(300.dp)) {
-                    if (glowAlpha > 0f) {
-                        val radius = size.minDimension / 2f
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    colors.primary.copy(alpha = 0.30f * glowAlpha),
-                                    Color.Transparent,
-                                ),
-                                center = center,
-                                radius = radius,
-                            ),
-                            radius = radius,
-                        )
+            Box(modifier = Modifier.size(168.dp), contentAlignment = Alignment.Center) {
+                // Rings and glow overflow the 168 dp box on purpose; a Canvas does not clip.
+                Canvas(Modifier.fillMaxSize()) {
+                    for (index in 0 until MainSplashTimeline.RING_COUNT) {
+                        drawRing(MainSplashTimeline.ringProgress(elapsed, index))
                     }
-                }
-                Canvas(Modifier.size(300.dp)) {
-                    drawRing(ringOne, colors.primary)
-                    drawRing(ringTwo, colors.primary)
+                    drawGlow(logo)
                 }
                 Box(
                     modifier = Modifier
                         .size(128.dp)
                         .graphicsLayer {
-                            scaleX = tileScale
-                            scaleY = tileScale
+                            alpha = logo
+                            scaleX = logoScale
+                            scaleY = logoScale
+                            rotationZ = logoRotation
                         }
+                        .blur(logoBlur.dp, BlurredEdgeTreatment.Unbounded)
                         .clip(RoundedCornerShape(30.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(colors.surfaceContainerHigh, colors.background)
-                            )
-                        )
+                        .background(Brush.verticalGradient(listOf(IntroTileTop, IntroTileBottom)))
+                        .border(1.dp, IntroLine, RoundedCornerShape(30.dp))
                 ) {
                     Canvas(Modifier.fillMaxSize()) {
-                        drawRxMark(
-                            letterR = letterR,
-                            letterX = letterX,
-                            rProgress = rProgress,
-                            xProgress = xProgress,
-                            rColor = colors.onSurface,
-                            xColor = colors.primary,
-                        )
+                        drawRxMark(letterR, letterX)
+                        drawSheen(sweep)
                     }
-                    Canvas(Modifier.fillMaxSize()) {
-                        drawSheen(sweepProgress, colors.onSurface)
-                    }
+                }
+                Canvas(Modifier.fillMaxSize()) {
+                    drawSlash(slashA, SLASH_A_DEGREES)
+                    drawSlash(slashB, SLASH_B_DEGREES)
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(34.dp))
 
             Text(
                 text = stringResource(R.string.app_name),
-                color = colors.onSurface,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = MainSplashTimeline.nameLetterSpacingSp(wordProgress).sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.graphicsLayer {
-                    alpha = wordProgress
-                    translationY = (1f - wordProgress) * 36f
-                },
+                style = TextStyle(
+                    brush = Brush.linearGradient(*MetalStops),
+                    fontSize = BRAND_FONT_SP.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = brandSpacingEm.em,
+                    textAlign = TextAlign.Center,
+                ),
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .absolutePadding(left = brandBalance)
+                    .graphicsLayer {
+                        alpha = brand
+                        translationY = (1f - brand) * risePx
+                    },
             )
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // The line the app greets a returning user with, riding in right as the name lands.
+            // No tracking here: the tagline is joined script in several locales and spacing its
+            // letters apart would break the words.
             Text(
                 text = stringResource(R.string.splash_tagline),
-                color = colors.onSurfaceVariant,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 1.5.sp,
+                color = IntroMuted,
+                fontSize = 13.sp,
                 textAlign = TextAlign.Center,
+                maxLines = 1,
                 modifier = Modifier.graphicsLayer {
-                    alpha = taglineProgress
-                    translationY = (1f - taglineProgress) * 18f
+                    alpha = tagline
+                    translationY = (1f - tagline) * risePx
                 },
             )
+        }
 
-            Spacer(Modifier.height(24.dp))
-
-            Box(
-                modifier = Modifier
-                    .width(124.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(colors.onSurface.copy(alpha = 0.12f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = barProgress
-                            transformOrigin = TransformOrigin(1f, 0.5f)
-                        }
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(colors.primary.copy(alpha = 0.55f), colors.primary)
-                            )
-                        )
-                )
-            }
+        Canvas(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 60.dp)
+                .width(140.dp)
+                .height(2.dp)
+                .clip(RoundedCornerShape(2.dp))
+        ) {
+            drawRect(Color.White.copy(alpha = 0.1f))
+            drawLoadingLine(bar, barFromRight)
         }
     }
 }
@@ -263,49 +295,86 @@ private fun animationsDisabled(context: Context): Boolean = try {
     false
 }
 
-private fun DrawScope.drawRing(progress: Float, color: Color) {
-    if (progress <= 0f || progress >= 1f) return
-    val radius = size.minDimension / 2f * (0.33f + 0.67f * progress)
+private fun DrawScope.drawRing(progress: Float) {
+    val alpha = MainSplashTimeline.ringAlpha(progress)
+    if (alpha <= 0f) return
     drawCircle(
-        color = color.copy(alpha = 0.38f * (1f - progress)),
-        radius = radius,
-        style = Stroke(width = 1.5.dp.toPx()),
+        color = IntroRing.copy(alpha = 0.5f * alpha),
+        radius = size.minDimension / 2f * MainSplashTimeline.ringScale(progress),
+        style = Stroke(width = 1.dp.toPx()),
     )
 }
 
-private fun DrawScope.drawRxMark(
-    letterR: Path,
-    letterX: Path,
-    rProgress: Float,
-    xProgress: Float,
-    rColor: Color,
-    xColor: Color,
-) {
-    if (rProgress <= 0f && xProgress <= 0f) return
+private fun DrawScope.drawGlow(logoProgress: Float) {
+    if (logoProgress <= 0f) return
+    val radius = size.minDimension * 0.62f
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(IntroGlow.copy(alpha = 0.30f * logoProgress), Color.Transparent),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+    )
+}
+
+private fun DrawScope.drawRxMark(letterR: Path, letterX: Path) {
     val unit = size.minDimension / 512f
+    val metal = Brush.linearGradient(
+        *MetalStops,
+        start = Offset(100f, 156f),
+        end = Offset(424f, 356f),
+    )
     withTransform({ scale(unit, unit, Offset.Zero) }) {
-        if (rProgress > 0f) {
-            clipRect(left = 0f, top = 0f, right = 512f * rProgress, bottom = 512f) {
-                drawPath(letterR, rColor)
-            }
-        }
-        if (xProgress > 0f) {
-            clipRect(left = 0f, top = 0f, right = 512f * xProgress, bottom = 512f) {
-                drawPath(letterX, xColor)
-            }
-        }
+        drawPath(letterR, metal)
+        drawPath(letterX, metal)
     }
 }
 
-private fun DrawScope.drawSheen(progress: Float, highlight: Color) {
+/** A slanted band of light, 40 % of the tile wide, travelling from off the left to off the right. */
+private fun DrawScope.drawSheen(progress: Float) {
     if (progress <= 0f || progress >= 1f) return
-    val band = size.width * 0.7f
-    val current = -band + (size.width + band * 2f) * progress
+    val band = size.width * 0.4f
+    val left = size.width * (-0.6f + 1.9f * progress)
+    val slant = size.height * 0.36f
     drawRect(
         brush = Brush.linearGradient(
-            colors = listOf(Color.Transparent, highlight.copy(alpha = 0.30f), Color.Transparent),
-            start = Offset(current - band, -band),
-            end = Offset(current + band, size.height + band),
+            colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.55f), Color.Transparent),
+            start = Offset(left, 0f),
+            end = Offset(left + band, slant),
         )
+    )
+}
+
+private fun DrawScope.drawSlash(progress: Float, degrees: Float) {
+    val alpha = MainSplashTimeline.slashAlpha(progress)
+    if (alpha <= 0f) return
+    val half = MainSplashTimeline.slashLengthDp(progress).dp.toPx() / 2f
+    if (half <= 0f) return
+    rotate(degrees, center) {
+        drawLine(
+            brush = Brush.horizontalGradient(
+                colors = listOf(Color.Transparent, Color.White, Color.Transparent),
+                startX = center.x - half,
+                endX = center.x + half,
+            ),
+            start = Offset(center.x - half, center.y),
+            end = Offset(center.x + half, center.y),
+            strokeWidth = 2.dp.toPx(),
+            alpha = 0.9f * alpha,
+        )
+    }
+}
+
+/** Fills from the reading-direction start, with the bright end leading. */
+private fun DrawScope.drawLoadingLine(progress: Float, fromRight: Boolean) {
+    if (progress <= 0f) return
+    val filled = size.width * progress.coerceIn(0f, 1f)
+    val left = if (fromRight) size.width - filled else 0f
+    val colors = if (fromRight) listOf(Color.White, IntroBarStart) else listOf(IntroBarStart, Color.White)
+    drawRect(
+        brush = Brush.horizontalGradient(colors, startX = left, endX = left + filled),
+        topLeft = Offset(left, 0f),
+        size = Size(filled, size.height),
     )
 }

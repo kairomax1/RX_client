@@ -73,6 +73,7 @@ fun AppTopBar(
     onSearchQueryChange: (String) -> Unit = {},
     onSearchClose: () -> Unit = {},
     searchPlaceholder: String? = null,
+    titleFontWeight: FontWeight = FontWeight.SemiBold,
     navigationIcon: @Composable (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
@@ -89,7 +90,7 @@ fun AppTopBar(
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = titleFontWeight,
                     )
                 }
             },

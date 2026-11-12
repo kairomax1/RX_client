@@ -74,3 +74,14 @@ Working branch: `arena/d739235f-rx-client` (App repo: `kairomax1/RX_client`).
   overlay is skipped when `ServiceRuntimeState.isRunning()` is true, i.e. the tunnel is up.
 - `ServiceRuntimeState` mirrors the core state into MMKV (`pref_service_running`) from the
   `:daemon` process and verifies the daemon process is alive before trusting it.
+
+## Black and silver pass
+- Dark scheme in `Theme.kt` is now pure black with brushed silver (`#F4F6FA` / `#A4ABB8`), from
+  the user's HTML design; the amber accent survives only in the light scheme and the launcher
+  icon. To go back to gold, change `primary`/`secondary` to `#E0B070` / `#C9A070`.
+- Intro (`MainSplashOverlay` + `MainSplashTimeline`): rings, mark spinning in out of a blur, two
+  slashes, sheen, name, tagline, loading line, then zoom-out exit while the home screen scales in
+  from 96 % (`MainActivity.ScreenContent`). Tap skips to the exit.
+- Main header is pinned left-to-right in every locale; group tabs sit in a 22 dp rounded bar.
+- The HTML the user pasted was cut off after `.tabs`; server cards and the bottom bar were not
+  part of it and are unchanged apart from the palette.

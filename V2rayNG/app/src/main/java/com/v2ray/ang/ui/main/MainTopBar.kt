@@ -13,6 +13,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,8 +21,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.v2ray.ang.R
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -47,8 +51,14 @@ fun MainTopBar(
     val navBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val maxMenuHeight = LocalConfiguration.current.screenHeightDp.dp - statusBarHeight - navBarHeight - 20.dp
 
+    // The design pins the header left to right (menu and name on the left, actions on the right)
+    // in every locale. Search and the dropdown bodies keep the locale's own direction.
+    val localeDirection = LocalLayoutDirection.current
+    val headerDirection = if (showSearch) localeDirection else LayoutDirection.Ltr
+    CompositionLocalProvider(LocalLayoutDirection provides headerDirection) {
     AppTopBar(
         title = stringResource(R.string.app_name),
+        titleFontWeight = FontWeight.Normal,
         onBackClick = {},
         isLoading = isLoading,
         isSearchActive = showSearch,
@@ -86,12 +96,14 @@ fun MainTopBar(
                         .heightIn(max = maxMenuHeight)
                         .verticalScrollbar(importMenuScrollState)
                 ) {
-                    ImportMenuContent(
-                        onAction = { action ->
-                            showImportMenu = false
-                            onAction(action)
-                        }
-                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides localeDirection) {
+                        ImportMenuContent(
+                            onAction = { action ->
+                                showImportMenu = false
+                                onAction(action)
+                            }
+                        )
+                    }
                 }
             }
             Box(modifier = Modifier.wrapContentSize(Alignment.TopEnd)) {
@@ -107,12 +119,15 @@ fun MainTopBar(
                         .heightIn(max = maxMenuHeight)
                         .verticalScrollbar(moreMenuScrollState)
                 ) {
-                    MoreMenuContent { action ->
-                        showMenu = false
-                        onMoreMenuAction(action)
+                    CompositionLocalProvider(LocalLayoutDirection provides localeDirection) {
+                        MoreMenuContent { action ->
+                            showMenu = false
+                            onMoreMenuAction(action)
+                        }
                     }
                 }
             }
         }
     )
+    }
 }

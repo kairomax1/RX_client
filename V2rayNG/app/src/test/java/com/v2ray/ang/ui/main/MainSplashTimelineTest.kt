@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test
 class MainSplashTimelineTest {
 
     private val delta = 0.0001f
+    private val eased = 0.01f
 
     @Test
     fun progressIsClampedOutsideItsWindow() {
@@ -26,90 +27,159 @@ class MainSplashTimelineTest {
     }
 
     @Test
-    fun tileStartsSmallOvershootsThenSettles() {
-        assertEquals(0.72f, MainSplashTimeline.tileScale(0f), delta)
-        assertEquals(1f, MainSplashTimeline.tileScale(MainSplashTimeline.TILE_END_MS), delta)
-        val mid = MainSplashTimeline.tileScale(
-            (MainSplashTimeline.TILE_START_MS + MainSplashTimeline.TILE_END_MS) / 2f
+    fun cubicBezierHitsItsEndsAndStaysMonotonic() {
+        assertEquals(0f, MainSplashTimeline.cubicBezier(0f, 0.2f, 0.9f, 0.2f, 1f), delta)
+        assertEquals(1f, MainSplashTimeline.cubicBezier(1f, 0.2f, 0.9f, 0.2f, 1f), delta)
+        // A straight line through the control points is the identity.
+        assertEquals(0.3f, MainSplashTimeline.cubicBezier(0.3f, 0.25f, 0.25f, 0.75f, 0.75f), eased)
+        // ease-in-out is symmetric around its midpoint.
+        assertEquals(0.5f, MainSplashTimeline.easeInOut(0.5f), eased)
+        var previous = 0f
+        for (step in 1..20) {
+            val value = MainSplashTimeline.easeLanding(step / 20f)
+            assertTrue(value >= previous - eased, "curve went backwards at step $step")
+            previous = value
+        }
+        // The landing curve is front-loaded: most of the way there after a quarter of the time.
+        assertTrue(MainSplashTimeline.easeLanding(0.25f) > 0.7f)
+    }
+
+    @Test
+    fun markSpinsInOutOfABlur() {
+        val hidden = MainSplashTimeline.logoProgress(MainSplashTimeline.LOGO_START_MS)
+        assertEquals(0f, hidden, delta)
+        assertEquals(0.4f, MainSplashTimeline.logoScale(hidden), delta)
+        assertEquals(-12f, MainSplashTimeline.logoRotation(hidden), delta)
+        assertEquals(14f, MainSplashTimeline.logoBlurDp(hidden), delta)
+
+        val landed = MainSplashTimeline.logoProgress(MainSplashTimeline.LOGO_END_MS)
+        assertEquals(1f, landed, delta)
+        assertEquals(1f, MainSplashTimeline.logoScale(landed), delta)
+        assertEquals(0f, MainSplashTimeline.logoRotation(landed), delta)
+        assertEquals(0f, MainSplashTimeline.logoBlurDp(landed), delta)
+    }
+
+    @Test
+    fun slashShootsOutThenFades() {
+        assertEquals(0f, MainSplashTimeline.slashAlpha(0f), delta)
+        assertEquals(0f, MainSplashTimeline.slashLengthDp(0f), delta)
+        assertEquals(1f, MainSplashTimeline.slashAlpha(0.3f), delta)
+        assertEquals(260f, MainSplashTimeline.slashLengthDp(0.6f), 0.01f)
+        assertEquals(1f, MainSplashTimeline.slashAlpha(0.6f), delta)
+        assertEquals(300f, MainSplashTimeline.slashLengthDp(1f), 0.01f)
+        assertEquals(0f, MainSplashTimeline.slashAlpha(1f), delta)
+
+        val start = MainSplashTimeline.SLASH_A_START_MS
+        assertEquals(0f, MainSplashTimeline.slashProgress(start, start), delta)
+        assertEquals(
+            1f,
+            MainSplashTimeline.slashProgress(start + MainSplashTimeline.SLASH_LENGTH_MS, start),
+            delta,
         )
-        assertTrue(mid > 1f, "expected an overshoot, was $mid")
-        assertTrue(mid < 1.15f, "overshoot must stay subtle, was $mid")
+        assertTrue(MainSplashTimeline.SLASH_B_START_MS > MainSplashTimeline.SLASH_A_START_MS)
     }
 
     @Test
-    fun overlayIsOpaqueUntilTheClosingFade() {
-        assertEquals(1f, MainSplashTimeline.overlayAlpha(0f), delta)
-        assertEquals(1f, MainSplashTimeline.overlayAlpha(MainSplashTimeline.FADE_START_MS), delta)
-        assertEquals(0f, MainSplashTimeline.overlayAlpha(MainSplashTimeline.TOTAL_MS), delta)
-        assertEquals(0f, MainSplashTimeline.overlayAlpha(MainSplashTimeline.TOTAL_MS * 2f), delta)
-    }
-
-    @Test
-    fun ringsAreStaggeredAndReachTheEnd() {
+    fun ringsLoopAndAreStaggered() {
+        val period = MainSplashTimeline.RING_PERIOD_MS
         val step = MainSplashTimeline.RING_STEP_MS
-        val start = MainSplashTimeline.RING_START_MS
-        val length = MainSplashTimeline.RING_LENGTH_MS
 
-        assertEquals(0f, MainSplashTimeline.ringProgress(start, 0f), delta)
-        assertEquals(0f, MainSplashTimeline.ringProgress(start, step), delta)
+        // The first ring is alive from the first frame; later rings wait for their turn.
+        assertEquals(0f, MainSplashTimeline.ringProgress(0f, 0), delta)
+        assertTrue(MainSplashTimeline.ringProgress(step / 2f, 0) > 0f)
+        assertEquals(0f, MainSplashTimeline.ringProgress(step / 2f, 1), delta)
+        assertEquals(0f, MainSplashTimeline.ringProgress(step, 2), delta)
 
-        // Halfway through the second ring's lead-in the first ring is already expanding.
-        assertTrue(MainSplashTimeline.ringProgress(start + step, 0f) > 0f)
-        assertEquals(0f, MainSplashTimeline.ringProgress(start + step, step), delta)
-
-        assertEquals(1f, MainSplashTimeline.ringProgress(start + length, 0f), delta)
-        assertEquals(1f, MainSplashTimeline.ringProgress(start + step + length, step), delta)
-    }
-
-    @Test
-    fun everyWindowFitsInsideTheTotalLength() {
-        val ends = listOf(
-            MainSplashTimeline.TILE_END_MS,
-            MainSplashTimeline.R_END_MS,
-            MainSplashTimeline.X_END_MS,
-            MainSplashTimeline.GLOW_END_MS,
-            MainSplashTimeline.SWEEP_END_MS,
-            MainSplashTimeline.WORD_END_MS,
-            MainSplashTimeline.TAGLINE_END_MS,
-            MainSplashTimeline.BAR_END_MS,
-            MainSplashTimeline.FADE_END_MS,
-            MainSplashTimeline.RING_START_MS + MainSplashTimeline.RING_STEP_MS + MainSplashTimeline.RING_LENGTH_MS,
+        // Each ring repeats with the same period.
+        assertEquals(
+            MainSplashTimeline.ringProgress(500f, 0),
+            MainSplashTimeline.ringProgress(500f + period, 0),
+            eased,
         )
-        ends.forEach { assertTrue(it <= MainSplashTimeline.TOTAL_MS, "window ends at $it") }
-        listOf(
-            MainSplashTimeline.TILE_START_MS to MainSplashTimeline.TILE_END_MS,
-            MainSplashTimeline.R_START_MS to MainSplashTimeline.R_END_MS,
-            MainSplashTimeline.X_START_MS to MainSplashTimeline.X_END_MS,
-            MainSplashTimeline.TAGLINE_START_MS to MainSplashTimeline.TAGLINE_END_MS,
-        ).forEach { (start, end) -> assertTrue(start < end, "window $start..$end") }
-    }
+        assertEquals(
+            MainSplashTimeline.ringProgress(step + 500f, 1),
+            MainSplashTimeline.ringProgress(500f, 0),
+            eased,
+        )
 
-    @Test
-    fun taglineRidesInOnTheNameAndSettlesBeforeTheFade() {
-        // Hidden while the tile and letters are still being drawn.
-        assertEquals(0f, MainSplashTimeline.taglineAlpha(0f), delta)
-        assertEquals(0f, MainSplashTimeline.taglineAlpha(MainSplashTimeline.TAGLINE_START_MS), delta)
-        // Starts after the name's own window opened, so the two read as one line of copy.
-        assertTrue(MainSplashTimeline.TAGLINE_START_MS > MainSplashTimeline.WORD_START_MS)
-        assertEquals(1f, MainSplashTimeline.taglineAlpha(MainSplashTimeline.TAGLINE_END_MS), delta)
-        // Fully readable before the overlay starts fading away.
-        assertTrue(MainSplashTimeline.TAGLINE_END_MS < MainSplashTimeline.FADE_START_MS)
+        assertEquals(0.7f, MainSplashTimeline.ringScale(0f), delta)
+        assertEquals(2.4f, MainSplashTimeline.ringScale(1f), delta)
+        assertEquals(0.7f, MainSplashTimeline.ringAlpha(0f), delta)
+        assertEquals(0f, MainSplashTimeline.ringAlpha(1f), delta)
     }
 
     @Test
     fun nameTrackingTightensAsItLands() {
-        val wide = MainSplashTimeline.nameLetterSpacingSp(0f)
-        val settled = MainSplashTimeline.nameLetterSpacingSp(1f)
-        assertEquals(9f, wide, delta)
-        assertEquals(4f, settled, delta)
+        val wide = MainSplashTimeline.brandLetterSpacingEm(0f)
+        val settled = MainSplashTimeline.brandLetterSpacingEm(1f)
+        assertEquals(0.8f, wide, delta)
+        assertEquals(0.38f, settled, delta)
         assertTrue(
-            MainSplashTimeline.nameLetterSpacingSp(0.5f) in settled..wide,
+            MainSplashTimeline.brandLetterSpacingEm(0.5f) in settled..wide,
             "tracking must tighten monotonically",
         )
     }
 
     @Test
-    fun finishFlagFollowsTheTotalLength() {
+    fun taglineFollowsTheNameAndSettlesBeforeTheExit() {
+        assertEquals(0f, MainSplashTimeline.taglineProgress(0f), delta)
+        assertEquals(
+            0f, MainSplashTimeline.taglineProgress(MainSplashTimeline.TAGLINE_START_MS), delta
+        )
+        assertTrue(MainSplashTimeline.TAGLINE_START_MS > MainSplashTimeline.BRAND_START_MS)
+        assertEquals(
+            1f, MainSplashTimeline.taglineProgress(MainSplashTimeline.TAGLINE_END_MS), delta
+        )
+        assertTrue(MainSplashTimeline.TAGLINE_END_MS < MainSplashTimeline.OUT_START_MS)
+    }
+
+    @Test
+    fun loadingLineIsFullBeforeTheExit() {
+        assertEquals(0f, MainSplashTimeline.barProgress(MainSplashTimeline.BAR_START_MS), delta)
+        assertEquals(1f, MainSplashTimeline.barProgress(MainSplashTimeline.BAR_END_MS), delta)
+        assertTrue(MainSplashTimeline.BAR_END_MS <= MainSplashTimeline.OUT_START_MS)
+    }
+
+    @Test
+    fun overlayIsUntouchedUntilItLeaves() {
+        val start = MainSplashTimeline.OUT_START_MS
+        assertEquals(1f, MainSplashTimeline.overlayAlpha(0f), delta)
+        assertEquals(1f, MainSplashTimeline.overlayAlpha(start), delta)
+        assertEquals(1f, MainSplashTimeline.overlayScale(start), delta)
+        assertEquals(0f, MainSplashTimeline.overlayBlurDp(start), delta)
+
+        val end = MainSplashTimeline.TOTAL_MS
+        assertEquals(0f, MainSplashTimeline.overlayAlpha(end), delta)
+        assertEquals(1.15f, MainSplashTimeline.overlayScale(end), delta)
+        assertEquals(8f, MainSplashTimeline.overlayBlurDp(end), delta)
+        assertEquals(0f, MainSplashTimeline.overlayAlpha(end * 2f), delta)
+    }
+
+    @Test
+    fun everyWindowEndsBeforeTheExit() {
+        listOf(
+            MainSplashTimeline.LOGO_END_MS,
+            MainSplashTimeline.SLASH_A_START_MS + MainSplashTimeline.SLASH_LENGTH_MS,
+            MainSplashTimeline.SLASH_B_START_MS + MainSplashTimeline.SLASH_LENGTH_MS,
+            MainSplashTimeline.SWEEP_END_MS,
+            MainSplashTimeline.BRAND_END_MS,
+            MainSplashTimeline.TAGLINE_END_MS,
+            MainSplashTimeline.BAR_END_MS,
+        ).forEach { assertTrue(it <= MainSplashTimeline.OUT_START_MS, "window ends at $it") }
+        assertTrue(MainSplashTimeline.OUT_START_MS < MainSplashTimeline.OUT_END_MS)
+    }
+
+    @Test
+    fun homeScreenScalesInFromJustBelowFullSize() {
+        assertEquals(MainSplashTimeline.REVEAL_START_SCALE, MainSplashTimeline.revealScale(0f), delta)
+        assertEquals(1f, MainSplashTimeline.revealScale(1f), delta)
+        assertEquals(1f, MainSplashTimeline.revealScale(4f), delta)
+    }
+
+    @Test
+    fun leavingAndFinishFlagsFollowTheExitWindow() {
+        assertFalse(MainSplashTimeline.isLeaving(MainSplashTimeline.OUT_START_MS - 1f))
+        assertTrue(MainSplashTimeline.isLeaving(MainSplashTimeline.OUT_START_MS))
         assertFalse(MainSplashTimeline.isFinished(MainSplashTimeline.TOTAL_MS - 1f))
         assertTrue(MainSplashTimeline.isFinished(MainSplashTimeline.TOTAL_MS))
     }

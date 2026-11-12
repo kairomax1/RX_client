@@ -8,6 +8,8 @@ import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -16,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.AngApplication
@@ -124,20 +127,48 @@ class MainActivity : HelperBaseComponentActivity() {
         var askLanguage by rememberSaveable {
             mutableStateOf(LanguageOnboarding.shouldAsk(context))
         }
+        // The home screen stays hidden under the intro and scales in when the intro starts leaving.
+        // Without an intro the target is already 1, so nothing animates.
+        var revealContent by rememberSaveable { mutableStateOf(!showSplash) }
+        val reveal by animateFloatAsState(
+            targetValue = if (revealContent) 1f else 0f,
+            animationSpec = tween(
+                durationMillis = MainSplashTimeline.REVEAL_MS,
+                delayMillis = MainSplashTimeline.REVEAL_DELAY_MS,
+            ),
+            label = "mainReveal",
+        )
         Box(modifier = Modifier.fillMaxSize()) {
-            if (askLanguage) {
-                LanguageOnboardingScreen(
-                    onSelect = { code ->
-                        askLanguage = false
-                        LanguageOnboarding.markChosen()
-                        AppLocaleManager.setApplicationLanguage(code)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = MainSplashTimeline.revealScale(reveal)
+                        alpha = reveal
+                        scaleX = scale
+                        scaleY = scale
                     }
-                )
-            } else {
-                MainContent()
+            ) {
+                if (askLanguage) {
+                    LanguageOnboardingScreen(
+                        onSelect = { code ->
+                            askLanguage = false
+                            LanguageOnboarding.markChosen()
+                            AppLocaleManager.setApplicationLanguage(code)
+                        }
+                    )
+                } else {
+                    MainContent()
+                }
             }
             if (showSplash) {
-                MainSplashOverlay(onFinished = { showSplash = false })
+                MainSplashOverlay(
+                    onLeaving = { revealContent = true },
+                    onFinished = {
+                        revealContent = true
+                        showSplash = false
+                    },
+                )
             }
         }
     }
