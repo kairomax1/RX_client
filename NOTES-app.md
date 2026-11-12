@@ -85,3 +85,10 @@ Working branch: `arena/d739235f-rx-client` (App repo: `kairomax1/RX_client`).
 - Main header is pinned left-to-right in every locale; group tabs sit in a 22 dp rounded bar.
 - The HTML the user pasted was cut off after `.tabs`; server cards and the bottom bar were not
   part of it and are unchanged apart from the palette.
+
+## "Have to uninstall on every build" (fixed)
+- Cause: releases carried `RXVPN_*_test-debug_*.apk`, signed with the CI runner's throwaway debug
+  key, which is different on every run. Installing it once broke every later update.
+- Now: that file is no longer shipped, CI signs debug builds with the release key too, and
+  `build.yml` fails if any APK of a run has another certificate. Do not re-add a differently
+  signed file to a release.
