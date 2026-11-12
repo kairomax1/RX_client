@@ -1,5 +1,28 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import com.v2ray.ang.R
+import com.v2ray.ang.ui.compose.RxDropdownMenu
+import com.v2ray.ang.ui.compose.RxMenuItem
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -54,7 +77,9 @@ import kotlinx.coroutines.flow.StateFlow
 private val TAB_BAR_PADDING = 4.dp
 private val TAB_BAR_SHAPE = RoundedCornerShape(22.dp)
 private val TAB_SPACING = 2.dp
-private val TAB_HEIGHT = 34.dp
+private val TAB_HEIGHT = 40.dp
+private val TAB_SHAPE = RoundedCornerShape(18.dp)
+private const val LONG_PRESS_FILL_MS = 700
 private val SELECTED_TAB_MARGIN = 12.dp
 
 /**
@@ -71,8 +96,17 @@ fun GroupTabBar(
     selectedTabIndex: Int,
     mainViewModel: MainViewModel,
     onTabClick: (Int) -> Unit,
+    onUpdateSubscription: (String) -> Unit,
+    onPingGroup: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Groups fed by a subscription link get the "update" entry in their long-press menu.
+    val subscriptionGroupIds = remember(groups) {
+        mainViewModel.getSubscriptions()
+            .filter { it.subscription.url.isNotBlank() }
+            .map { it.guid }
+            .toSet()
+    }
     val selectedIndex = selectedTabIndex.coerceIn(0, groups.lastIndex)
     val colors = MaterialTheme.colorScheme
     // The plain surface color equals the screen background in dark mode, so the bar needs its own tone there.
@@ -105,7 +139,10 @@ fun GroupTabBar(
                                 group = group,
                                 selected = index == selectedIndex,
                                 serverFlow = serverFlow,
-                                onClick = { onTabClick(index) }
+                                hasSubscriptionUrl = group.id in subscriptionGroupIds,
+                                onClick = { onTabClick(index) },
+                                onUpdateSubscription = { onUpdateSubscription(group.id) },
+                                onPingGroup = { onPingGroup(group.id) },
                             )
                         }
                     }
@@ -158,13 +195,21 @@ private fun EqualOrNaturalTabsLayout(
     }
 }
 
+/**
+ * One tab. A tap selects it. Holding it fills it with a soft white light that grows stronger; when
+ * the light is full (about 0.7 s) the phone ticks and a small menu opens for that group only.
+ * Letting go earlier cancels and counts as a normal tap.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupTabItem(
     group: GroupMapItem,
     selected: Boolean,
     serverFlow: StateFlow<List<ServersCache>>,
-    onClick: () -> Unit
+    hasSubscriptionUrl: Boolean,
+    onClick: () -> Unit,
+    onUpdateSubscription: () -> Unit,
+    onPingGroup: () -> Unit,
 ) {
     val servers by serverFlow.collectAsStateWithLifecycle()
     // The default group (empty id) never showed a count.
@@ -173,6 +218,12 @@ private fun GroupTabItem(
     val bringIntoView = remember { BringIntoViewRequester() }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val marginPx = with(LocalDensity.current) { SELECTED_TAB_MARGIN.toPx() }
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val fill = remember { Animatable(0f) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val currentOnClick by rememberUpdatedState(onClick)
+    val longPressLabel = stringResource(R.string.tab_menu_open)
 
     // Bring the tab in with some room around it so the pill never ends up flush against the bar's
     // rounded edge; at the first and last tab the scroll stops at the bar's own inner padding.
@@ -183,45 +234,123 @@ private fun GroupTabItem(
             )
         }
     }
+    LaunchedEffect(menuOpen) {
+        if (!menuOpen && fill.value > 0f) fill.animateTo(0f, tween(260))
+    }
 
-    // One selectable node: name, count and selected state are announced together.
-    Row(
-        modifier = Modifier
-            .bringIntoViewRequester(bringIntoView)
-            .onSizeChanged { size = it }
-            .clip(CircleShape)
-            .background(if (selected) colors.primary.copy(alpha = 0.12f) else Color.Transparent)
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = group.remarks,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            color = if (selected) colors.primary else colors.onSurfaceVariant,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis
-        )
-        if (count > 0) {
-            Spacer(Modifier.width(3.dp))
-            Box(
-                modifier = Modifier
-                    .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
-                    .clip(CircleShape)
-                    .background(if (selected) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.55f))
-                    .padding(horizontal = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = count.toString(),
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp),
-                    color = if (selected) colors.onPrimary else colors.surface,
-                    maxLines = 1
+    val selectedBrush = Brush.verticalGradient(
+        listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.06f))
+    )
+
+    Box {
+        // One selectable node: name, count and selected state are announced together.
+        Row(
+            modifier = Modifier
+                .bringIntoViewRequester(bringIntoView)
+                .onSizeChanged { size = it }
+                .clip(TAB_SHAPE)
+                .then(
+                    if (selected) {
+                        Modifier
+                            .background(selectedBrush)
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), TAB_SHAPE)
+                    } else {
+                        Modifier
+                    }
+                )
+                .drawBehind {
+                    val value = fill.value
+                    if (value > 0f) {
+                        // Grows from the start edge and brightens as it goes.
+                        drawRect(
+                            color = Color.White.copy(alpha = 0.10f + 0.34f * value),
+                            size = Size(this.size.width * value, this.size.height),
+                        )
+                    }
+                }
+                .semantics {
+                    this.selected = selected
+                    role = Role.Tab
+                    onClick { currentOnClick(); true }
+                    onLongClick(label = longPressLabel) { menuOpen = true; true }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            var fired = false
+                            val job = scope.launch {
+                                fill.snapTo(0f)
+                                fill.animateTo(1f, tween(LONG_PRESS_FILL_MS, easing = LinearEasing))
+                                fired = true
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                menuOpen = true
+                            }
+                            val released = tryAwaitRelease()
+                            if (!fired) {
+                                job.cancel()
+                                scope.launch { fill.animateTo(0f, tween(160)) }
+                                if (released) currentOnClick()
+                            }
+                        }
+                    )
+                }
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = group.remarks,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = if (selected) colors.onSurface else colors.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (count > 0) {
+                Spacer(Modifier.width(5.dp))
+                Box(
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 18.dp, minHeight = 16.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (selected) colors.onSurface.copy(alpha = 0.92f)
+                            else colors.onSurfaceVariant.copy(alpha = 0.28f)
+                        )
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp),
+                        color = if (selected) colors.surface else colors.onSurface,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+        RxDropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            var index = 0
+            if (hasSubscriptionUrl) {
+                RxMenuItem(
+                    index = index++,
+                    text = stringResource(R.string.tab_menu_update_subscription),
+                    iconRes = R.drawable.ic_refresh_24dp,
+                    onClick = {
+                        menuOpen = false
+                        onUpdateSubscription()
+                    },
                 )
             }
+            RxMenuItem(
+                index = index,
+                text = stringResource(R.string.tab_menu_ping_all),
+                iconRes = R.drawable.ic_ping_24dp,
+                onClick = {
+                    menuOpen = false
+                    onPingGroup()
+                },
+            )
         }
     }
 }

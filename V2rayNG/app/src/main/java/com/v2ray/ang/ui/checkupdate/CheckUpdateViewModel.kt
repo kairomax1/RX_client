@@ -3,6 +3,11 @@ package com.v2ray.ang.ui.checkupdate
 import android.app.Application
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import androidx.lifecycle.viewModelScope
+import com.v2ray.ang.handler.UpdateNotifier
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import java.io.File
 import com.v2ray.ang.dto.CheckUpdateResult
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.UpdateCheckerManager
@@ -30,14 +35,27 @@ class CheckUpdateViewModel(application: Application) : BaseViewModel(application
         MmkvManager.encodeSettings(AppConfig.PREF_CHECK_UPDATE_PRE_RELEASE, enabled)
     }
 
-    fun checkForUpdates() {
+    private val _downloading = MutableStateFlow(false)
+    val downloading: StateFlow<Boolean> = _downloading.asStateFlow()
+
+    /** A downloaded APK waiting to be handed to the system installer by the screen. */
+    private val _installFile = MutableStateFlow<File?>(null)
+    val installFile: StateFlow<File?> = _installFile.asStateFlow()
+
+    /**
+     * @param autoInstall opened from the update notification: skip the dialog and go straight to
+     * download and install.
+     */
+    fun checkForUpdates(autoInstall: Boolean = false) {
         launchLoading {
             try {
                 val result = UpdateCheckerManager.checkForUpdate(_checkPreRelease.value)
                 if (result.hasUpdate) {
+                    if (!result.isPreRelease) result.latestVersion?.let { UpdateNotifier.markPending(it) }
                     _updateResult.value = result
-                    _showUpdateDialog.value = true
+                    if (autoInstall) downloadAndInstall(result) else _showUpdateDialog.value = true
                 } else {
+                    UpdateNotifier.clearPending()
                     toastSuccess(R.string.update_already_latest_version)
                 }
             } catch (e: Exception) {
@@ -45,6 +63,30 @@ class CheckUpdateViewModel(application: Application) : BaseViewModel(application
                 toastError(R.string.toast_failure)
             }
         }
+    }
+
+    fun downloadAndInstall(result: CheckUpdateResult) {
+        val version = result.latestVersion
+        val url = result.downloadUrl
+        if (version.isNullOrEmpty() || url.isNullOrEmpty() || _downloading.value) return
+        _downloading.value = true
+        viewModelScope.launch {
+            try {
+                val apk = UpdateNotifier.downloadApk(getApplication<Application>(), version, url)
+                if (apk != null) _installFile.value = apk else toastError(R.string.update_download_failed)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Failed to download the update", e)
+                toastError(R.string.update_download_failed)
+            } finally {
+                _downloading.value = false
+            }
+        }
+    }
+
+    fun onInstallHandled() {
+        _installFile.value = null
     }
 
     fun dismissUpdateDialog() {

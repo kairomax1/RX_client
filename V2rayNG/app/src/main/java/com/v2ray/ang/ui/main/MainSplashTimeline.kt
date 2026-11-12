@@ -33,8 +33,8 @@ internal object MainSplashTimeline {
     const val RING_COUNT = 3
 
     /** The intro starts leaving here: it fades, grows and blurs for [OUT_END_MS] - [OUT_START_MS]. */
-    const val OUT_START_MS = 3000f
-    const val OUT_END_MS = 3800f
+    const val OUT_START_MS = 3300f
+    const val OUT_END_MS = 4100f
 
     /** Whole overlay, including its exit. Nothing is drawn by the overlay after it. */
     const val TOTAL_MS = OUT_END_MS

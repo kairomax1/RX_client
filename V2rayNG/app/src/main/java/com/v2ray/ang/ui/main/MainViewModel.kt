@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.UpdateNotifier
 import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.GroupMapItem
 import com.v2ray.ang.dto.LocateTarget
@@ -108,6 +109,10 @@ class MainViewModel(
     private val pendingTestResults = linkedMapOf<String, Long>()
 
     private val testRequests = MainTestRequests()
+    private var removeInvalidAfterRequestId: String? = null
+
+    /** True while a newer official release is known; drives the red dot on the menu button. */
+    val updatePending: StateFlow<Boolean> = UpdateNotifier.pending
     private var bulkTestJob: Job? = null
 
     private val initialPageReady = CompletableDeferred<Unit>()
@@ -129,26 +134,40 @@ class MainViewModel(
 
     private fun handleServiceEvent(event: MainServiceEvent) {
         when (event) {
-            MainServiceEvent.StateRunning -> updateRunningState(true, clearTestingText = false)
-            MainServiceEvent.StateNotRunning -> updateRunningState(false, clearTestingText = false)
+            MainServiceEvent.StateRunning -> {
+                updateRunningState(true, clearTestingText = false)
+                // The service was already up (app reopened): nothing to verify again.
+                if (uiState.value.connectPhase == ConnectPhase.Idle) {
+                    _uiState.update { it.copy(connectPhase = ConnectPhase.Connected) }
+                }
+            }
+
+            MainServiceEvent.StateNotRunning -> {
+                updateRunningState(false, clearTestingText = false)
+                onServiceStopped()
+            }
+
+            // No toast on connect or disconnect: the connect button itself carries the state.
             MainServiceEvent.StateStartSuccess -> {
-                toastSuccess(R.string.toast_services_success)
                 updateRunningState(true)
+                beginConnectionVerification()
             }
 
             is MainServiceEvent.StateStartFailure -> {
-                if (!event.message.isNullOrBlank()) {
-                    toastError(event.message)
-                } else {
-                    toastError(R.string.toast_services_failure)
-                }
+                LogUtil.w(AppConfig.TAG, "Main: service start failed: ${event.message.orEmpty()}")
                 updateRunningState(false)
+                onConnectFailed()
             }
 
-            MainServiceEvent.StateStopSuccess -> updateRunningState(false)
+            MainServiceEvent.StateStopSuccess -> {
+                updateRunningState(false)
+                onServiceStopped()
+            }
+
             is MainServiceEvent.MeasureDelayResult -> {
                 if (!uiState.value.isRunning || !testRequests.completeCurrent(event.requestId)) return
                 _uiState.update { it.copy(isTesting = testRequests.isTesting, status = MainStatus.ConnectionTest(event.result)) }
+                onCurrentDelayMeasured(event.result.delayMillis)
             }
 
             is MainServiceEvent.MeasureConfigSuccess -> {
@@ -220,6 +239,99 @@ class MainViewModel(
         }
     }
 
+    // ---------- Connection phase ----------
+    private var verifyAttempts = 0
+    private var connectWatchdog: Job? = null
+    private var failureResetJob: Job? = null
+
+    /** The user asked to connect; the button shows "connecting" until the tunnel is proven. */
+    fun onConnectRequested() {
+        failureResetJob?.cancel()
+        verifyAttempts = 0
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null) }
+        connectWatchdog?.cancel()
+        connectWatchdog = viewModelScope.launch {
+            delay(CONNECT_TIMEOUT_MS)
+            if (uiState.value.connectPhase == ConnectPhase.Connecting) {
+                val wasRunning = uiState.value.isRunning
+                onConnectFailed()
+                if (wasRunning) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            }
+        }
+    }
+
+    /** The core is up; a real request through it decides whether the connection counts. */
+    private fun beginConnectionVerification() {
+        if (uiState.value.connectPhase != ConnectPhase.Connecting) {
+            // Started from outside the screen (tile, widget, restart): still measure once.
+            _uiState.update { it.copy(connectPhase = ConnectPhase.Connected) }
+        }
+        viewModelScope.launch {
+            // The tunnel needs a moment after the core reports success.
+            delay(VERIFY_SETTLE_MS)
+            if (uiState.value.isRunning) testCurrentServerRealPing()
+        }
+    }
+
+    private fun onCurrentDelayMeasured(delayMillis: Long) {
+        val phase = uiState.value.connectPhase
+        if (phase != ConnectPhase.Connecting) {
+            _uiState.update { it.copy(pingMillis = delayMillis) }
+            return
+        }
+        if (delayMillis >= 0) {
+            connectWatchdog?.cancel()
+            _uiState.update { it.copy(connectPhase = ConnectPhase.Connected, pingMillis = delayMillis) }
+            return
+        }
+        // One failed probe can be a hiccup of the test address; a second one means no traffic flows.
+        verifyAttempts++
+        if (verifyAttempts < VERIFY_MAX_ATTEMPTS) {
+            viewModelScope.launch {
+                delay(VERIFY_RETRY_MS)
+                if (uiState.value.isRunning && uiState.value.connectPhase == ConnectPhase.Connecting) {
+                    testCurrentServerRealPing()
+                }
+            }
+        } else {
+            onConnectFailed()
+            dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+        }
+    }
+
+    fun onConnectCancelled() {
+        connectWatchdog?.cancel()
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null) }
+    }
+
+    /** Red button, shake, vibration and the floating message; then back to the idle button. */
+    fun onConnectFailed() {
+        connectWatchdog?.cancel()
+        _uiState.update {
+            it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, failureTick = it.failureTick + 1)
+        }
+        failureResetJob?.cancel()
+        failureResetJob = viewModelScope.launch {
+            delay(FAILURE_FEEDBACK_MS)
+            _uiState.update {
+                if (it.connectPhase == ConnectPhase.Failed) it.copy(connectPhase = ConnectPhase.Idle) else it
+            }
+        }
+    }
+
+    private fun onServiceStopped() {
+        when (uiState.value.connectPhase) {
+            // A stop that follows a failed attempt must not wipe the failure feedback early.
+            ConnectPhase.Failed -> Unit
+            // The service died before the connection was ever proven.
+            ConnectPhase.Connecting -> if (verifyAttempts > 0) onConnectFailed()
+            else -> {
+                connectWatchdog?.cancel()
+                _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null) }
+            }
+        }
+    }
+
     internal fun formatStatus(status: MainStatus): String = when (status) {
         MainStatus.Disconnected -> dataSource.getString(R.string.connection_not_connected)
         MainStatus.Connected -> dataSource.getString(R.string.connection_connected)
@@ -280,6 +392,9 @@ class MainViewModel(
             MainAction.RefreshGroups -> setupGroupTab(forceRefresh = true)
             MainAction.TestAllServers -> testAllRealPing(true)
             MainAction.TestRealAllServers -> testAllRealPing()
+            is MainAction.TestGroupRealPing -> testAllRealPing(groupId = action.groupId)
+            MainAction.PingThenRemoveInvalid -> pingThenRemoveInvalid()
+            is MainAction.CopySelected -> copySelected(action.guids)
             MainAction.CancelTesting -> cancelAllPing()
             MainAction.RemoveAllServers -> removeAllServerAsync()
             MainAction.RemoveDuplicateServers -> removeDuplicateServerAsync()
@@ -844,10 +959,37 @@ class MainViewModel(
         }
     }
 
-    fun testAllRealPing(onlyTcp: Boolean = false) {
+    /** Pings the whole current group, then deletes every config that failed the test. */
+    private fun pingThenRemoveInvalid() {
+        testAllRealPing()
+        removeInvalidAfterRequestId = testRequests.bulk?.id
+    }
+
+    private fun copySelected(guids: List<String>) {
+        if (guids.isEmpty()) return
+        launchLoading {
+            withContext(ioDispatcher) {
+                try {
+                    val ret = dataSource.shareNonCustomConfigsToClipboard(guids)
+                    if (ret > 0) {
+                        toast(dataSource.getString(R.string.title_export_config_count, ret))
+                    } else {
+                        toastError(R.string.toast_failure)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Copy selected failed", e)
+                    toastError(R.string.toast_failure)
+                }
+            }
+        }
+    }
+
+    fun testAllRealPing(onlyTcp: Boolean = false, groupId: String = uiState.value.selectedGroupId) {
         cancelAllPing()
-        val groupId = uiState.value.selectedGroupId
-        val servers = currentServers()
+        removeInvalidAfterRequestId = null
+        val servers = mutableServerGroupState(groupId).value.servers
         if (servers.isEmpty()) {
             return
         }
@@ -910,6 +1052,12 @@ class MainViewModel(
     private fun onTestsFinished(requestId: String) {
         if (testRequests.completeBulk(requestId) == null) return
         resetTestStatus()
+        if (removeInvalidAfterRequestId == requestId) {
+            // The removal reloads the groups itself.
+            removeInvalidAfterRequestId = null
+            removeInvalidServerAsync()
+            return
+        }
         viewModelScope.launch(ioDispatcher) {
             cacheMutex.withLock { groupDataCache.clear() }
             reloadAllGroups(_uiState.value.groups.map { it.id })
@@ -974,5 +1122,10 @@ class MainViewModel(
 
     private companion object {
         const val TEST_RESULT_FLUSH_INTERVAL_MS = 500L
+        const val CONNECT_TIMEOUT_MS = 25_000L
+        const val VERIFY_SETTLE_MS = 400L
+        const val VERIFY_RETRY_MS = 900L
+        const val VERIFY_MAX_ATTEMPTS = 2
+        const val FAILURE_FEEDBACK_MS = 3_800L
     }
 }

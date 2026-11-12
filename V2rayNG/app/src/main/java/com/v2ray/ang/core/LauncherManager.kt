@@ -36,18 +36,24 @@ object LauncherManager {
         return true
     }
 
-    fun startService(context: Context, guid: String? = null) {
+    /**
+     * @param quiet the caller shows the failure itself (the main screen's connect button), so no toast.
+     * @return false when the start was rejected before the service was launched.
+     */
+    fun startService(context: Context, guid: String? = null, quiet: Boolean = false): Boolean {
         LogUtil.i(AppConfig.TAG, "LauncherManager: startService from ${context::class.java.simpleName}")
 
         if (guid != null) {
             MmkvManager.setSelectServer(guid)
         }
 
-        try {
+        return try {
             startContextService(context)
+            true
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "LauncherManager: ${e.message}", e)
-            context.toast(e.message ?: e.javaClass.simpleName)
+            if (!quiet) context.toast(e.message ?: e.javaClass.simpleName)
+            false
         }
     }
 
@@ -100,10 +106,9 @@ object LauncherManager {
             Utils.setClipboard(context, context.getString(R.string.toast_allow_insecure_deprecated))
         }
 
+        // Connecting is silent; only the open-proxy warning remains because it is a safety notice.
         if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PROXY_SHARING)) {
             context.toast(R.string.toast_warning_pref_proxysharing_short)
-        } else {
-            context.toast(R.string.toast_services_start)
         }
 
         val isRootMode = SettingsManager.isRootMode()

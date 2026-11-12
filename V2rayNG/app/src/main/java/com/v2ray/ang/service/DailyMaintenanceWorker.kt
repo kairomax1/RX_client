@@ -25,6 +25,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.handler.UpdateCheckerManager
+import com.v2ray.ang.handler.UpdateNotifier
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.Dispatchers
@@ -80,86 +81,20 @@ class DailyMaintenanceWorker(
     private suspend fun updateEngineIfAvailable() {
         if (!isOnline()) return
 
+        // Official releases only; pre-releases and drafts never trigger the notice.
         val result = UpdateCheckerManager.checkForUpdate(includePreRelease = false)
         val url = result.downloadUrl
         val version = result.latestVersion
-        if (!result.hasUpdate || url.isNullOrEmpty() || version.isNullOrEmpty()) return
-
-        val updateDir = File(applicationContext.cacheDir, "update").apply { mkdirs() }
-        val target = File(updateDir, "RX-VPN-$version.apk")
-        // Keep a download from an earlier pass instead of fetching the same megabytes again.
-        if (target.length() <= 0) {
-            val downloaded = HttpUtil.downloadToFile(
-                UrlContentRequest(url = url, timeout = 60_000),
-                target
-            )
-            if (!downloaded) {
-                target.delete()
-                LogUtil.w(AppConfig.TAG, "Daily maintenance: update download failed")
-                return
-            }
-        }
-
-        // Older builds accumulate in the cache; keep only the one that is being offered.
-        updateDir.listFiles()
-            ?.filter { it != target }
-            ?.forEach { it.delete() }
-
-        notifyUpdateReady(target, version)
-    }
-
-    private fun notifyUpdateReady(apk: File, version: String) {
-        val context = applicationContext
-        val manager = NotificationManagerCompat.from(context)
-        if (!manager.areNotificationsEnabled()) {
-            LogUtil.i(AppConfig.TAG, "Daily maintenance: notifications are off, update stays cached")
+        if (!result.hasUpdate || url.isNullOrEmpty() || version.isNullOrEmpty()) {
+            UpdateNotifier.onCheckResult(applicationContext, result)
             return
         }
 
-        ensureChannel(context)
-
-        val uri = FileProvider.getUriForFile(
-            context,
-            BuildConfig.APPLICATION_ID + ".cache",
-            apk
-        )
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        val pending = PendingIntent.getActivity(
-            context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(context.getString(R.string.daily_update_title))
-            .setContentText(context.getString(R.string.daily_update_text, version))
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .build()
-
-        try {
-            manager.notify(NOTIFICATION_ID, notification)
-        } catch (e: SecurityException) {
-            LogUtil.w(AppConfig.TAG, "Daily maintenance: could not post the update notification", e)
+        // Fetch the APK ahead of time so a tap on the notification can go straight to the installer.
+        if (UpdateNotifier.downloadApk(applicationContext, version, url) == null) {
+            LogUtil.w(AppConfig.TAG, "Daily maintenance: update download failed; it is fetched on tap instead")
         }
-    }
-
-    private fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val system = context.getSystemService(NotificationManager::class.java) ?: return
-        if (system.getNotificationChannel(CHANNEL_ID) != null) return
-        system.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.notification_channel_daily_maintenance),
-                NotificationManager.IMPORTANCE_DEFAULT
-            )
-        )
+        UpdateNotifier.onCheckResult(applicationContext, result)
     }
 
     // -------------------------------------------------------------------------
@@ -223,8 +158,4 @@ class DailyMaintenanceWorker(
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    private companion object {
-        const val CHANNEL_ID = "daily_maintenance_channel"
-        const val NOTIFICATION_ID = 21
-    }
 }

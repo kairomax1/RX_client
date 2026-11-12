@@ -1,5 +1,11 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -100,7 +106,7 @@ internal fun SubscriptionInfoCard(
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = CARD_ALPHA),
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
-        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 10.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 10.dp, top = 8.dp, bottom = 10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = model.title ?: fallbackTitle,
@@ -110,13 +116,10 @@ internal fun SubscriptionInfoCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                model.supportUrl?.let { url ->
+                // Only a Telegram link earns a button here; other support addresses stay out.
+                model.supportUrl?.takeIf { SubscriptionInfoParser.isTelegramLink(it) }?.let { url ->
                     CardIconButton(
-                        iconRes = if (SubscriptionInfoParser.isTelegramLink(url)) {
-                            R.drawable.ic_telegram_24dp
-                        } else {
-                            R.drawable.ic_feedback_24dp
-                        },
+                        iconRes = R.drawable.ic_telegram_24dp,
                         contentDescription = stringResource(R.string.sub_info_open_support),
                         onClick = { onOpenLink(url) },
                     )
@@ -139,7 +142,7 @@ internal fun SubscriptionInfoCard(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(end = 8.dp)
+                    .padding(end = 6.dp, top = 6.dp)
                     .semantics(mergeDescendants = true) {}
             ) {
                 StatsRow(model)
@@ -161,10 +164,21 @@ internal fun SubscriptionInfoCard(
     }
 }
 
+/** Round button with its own disc, large enough to hit and spaced from its neighbours. */
 @Composable
 private fun CardIconButton(iconRes: Int, contentDescription: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(32.dp)) {
-        Icon(painterResource(iconRes), contentDescription, Modifier.size(20.dp))
+    val colors = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .padding(start = 10.dp)
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(colors.onSurface.copy(alpha = 0.07f))
+            .border(1.dp, colors.onSurface.copy(alpha = 0.10f), CircleShape)
+            .clickable(role = Role.Button, onClickLabel = contentDescription, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(iconRes), contentDescription, Modifier.size(21.dp), tint = colors.onSurface)
     }
 }
 

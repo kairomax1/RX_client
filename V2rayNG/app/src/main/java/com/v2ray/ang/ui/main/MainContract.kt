@@ -15,6 +15,12 @@ sealed interface MainStatus {
 }
 
 /**
+ * Where the connect button is in its life. [Connecting] lasts until a real request went through
+ * the tunnel, so "connected" on screen means traffic actually flows, not just that the core started.
+ */
+enum class ConnectPhase { Idle, Connecting, Connected, Failed }
+
+/**
  * Main UI state
  */
 data class MainUiState(
@@ -29,7 +35,12 @@ data class MainUiState(
     val doubleColumnDisplay: Boolean = false,
     val routingMode: PerAppRoutingMode = PerAppRoutingMode.ALL,
     val routedAppCount: Int = 0,
-    val shareQRCodeBitmap: android.graphics.Bitmap? = null
+    val shareQRCodeBitmap: android.graphics.Bitmap? = null,
+    val connectPhase: ConnectPhase = ConnectPhase.Idle,
+    /** Last measured latency of the active connection; null = none yet, negative = test failed. */
+    val pingMillis: Long? = null,
+    /** Bumped on every failed connection attempt so the UI can replay its failure feedback. */
+    val failureTick: Int = 0,
 )
 
 /**
@@ -50,6 +61,9 @@ sealed interface MainAction {
     data object UpdateSubscriptions : MainAction
     data class UpdateGroupSubscription(val groupId: String) : MainAction
     data object ExportAll : MainAction
+    data class TestGroupRealPing(val groupId: String) : MainAction
+    data object PingThenRemoveInvalid : MainAction
+    data class CopySelected(val guids: List<String>) : MainAction
 
     data object ImportQRcode : MainAction
     data object ImportClipboard : MainAction

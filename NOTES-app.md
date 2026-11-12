@@ -92,3 +92,40 @@ Working branch: `arena/d739235f-rx-client` (App repo: `kairomax1/RX_client`).
 - Now: that file is no longer shipped, CI signs debug builds with the release key too, and
   `build.yml` fails if any APK of a run has another certificate. Do not re-add a differently
   signed file to a release.
+
+
+## Build 1 of the 24-item batch (home screen, menus, update notice, About)
+
+Standing rule (item 19): **anything newly added to the app (button, menu, message, card, screen)
+gets its own animation.** Every such animation must go through `rememberAnimationsEnabled()` so the
+system "Remove animations" switch still gives a still screen.
+
+What changed and where:
+
+- Live wallpaper: `RxDustBackground` in `ui/compose/RxMotion.kt`, drawn behind the main screen.
+- Connection state lives in `ConnectPhase` (`MainContract.kt`). `Connecting` lasts until a real
+  delay test through the tunnel succeeds (`MainViewModel.beginConnectionVerification`). Two failed
+  probes, a start failure, or 25 s without a result count as failed: the service is stopped, the
+  connect button turns red and shakes, the phone buzzes, `ConnectFailureMessage` rises from the dock.
+  No toast is shown on connect or disconnect; `LauncherManager.startService(quiet = true)` is what
+  the main screen uses. The open-proxy warning toast is kept on purpose (safety notice).
+- The measured delay is `MainUiState.pingMillis`, shown on the ping button in the dock.
+- Menus use `RxDropdownMenu` / `RxMenuItem`. Three-dots menu: six entries
+  (`MainMoreMenuAction`). Plus menu: three entries. The manual "add ..." editors are no longer
+  reachable from the plus menu; editing an existing config still works.
+- "Delete failed configs" pings the current group first (`PingThenRemoveInvalid`), then removes.
+- Group tab long-press (0.7 s fill) opens a per-group menu: `MainGroupTab.kt`.
+- Grid button opens `MainQuickSheet` (subscriptions, per-app, routing, settings). The drawer keeps
+  update check, backup and About. Cloudflare and SpeedTest screens still exist but have no entry.
+- Settings: technical entries are hidden, not reset (list in `SettingsActivity.kt`'s comment).
+- Updates: `handler/UpdateNotifier.kt`. Official releases only. Checked on app open (at most every
+  6 h) and by the daily worker; red dot via `UpdateNotifier.pending`; the notification opens
+  `CheckUpdateActivity` with `EXTRA_AUTO_INSTALL`, which downloads the APK and opens the installer.
+- About: licences, translators, feedback, privacy and the package line are no longer shown
+  (user decision; GPL attribution stays reachable through the source repository link).
+- Logo: generated from `branding/rx-vpn-app-icon-silver.png` (launcher, adaptive foreground at 66 %
+  on black, themed monochrome layer, `ic_brand_logo` for intro, drawer and onboarding).
+- Strings added in this pass are translated for fa, ar, ru, zh, vi; `az` and `bn` carry the English
+  text and `bqi` the Persian text until someone translates them.
+
+Not run on a device: none of the above was seen on a phone or emulator.

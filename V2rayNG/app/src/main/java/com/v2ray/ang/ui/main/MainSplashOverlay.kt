@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import android.content.Context
 import android.provider.Settings
 import androidx.compose.foundation.Canvas
@@ -162,8 +164,6 @@ fun MainSplashOverlay(
     val overlayScale = MainSplashTimeline.overlayScale(elapsed)
     val overlayBlur = MainSplashTimeline.overlayBlurDp(elapsed)
 
-    val letterR = remember { rxLetterR() }
-    val letterX = remember { rxLetterX() }
     val density = LocalDensity.current
     val risePx = with(density) { 14.dp.toPx() }
     // Tracking adds a gap after the last letter too. The name is Latin, so that gap is always on
@@ -212,11 +212,14 @@ fun MainSplashOverlay(
                         }
                         .blur(logoBlur.dp, BlurredEdgeTreatment.Unbounded)
                         .clip(RoundedCornerShape(30.dp))
-                        .background(Brush.verticalGradient(listOf(IntroTileTop, IntroTileBottom)))
-                        .border(1.dp, IntroLine, RoundedCornerShape(30.dp))
                 ) {
+                    // The real logo artwork carries its own tile and rim.
+                    Image(
+                        painter = painterResource(R.drawable.ic_brand_logo),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                     Canvas(Modifier.fillMaxSize()) {
-                        drawRxMark(letterR, letterX)
                         drawSheen(sweep)
                     }
                 }
@@ -316,19 +319,6 @@ private fun DrawScope.drawGlow(logoProgress: Float) {
         ),
         radius = radius,
     )
-}
-
-private fun DrawScope.drawRxMark(letterR: Path, letterX: Path) {
-    val unit = size.minDimension / 512f
-    val metal = Brush.linearGradient(
-        *MetalStops,
-        start = Offset(100f, 156f),
-        end = Offset(424f, 356f),
-    )
-    withTransform({ scale(unit, unit, Offset.Zero) }) {
-        drawPath(letterR, metal)
-        drawPath(letterX, metal)
-    }
 }
 
 /** A slanted band of light, 40 % of the tile wide, travelling from off the left to off the right. */

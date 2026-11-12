@@ -23,6 +23,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.unit.dp
+import com.v2ray.ang.AppConfig
+import com.v2ray.ang.handler.UpdateNotifier
+import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.core.CoreNativeManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -39,8 +49,11 @@ class CheckUpdateActivity : BaseComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Opening the screen always checks; coming from the update notification also installs.
         if (savedInstanceState == null) {
-            viewModel.checkForUpdates()
+            viewModel.checkForUpdates(
+                autoInstall = intent?.getBooleanExtra(UpdateNotifier.EXTRA_AUTO_INSTALL, false) == true
+            )
         }
     }
 
@@ -62,8 +75,20 @@ fun CheckUpdateScreen(
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
     val updateResult by viewModel.updateResult.collectAsStateWithLifecycle()
 
-    val libVersion = CoreNativeManager.getLibVersion()
-    val versionText = "v${BuildConfig.VERSION_NAME} ($libVersion)"
+    val downloading by viewModel.downloading.collectAsStateWithLifecycle()
+    val installFile by viewModel.installFile.collectAsStateWithLifecycle()
+
+    val versionText = "v${BuildConfig.VERSION_NAME}"
+
+    LaunchedEffect(installFile) {
+        val apk = installFile ?: return@LaunchedEffect
+        try {
+            context.startActivity(UpdateNotifier.installIntent(context, apk))
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Could not open the installer", e)
+        }
+        viewModel.onInstallHandled()
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -71,7 +96,7 @@ fun CheckUpdateScreen(
             AppTopBar(
                 title = stringResource(R.string.update_check_for_update),
                 onBackClick = onBackClick,
-                isLoading = isLoading
+                isLoading = isLoading || downloading
             )
         }
     ) { innerPadding ->
@@ -92,6 +117,18 @@ fun CheckUpdateScreen(
                 title = stringResource(R.string.update_check_for_update),
                 onClick = { viewModel.checkForUpdates() }
             )
+            AnimatedVisibility(
+                visible = downloading,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                Text(
+                    text = stringResource(R.string.update_downloading),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                )
+            }
             VersionInfoBlock(versionText = versionText)
             NavigationBarsSpacer()
         }
@@ -115,7 +152,7 @@ fun CheckUpdateScreen(
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.dismissUpdateDialog()
-                    result.downloadUrl?.let { Utils.openUri(context, it) }
+                    viewModel.downloadAndInstall(result)
                 }) {
                     Text(stringResource(R.string.update_now))
                 }

@@ -1,5 +1,11 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +45,10 @@ fun MainEmptyState(
             .padding(horizontal = 20.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        RxGlassPanel(modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()) {
+        RxGlassPanel(
+            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(36.dp),
+        ) {
             Column(
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -48,16 +57,32 @@ fun MainEmptyState(
                 // without a stock illustration, and follows the active accent in every theme.
                 Box(
                     modifier = Modifier
-                        .size(112.dp)
+                        .size(108.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.03f),
+                                )
+                            )
+                        )
+                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_brand_mark),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(64.dp)
+                    Text(
+                        text = "RX",
+                        style = TextStyle(
+                            brush = Brush.linearGradient(
+                                0f to Color(0xFFFFFFFF),
+                                0.35f to Color(0xFFAEB4C0),
+                                0.6f to Color(0xFFF6F8FB),
+                                1f to Color(0xFF7D838F),
+                            ),
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.sp,
+                        ),
                     )
                 }
                 Text(
@@ -78,6 +103,7 @@ fun MainEmptyState(
                 RxGlassButton(
                     onClick = onImportConfig,
                     accent = true,
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
                 ) {
                     Icon(
@@ -91,6 +117,7 @@ fun MainEmptyState(
                 // choice, instead of a button and a stray text link.
                 RxGlassButton(
                     onClick = onImportClipboard,
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 ) {
                     Icon(
@@ -98,7 +125,7 @@ fun MainEmptyState(
                         contentDescription = null,
                         modifier = Modifier.size(20.dp),
                     )
-                    Text(stringResource(R.string.menu_item_import_config_clipboard))
+                    Text(stringResource(R.string.empty_state_paste))
                 }
             }
         }

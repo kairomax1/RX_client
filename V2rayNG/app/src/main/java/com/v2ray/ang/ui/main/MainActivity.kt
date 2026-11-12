@@ -24,6 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.UpdateNotifier
 import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
@@ -109,6 +110,8 @@ class MainActivity : HelperBaseComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         mainViewModel.onAction(MainAction.Initialize)
+        // Official releases only; shows the red dot and the update notification when one is out.
+        lifecycleScope.launch { UpdateNotifier.checkOnAppOpen(applicationContext) }
 
         checkAndRequestPermission(PermissionType.POST_NOTIFICATIONS) {}
     }
@@ -239,10 +242,16 @@ class MainActivity : HelperBaseComponentActivity() {
     }
 
     private fun handleFabAction() {
-        if (mainViewModel.uiState.value.isRunning) {
-            LauncherManager.stopService(this)
-        } else {
-            requestServiceStart()
+        val state = mainViewModel.uiState.value
+        when {
+            state.isRunning -> LauncherManager.stopService(this)
+            // A tap while still connecting cancels the attempt.
+            state.connectPhase == ConnectPhase.Connecting -> {
+                mainViewModel.onConnectCancelled()
+                LauncherManager.stopService(this)
+            }
+
+            else -> requestServiceStart()
         }
     }
 
@@ -277,7 +286,10 @@ class MainActivity : HelperBaseComponentActivity() {
         ) {
             checkAndRequestPermission(PermissionType.ACCESS_LOCAL_NETWORK) {}
         }
-        LauncherManager.startService(this)
+        mainViewModel.onConnectRequested()
+        if (!LauncherManager.startService(this, quiet = true)) {
+            mainViewModel.onConnectFailed()
+        }
     }
 
     private fun importManually(createConfigType: Int) {

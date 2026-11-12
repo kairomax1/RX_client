@@ -27,6 +27,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
+import com.v2ray.ang.R
+import com.v2ray.ang.ui.compose.RxDustBackground
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -49,12 +54,15 @@ fun MainScreen(
     val groups = uiState.groups
     val isLoading by mainViewModel.isLoading.collectAsStateWithLifecycle()
     val isRunning = uiState.isRunning
+    val updatePending by mainViewModel.updatePending.collectAsStateWithLifecycle()
     val displayText = mainViewModel.formatStatus(uiState.status)
-    // While connected the bottom bar shows the measured latency instead of a separate test button.
-    val pingText = when (val status = uiState.status) {
-        is MainStatus.ConnectionTest ->
-            if (status.result.delayMillis >= 0) "${status.result.delayMillis} ms" else null
-        else -> null
+    // The status line names the connection state; bulk test progress takes it over while it runs.
+    val statusText = when {
+        uiState.connectPhase == ConnectPhase.Connecting -> stringResource(R.string.rx_connecting)
+        uiState.status is MainStatus.TestProgress -> displayText
+        uiState.status is MainStatus.Testing && uiState.connectPhase != ConnectPhase.Connected -> displayText
+        uiState.connectPhase == ConnectPhase.Connected -> stringResource(R.string.connection_connected)
+        else -> stringResource(R.string.connection_not_connected)
     }
     val selectedGuid = uiState.selectedGuid
     val doubleColumnDisplay = uiState.doubleColumnDisplay
@@ -68,6 +76,8 @@ fun MainScreen(
     var showDelAllConfirm by remember { mutableStateOf(false) }
     var showDelDuplicateConfirm by remember { mutableStateOf(false) }
     var showDelInvalidConfirm by remember { mutableStateOf(false) }
+    var showQuickSheet by remember { mutableStateOf(false) }
+    var showCopySelected by remember { mutableStateOf(false) }
     var showRemoveConfirm by rememberSaveable(stateSaver = ServerDeleteTarget.Saver) {
         mutableStateOf<ServerDeleteTarget?>(null)
     }
@@ -126,7 +136,7 @@ fun MainScreen(
         onConfirmDelDuplicate = { showDelDuplicateConfirm = false; onAction(MainAction.RemoveDuplicateServers) },
         showDelInvalidConfirm = showDelInvalidConfirm,
         onDismissDelInvalid = { showDelInvalidConfirm = false },
-        onConfirmDelInvalid = { showDelInvalidConfirm = false; onAction(MainAction.RemoveInvalidServers) },
+        onConfirmDelInvalid = { showDelInvalidConfirm = false; onAction(MainAction.PingThenRemoveInvalid) },
         showRemoveConfirm = showRemoveConfirm,
         onDismissRemove = { showRemoveConfirm = null },
         onConfirmRemove = { guid -> showRemoveConfirm = null; onAction(MainAction.RemoveServer(guid)) }
@@ -147,21 +157,32 @@ fun MainScreen(
         QRCodeDialog(bitmap = shareQRCodeBitmap, onDismiss = { onAction(MainAction.DismissQRCodeDialog) })
     }
 
-    Box(
-        modifier = Modifier.fillMaxSize().background(
-            Brush.verticalGradient(
-                listOf(
-                    MaterialTheme.colorScheme.surfaceContainerLow,
-                    MaterialTheme.colorScheme.background,
-                )
-            )
+    if (showCopySelected) {
+        val copyFlow = remember(uiState.selectedGroupId) {
+            mainViewModel.serversForGroup(uiState.selectedGroupId)
+        }
+        val copyServers by copyFlow.collectAsStateWithLifecycle()
+        CopySelectedDialog(
+            servers = copyServers,
+            onDismiss = { showCopySelected = false },
+            onCopy = { guids ->
+                showCopySelected = false
+                onAction(MainAction.CopySelected(guids))
+            },
         )
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
     ) {
+        // Live wallpaper, behind everything on the screen.
+        RxDustBackground()
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
                 MainDrawerContent(
                     drawerState = drawerState,
+                    updatePending = updatePending,
                     onNavigate = { route ->
                         scope.launch { drawerState.close() }
                         onNavigate(route)
@@ -177,6 +198,7 @@ fun MainScreen(
                         isLoading = isLoading,
                         showSearch = showSearch,
                         searchQuery = searchQuery,
+                        updatePending = updatePending,
                         onSearchQueryChange = { query: String ->
                             searchQuery = query
                             onAction(MainAction.Search(query))
@@ -196,30 +218,27 @@ fun MainScreen(
                                 MainMoreMenuAction.DeleteDuplicate -> showDelDuplicateConfirm = true
                                 MainMoreMenuAction.DeleteInvalid -> showDelInvalidConfirm = true
                                 MainMoreMenuAction.ExportAll -> onAction(MainAction.ExportAll)
-                                MainMoreMenuAction.LocateSelected -> onAction(MainAction.LocateSelectedServer)
-                                MainMoreMenuAction.SortByTestResults -> onAction(MainAction.SortByTestResults)
-                                MainMoreMenuAction.TestAll -> onAction(MainAction.TestAllServers)
-                                MainMoreMenuAction.TestAllRealPing -> onAction(MainAction.TestRealAllServers)
-                                MainMoreMenuAction.UpdateSubscriptions -> onAction(MainAction.UpdateSubscriptions)
+                                MainMoreMenuAction.CopySelected -> showCopySelected = true
                             }
                         }
                     )
                 },
                 bottomBar = {
                     MainBottomBar(
-                        displayText = displayText,
-                        isRunning = isRunning,
+                        statusText = statusText,
+                        phase = uiState.connectPhase,
+                        failureTick = uiState.failureTick,
                         isTesting = uiState.isTesting,
-                        pingText = pingText,
+                        pingMillis = uiState.pingMillis,
                         canConnect = MainConnectionPolicy.canConnect(
-                        isRunning = isRunning,
-                        selectedGuid = selectedGuid,
-                        routingMode = uiState.routingMode,
-                        routedAppCount = uiState.routedAppCount,
-                    ),
-                    needsAppSelection = uiState.routingMode == PerAppRoutingMode.ONLY_SELECTED && uiState.routedAppCount == 0,
+                            isRunning = isRunning,
+                            selectedGuid = selectedGuid,
+                            routingMode = uiState.routingMode,
+                            routedAppCount = uiState.routedAppCount,
+                        ),
+                        needsAppSelection = uiState.routingMode == PerAppRoutingMode.ONLY_SELECTED && uiState.routedAppCount == 0,
                         onAction = onAction,
-                        onNavigate = onNavigate,
+                        onOpenQuickSheet = { showQuickSheet = true },
                     )
                 },
                 floatingActionButton = {},
@@ -244,7 +263,13 @@ fun MainScreen(
                                             animateAdjacentPage = true
                                         )
                                     }
-                                }
+                                },
+                                onUpdateSubscription = { groupId ->
+                                    onAction(MainAction.UpdateGroupSubscription(groupId))
+                                },
+                                onPingGroup = { groupId ->
+                                    onAction(MainAction.TestGroupRealPing(groupId))
+                                },
                             )
                         }
 
@@ -297,6 +322,25 @@ fun MainScreen(
                     )
                 }
             }
+        }
+
+        // Rises out of the connect button; the only message shown around connecting.
+        ConnectFailureMessage(
+            visible = uiState.connectPhase == ConnectPhase.Failed,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 150.dp),
+        )
+
+        if (showQuickSheet) {
+            MainQuickSheet(
+                onDismiss = { showQuickSheet = false },
+                onNavigate = { destination ->
+                    showQuickSheet = false
+                    onNavigate(destination)
+                },
+            )
         }
     }
 }

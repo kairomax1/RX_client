@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
@@ -48,23 +49,26 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
 
-private val primaryDrawerItems = listOf(
+/** Subscriptions, per-app, routing and settings live in the quick card beside the connect button. */
+internal val quickSheetItems = listOf(
     MainDestination.Subscriptions,
     MainDestination.PerAppProxy,
     MainDestination.Routing,
-    MainDestination.Cloudflare,
-    MainDestination.SpeedTest,
-    MainDestination.Settings
+    MainDestination.Settings,
 )
 
-private val drawerItems = primaryDrawerItems + listOf(
+private val drawerItems = listOf(
     MainDestination.CheckUpdate,
     MainDestination.BackupRestore,
-    MainDestination.About
+    MainDestination.About,
 )
 
 @Composable
-fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) -> Unit) {
+fun MainDrawerContent(
+    drawerState: DrawerState,
+    updatePending: Boolean,
+    onNavigate: (MainDestination) -> Unit,
+) {
     val drawerScrollState = rememberScrollState()
 
     ModalDrawerSheet(
@@ -85,7 +89,7 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
                                 MaterialTheme.colorScheme.surface,
                             )
                         )
@@ -95,7 +99,7 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
                 Image(
                     painter = painterResource(R.drawable.ic_brand_logo),
                     contentDescription = null,
-                    modifier = Modifier.size(92.dp)
+                    modifier = Modifier.size(84.dp).clip(RoundedCornerShape(20.dp))
                 )
                 Text(
                     text = stringResource(R.string.app_name),
@@ -113,17 +117,19 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
                 )
             }
             Spacer(Modifier.height(8.dp))
-            drawerItems.forEachIndexed { index, item ->
-                if (index == primaryDrawerItems.size) {
-                    Spacer(Modifier.height(10.dp))
-                    AppDivider()
-                    Spacer(Modifier.height(10.dp))
-                }
+            drawerItems.forEach { item ->
+                val badge: (@Composable () -> Unit)? =
+                    if (updatePending && item == MainDestination.CheckUpdate) {
+                        { UpdateDotBadge() }
+                    } else {
+                        null
+                    }
                 NavigationDrawerItem(
                     label = { Text(stringResource(item.labelRes)) },
                     selected = false,
                     onClick = { onNavigate(item) },
                     icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
+                    badge = badge,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
