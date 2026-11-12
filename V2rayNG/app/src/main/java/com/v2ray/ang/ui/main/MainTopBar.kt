@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -89,7 +90,10 @@ fun MainTopBar(
     val localeDirection = LocalLayoutDirection.current
 
     Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        CompositionLocalProvider(
+            LocalLayoutDirection provides LayoutDirection.Ltr,
+            LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

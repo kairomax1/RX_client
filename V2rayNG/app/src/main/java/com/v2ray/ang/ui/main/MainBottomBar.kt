@@ -43,6 +43,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,7 +57,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import java.util.Locale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -93,6 +99,8 @@ fun MainBottomBar(
     failureTick: Int,
     isTesting: Boolean,
     pingMillis: Long?,
+    exitIp: String?,
+    exitCountry: String?,
     canConnect: Boolean,
     needsAppSelection: Boolean,
     onAction: (MainAction) -> Unit,
@@ -136,6 +144,9 @@ fun MainBottomBar(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
                 )
+                if (connected) {
+                    ExitAddressText(ip = exitIp, country = exitCountry)
+                }
             }
             Spacer(Modifier.height(12.dp))
             // The design pins this row left to right in every locale.
@@ -211,6 +222,77 @@ private fun DockSideButton(
                     if (enabled) colors.onSurface else colors.onSurfaceVariant.copy(alpha = 0.6f)
         ) {
             content()
+        }
+    }
+}
+
+/** Regional-indicator flag for a two-letter country code; empty for anything else. */
+private fun countryFlag(code: String): String {
+    val upper = code.trim().uppercase()
+    if (upper.length != 2 || upper.any { it !in 'A'..'Z' }) return ""
+    return upper.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")
+}
+
+/**
+ * The exit address, typed out one character at a time beside the status, followed by the country.
+ * It is typed again whenever a new test reports a different address.
+ */
+@Composable
+private fun ExitAddressText(ip: String?, country: String?) {
+    val animate = rememberAnimationsEnabled()
+    val locale = LocalConfiguration.current.locales[0]
+    val countryPart = country?.trim().orEmpty().let { code ->
+        val flag = countryFlag(code)
+        // A two-letter code becomes the country's name in the app language; anything else is shown as sent.
+        val name = if (flag.isEmpty()) code else Locale("", code.uppercase()).getDisplayCountry(locale).ifBlank { code }
+        listOf(flag, name).filter { it.isNotEmpty() }.joinToString(" ")
+    }
+    val full = listOf(ip?.trim().orEmpty(), countryPart).filter { it.isNotEmpty() }.joinToString("  ·  ")
+    var shown by remember { mutableIntStateOf(0) }
+    LaunchedEffect(full) {
+        if (!animate) {
+            shown = full.length
+            return@LaunchedEffect
+        }
+        shown = 0
+        while (shown < full.length) {
+            delay(42)
+            // Never stop between the two halves of a flag or other surrogate pair.
+            var next = shown + 1
+            while (next < full.length && Character.isLowSurrogate(full[next])) next++
+            shown = next
+        }
+    }
+    val caret by rememberInfiniteTransition(label = "caret").animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        label = "caretAlpha",
+    )
+    if (full.isEmpty()) return
+    val typing = shown < full.length
+    // Addresses are Latin: keep them left to right inside a right-to-left status line.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = full.take(shown.coerceAtMost(full.length)),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                color = ConnectedDot,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (typing && animate) {
+                Box(
+                    Modifier
+                        .padding(start = 2.dp)
+                        .width(2.dp)
+                        .height(15.dp)
+                        .graphicsLayer { alpha = caret }
+                        .background(ConnectedDot)
+                )
+            }
         }
     }
 }

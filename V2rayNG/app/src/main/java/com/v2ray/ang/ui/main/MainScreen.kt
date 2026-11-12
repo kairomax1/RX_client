@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.ui.compose.rxScreenBrush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -173,7 +174,7 @@ fun MainScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+        modifier = Modifier.fillMaxSize().background(rxScreenBrush())
     ) {
         // Live wallpaper, behind everything on the screen.
         RxDustBackground()
@@ -230,6 +231,8 @@ fun MainScreen(
                         failureTick = uiState.failureTick,
                         isTesting = uiState.isTesting,
                         pingMillis = uiState.pingMillis,
+                        exitIp = uiState.exitIp,
+                        exitCountry = uiState.exitCountry,
                         canConnect = MainConnectionPolicy.canConnect(
                             isRunning = isRunning,
                             selectedGuid = selectedGuid,

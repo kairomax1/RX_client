@@ -41,6 +41,9 @@ data class MainUiState(
     val pingMillis: Long? = null,
     /** Bumped on every failed connection attempt so the UI can replay its failure feedback. */
     val failureTick: Int = 0,
+    /** Address and country the tunnel leaves from, as seen by the last successful test. */
+    val exitIp: String? = null,
+    val exitCountry: String? = null,
 )
 
 /**

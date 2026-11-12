@@ -288,11 +288,13 @@ fun ReorderableCollectionItemScope.reorderableDragHandle(): Modifier {
 fun ReorderableListItem(
     scope: ReorderableCollectionItemScope,
     isDragging: Boolean,
+    color: Color = MaterialTheme.colorScheme.surface,
     content: @Composable RowScope.() -> Unit
 ) {
     val elevation by reorderableElevation(isDragging)
     Surface(
         modifier = Modifier.fillMaxWidth(),
+        color = color,
         shadowElevation = elevation
     ) {
         Row(
@@ -309,6 +311,7 @@ fun ReorderableListItem(
 fun ReorderableGridItem(
     scope: ReorderableCollectionItemScope,
     isDragging: Boolean,
+    color: Color = MaterialTheme.colorScheme.surface,
     content: @Composable () -> Unit
 ) {
     val elevation by reorderableElevation(isDragging)
@@ -316,6 +319,7 @@ fun ReorderableGridItem(
         modifier = Modifier
             .fillMaxWidth()
             .then(with(scope) { reorderableDragHandle() }),
+        color = color,
         shadowElevation = elevation
     ) {
         content()

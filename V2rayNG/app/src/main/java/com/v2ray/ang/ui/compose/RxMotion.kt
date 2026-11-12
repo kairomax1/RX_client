@@ -33,7 +33,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.sin
 import kotlin.random.Random
 
 /** Surface of everything that floats above the screen: menus, the quick card, the failure message. */
@@ -72,6 +74,20 @@ fun rememberAnimationsEnabled(): Boolean {
     }
 }
 
+/**
+ * Backdrop of the main screen. Pure black next to bright silver is hard on the eyes, so the
+ * screen sits on a deep blue-grey that still reads as dark.
+ */
+@Composable
+fun rxScreenBrush(): Brush {
+    val colors = MaterialTheme.colorScheme
+    return if (colors.background.luminance() < 0.5f) {
+        Brush.verticalGradient(listOf(Color(0xFF12151C), Color(0xFF0D0F14), Color(0xFF101319)))
+    } else {
+        Brush.verticalGradient(listOf(colors.surfaceContainerLow, colors.background))
+    }
+}
+
 /** The particles of [RxDustBackground]; plain arrays so a frame allocates nothing. */
 private class DustField {
     var count = 0
@@ -82,7 +98,9 @@ private class DustField {
     var radius = FloatArray(0)
     var speed = FloatArray(0)
     var alpha = FloatArray(0)
+    var phase = FloatArray(0)
     var lastNanos = 0L
+    var seconds = 0f
 
     fun ensure(size: Size, density: Float) {
         if (size.width == width && size.height == height) return
@@ -90,13 +108,15 @@ private class DustField {
         height = size.height
         val widthDp = width / density
         val heightDp = height / density
-        count = min(70f, widthDp * heightDp / 14000f).toInt().coerceAtLeast(0)
+        // Denser and a little larger than the web mock, where a phone screen got about two dozen
+        // specks that vanished behind the list.
+        count = min(110f, widthDp * heightDp / 3600f).toInt().coerceAtLeast(0)
         x = FloatArray(count) { Random.nextFloat() * width }
         y = FloatArray(count) { Random.nextFloat() * height }
-        radius = FloatArray(count) { (0.2f + Random.nextFloat() * 1.3f) * density }
-        // 0.05 to 0.3 px per 60 Hz frame in the design, expressed here in pixels per second.
-        speed = FloatArray(count) { (0.05f + Random.nextFloat() * 0.25f) * 60f * density }
-        alpha = FloatArray(count) { 0.1f + Random.nextFloat() * 0.5f }
+        radius = FloatArray(count) { (0.5f + Random.nextFloat() * 1.5f) * density }
+        speed = FloatArray(count) { (5f + Random.nextFloat() * 20f) * density }
+        alpha = FloatArray(count) { 0.22f + Random.nextFloat() * 0.5f }
+        phase = FloatArray(count) { Random.nextFloat() * 6.283f }
     }
 
     fun step(nowNanos: Long) {
@@ -105,10 +125,11 @@ private class DustField {
             return
         }
         // Clamp so a paused screen does not make every particle jump when it resumes.
-        val seconds = ((nowNanos - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
+        val delta = ((nowNanos - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
         lastNanos = nowNanos
+        seconds += delta
         for (i in 0 until count) {
-            y[i] -= speed[i] * seconds
+            y[i] -= speed[i] * delta
             if (y[i] < -5f) {
                 y[i] = height + 5f
                 x[i] = Random.nextFloat() * width
@@ -118,8 +139,9 @@ private class DustField {
 }
 
 /**
- * The live wallpaper: silver dust drifting upward over a faint glow. Drawn in the draw phase only,
- * so it never recomposes the screen above it. Skipped on light themes, where it would not show.
+ * The live wallpaper: silver dust drifting upward and twinkling, over two soft lights that wander
+ * slowly. Drawn in the draw phase only, so it never recomposes the screen above it. Skipped on
+ * light themes, where it would not show.
  */
 @Composable
 fun RxDustBackground(modifier: Modifier = Modifier) {
@@ -135,16 +157,34 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
     Canvas(modifier.fillMaxSize()) {
         field.ensure(size, density)
         field.step(frameNanos)
+        val t = field.seconds
+        // Two wide, faint lights on slow, different orbits.
+        val first = Offset(
+            size.width * (0.5f + 0.32f * sin(t * 0.11f)),
+            size.height * (0.36f + 0.10f * cos(t * 0.09f)),
+        )
         drawRect(
             Brush.radialGradient(
-                colors = listOf(Color(0x1A7887AA), Color.Transparent),
-                center = Offset(size.width / 2f, size.height * 0.45f),
-                radius = size.height * 0.6f,
+                colors = listOf(Color(0x2E8A9CC8), Color.Transparent),
+                center = first,
+                radius = size.height * 0.55f,
+            )
+        )
+        val second = Offset(
+            size.width * (0.5f - 0.36f * sin(t * 0.07f + 1.3f)),
+            size.height * (0.78f + 0.08f * sin(t * 0.13f)),
+        )
+        drawRect(
+            Brush.radialGradient(
+                colors = listOf(Color(0x1FB8C4DC), Color.Transparent),
+                center = second,
+                radius = size.height * 0.42f,
             )
         )
         for (i in 0 until field.count) {
+            val twinkle = 0.65f + 0.35f * sin(t * 1.4f + field.phase[i])
             drawCircle(
-                color = Color(0xFFD7E1F5).copy(alpha = field.alpha[i]),
+                color = Color(0xFFD7E1F5).copy(alpha = field.alpha[i] * twinkle),
                 radius = field.radius[i],
                 center = Offset(field.x[i], field.y[i]),
             )

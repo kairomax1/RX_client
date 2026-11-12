@@ -167,6 +167,15 @@ class MainViewModel(
             is MainServiceEvent.MeasureDelayResult -> {
                 if (!uiState.value.isRunning || !testRequests.completeCurrent(event.requestId)) return
                 _uiState.update { it.copy(isTesting = testRequests.isTesting, status = MainStatus.ConnectionTest(event.result)) }
+                if (event.result.delayMillis >= 0) {
+                    // Every test re-reads the exit address, so a rotating one is shown as it changes.
+                    _uiState.update {
+                        it.copy(
+                            exitIp = event.result.ipAddress?.takeIf { ip -> ip.isNotBlank() } ?: it.exitIp,
+                            exitCountry = event.result.country?.takeIf { c -> c.isNotBlank() } ?: it.exitCountry,
+                        )
+                    }
+                }
                 onCurrentDelayMeasured(event.result.delayMillis)
             }
 
@@ -248,7 +257,7 @@ class MainViewModel(
     fun onConnectRequested() {
         failureResetJob?.cancel()
         verifyAttempts = 0
-        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null) }
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null, exitIp = null, exitCountry = null) }
         connectWatchdog?.cancel()
         connectWatchdog = viewModelScope.launch {
             delay(CONNECT_TIMEOUT_MS)
@@ -301,14 +310,14 @@ class MainViewModel(
 
     fun onConnectCancelled() {
         connectWatchdog?.cancel()
-        _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null) }
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
     }
 
     /** Red button, shake, vibration and the floating message; then back to the idle button. */
     fun onConnectFailed() {
         connectWatchdog?.cancel()
         _uiState.update {
-            it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, failureTick = it.failureTick + 1)
+            it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, exitIp = null, exitCountry = null, failureTick = it.failureTick + 1)
         }
         failureResetJob?.cancel()
         failureResetJob = viewModelScope.launch {
@@ -327,7 +336,7 @@ class MainViewModel(
             ConnectPhase.Connecting -> if (verifyAttempts > 0) onConnectFailed()
             else -> {
                 connectWatchdog?.cancel()
-                _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null) }
+                _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
             }
         }
     }

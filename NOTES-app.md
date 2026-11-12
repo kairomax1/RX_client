@@ -129,3 +129,14 @@ What changed and where:
   text and `bqi` the Persian text until someone translates them.
 
 Not run on a device: none of the above was seen on a phone or emulator.
+
+### Follow-up after the first device test
+
+- The config list hid the wallpaper because `ReorderableListItem`/`ReorderableGridItem` wrapped every
+  row in an opaque `Surface`. Both now take a `color`; the main list passes transparent.
+- Main screen backdrop is `rxScreenBrush()` (deep blue-grey), not pure black; the dust is denser,
+  twinkles, and sits over two slowly wandering lights.
+- Configs are separate rounded cards (`SERVER_CARD_SHAPE`), no dividers; the selected one has a
+  silver rim.
+- `MainUiState.exitIp` / `exitCountry` come from every successful delay test and are typed out in
+  the status line (`ExitAddressText`), so a rotating exit address updates on each ping.

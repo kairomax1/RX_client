@@ -1,5 +1,10 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -231,7 +236,9 @@ private fun ServerListPage(
                     ) { isDragging ->
                         ReorderableGridItem(
                             scope = this,
-                            isDragging = isDragging
+                            isDragging = isDragging,
+                            // See-through at rest so the live wallpaper shows between the cards.
+                            color = if (isDragging) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                         ) { content() }
                     }
                 } else {
@@ -266,7 +273,9 @@ private fun ServerListPage(
                     ) { isDragging ->
                         ReorderableListItem(
                             scope = this,
-                            isDragging = isDragging
+                            isDragging = isDragging,
+                            // See-through at rest so the live wallpaper shows between the cards.
+                            color = if (isDragging) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                         ) {
                             ServerItemRow(
                                 row = row,
@@ -274,7 +283,6 @@ private fun ServerListPage(
                                 actions = actions
                             )
                         }
-                        ItemDivider()
                     }
                 } else {
                     ServerItemRow(
@@ -282,7 +290,6 @@ private fun ServerListPage(
                         isSelected = row.guid == selectedGuid,
                         actions = actions
                     )
-                    ItemDivider()
                 }
             }
         }
@@ -321,6 +328,8 @@ private fun LocateTargetEffect(
     }
 }
 
+private val SERVER_CARD_SHAPE = RoundedCornerShape(20.dp)
+
 @Composable
 private fun ServerItemRow(
     row: ServerRowUiModel,
@@ -349,7 +358,6 @@ private fun ServerItemColumn(
             doubleColumnDisplay = doubleColumnDisplay,
             actions = actions
         )
-        ItemDivider()
     }
 }
 
@@ -373,13 +381,30 @@ private fun ServerListItem(
     }
     val verticalPadding = if (doubleColumnDisplay) 8.dp else 11.dp
 
-    // Selected rows are tinted rather than outlined: it reads instantly in a list of twenty and
-    // still leaves the text at full contrast on every wallpaper and theme.
+    // Each config is its own floating card. The fill is thin on purpose: the wallpaper keeps
+    // moving behind it. The selected card is brighter, with a silver rim and a bar on its edge.
+    val cardBrush = if (isSelected) {
+        Brush.linearGradient(
+            listOf(colors.onSurface.copy(alpha = 0.16f), colors.onSurface.copy(alpha = 0.05f))
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(colors.onSurface.copy(alpha = 0.065f), colors.onSurface.copy(alpha = 0.025f))
+        )
+    }
+    val rim by animateColorAsState(
+        targetValue = colors.onSurface.copy(alpha = if (isSelected) 0.42f else 0.09f),
+        animationSpec = tween(320),
+        label = "serverCardRim",
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = if (doubleColumnDisplay) 5.dp else 12.dp, vertical = 5.dp)
             .height(IntrinsicSize.Min)
-            .background(if (isSelected) colors.primary.copy(alpha = 0.09f) else Color.Transparent)
+            .clip(SERVER_CARD_SHAPE)
+            .background(cardBrush)
+            .border(1.dp, rim, SERVER_CARD_SHAPE)
             .semantics {
                 if (selectedStateDescription != null) {
                     stateDescription = selectedStateDescription
@@ -389,9 +414,14 @@ private fun ServerListItem(
     ) {
         Box(
             Modifier
+                .padding(vertical = 14.dp)
                 .width(4.dp)
                 .fillMaxHeight()
-                .background(if (isSelected) colors.primary else Color.Transparent)
+                .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                .background(
+                    if (isSelected) Brush.verticalGradient(listOf(colors.primary, colors.secondary))
+                    else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+                )
         )
 
         Column(
@@ -471,7 +501,7 @@ private fun ServerListItem(
                 RxPill(
                     text = row.typeDescription,
                     contentColor = colors.onSurfaceVariant,
-                    containerColor = colors.surfaceContainerHigh.copy(alpha = 0.85f),
+                    containerColor = colors.onSurface.copy(alpha = 0.08f),
                 )
                 if (doubleColumnDisplay && delayText.isNotEmpty()) {
                     RxPill(

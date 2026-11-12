@@ -242,7 +242,7 @@ private fun GroupTabItem(
         listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.06f))
     )
 
-    Box {
+    Box(propagateMinConstraints = true) {
         // One selectable node: name, count and selected state are announced together.
         Row(
             modifier = Modifier
