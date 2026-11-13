@@ -14,6 +14,7 @@ import com.v2ray.ang.enums.BalancerStrategyType
 import com.v2ray.ang.enums.CoreResolvedType
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.DnsMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.HttpUtil
@@ -546,7 +547,8 @@ object CoreConfigManager {
             inbound1.settings?.accounts = null
         }
         val fakedns = MmkvManager.decodeSettingsBool(AppConfig.PREF_FAKE_DNS_ENABLED) == true
-        val sniffAllTlsAndHttp =
+        // DNS mode decides by site name, so the name has to be read from the connection.
+        val sniffAllTlsAndHttp = DnsMode.isEnabled() ||
             MmkvManager.decodeSettingsBool(AppConfig.PREF_SNIFFING_ENABLED, true) != false
         inbound1.sniffing?.enabled = fakedns || sniffAllTlsAndHttp
         inbound1.sniffing?.routeOnly =
@@ -597,7 +599,7 @@ object CoreConfigManager {
     private fun collectUserRuleDomainsByTag(tag: String): ArrayList<String> {
         val domain = ArrayList<String>()
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = DnsMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             if (key.enabled && key.outboundTag == tag && !key.domain.isNullOrEmpty()) {
                 key.domain?.forEach {
@@ -615,7 +617,7 @@ object CoreConfigManager {
     private fun collectCustomOutboundDomains(): ArrayList<String> {
         val domain = ArrayList<String>()
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = DnsMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             if (key.enabled && !AppConfig.BUILTIN_OUTBOUND_TAGS.contains(key.outboundTag)
                 && !key.domain.isNullOrEmpty()
@@ -1174,7 +1176,7 @@ object CoreConfigManager {
             MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY)
                 ?: "AsIs"
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = DnsMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             appendRoutingUserRule(configContext, key, v2rayConfig, policyGroupBalancerTags)
         }

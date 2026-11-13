@@ -229,3 +229,18 @@ Nine items, delivered together.
   list. Android 9 and older open the release page in the browser.
 - **No automatic publishing.** A push to `master` only builds and tests. A release is made by
   running `build.yml` by hand with `release_tag`.
+
+## DNS mode (split tunnel by site list)
+
+- Logic: `handler/DnsMode.kt`. When `pref_rx_dns_mode` is on, the core is given `DnsMode.rulesets()`
+  instead of the user's stored routing rules (those are not modified and come back when the mode
+  is switched off). Listed sites (filtered + restricted + the user's own) and Telegram's networks
+  go through the config; everything else goes out directly. Sniffing is forced on, because the
+  rules match on the site name.
+- The lists are plain domain names kept in the code, so the mode does not depend on geo files.
+- It is not a DNS server: an Android app cannot listen on port 53. For a console or TV the card
+  shows the phone's proxy address (LAN IP + the app's proxy port); that needs "proxy sharing" on,
+  the device on the phone's Wi-Fi/hotspot, and no proxy password.
+- UI: fifth tile of the quick sheet (`MainDestination.DnsMode`) opens `MainDnsModeCard`;
+  state in `DnsModeViewModel`. A running tunnel is restarted after each change.
+- Not tested on a device. With the "dynamic port" setting on, the port changes at every start.

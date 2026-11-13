@@ -671,4 +671,27 @@
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
+    <string name="dns_mode_title">DNS mode</string>
+    <string name="dns_mode_about">Only filtered and restricted sites go through the config; games and everything else go directly, with their speed and ping untouched.</string>
+    <string name="dns_mode_state_on">On</string>
+    <string name="dns_mode_state_off">Off</string>
+    <string name="dns_mode_turn_on">Turn it on</string>
+    <string name="dns_mode_turn_off">Turn it off</string>
+    <string name="dns_mode_add_site">A site did not open? Add it</string>
+    <string name="dns_mode_devices">Console and other devices</string>
+    <string name="dns_mode_add_site_ask">Write the name of the site that did not open</string>
+    <string name="dns_mode_site_add">Add</string>
+    <string name="dns_mode_site_added">Added</string>
+    <string name="dns_mode_site_clear">Clear my list</string>
+    <string name="dns_mode_back">Back</string>
+    <string name="dns_mode_copy">Copy address</string>
+    <string name="dns_mode_copied">Copied</string>
+    <string name="dns_mode_devices_about">A console or TV can go through the connection of this phone. First allow other devices to connect to the phone.</string>
+    <string name="dns_mode_devices_on">Allow</string>
+    <string name="dns_mode_devices_off">Stop allowing</string>
+    <string name="dns_mode_devices_how">Connect the device to the hotspot or Wi-Fi of this phone and enter these two under Proxy Server in its network settings. The VPN on the phone must stay on.</string>
+    <string name="dns_mode_devices_address">Address: %s</string>
+    <string name="dns_mode_devices_port">Port: %s</string>
+    <string name="dns_mode_devices_no_network">The phone is not on Wi-Fi and its hotspot is off. Turn one on and open this card again.</string>
+    <string name="dns_mode_devices_password">A password is set for the proxy of the app, and consoles have nowhere to enter one. Remove it in settings.</string>
 </resources>

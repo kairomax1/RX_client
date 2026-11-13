@@ -77,6 +77,8 @@ class MainActivity : HelperBaseComponentActivity() {
         MainViewModel.Factory(application, MainRepository(application as AngApplication))
     }
 
+    private val dnsModeViewModel: DnsModeViewModel by viewModels()
+
     private val requestVpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) startV2Ray()
@@ -185,6 +187,7 @@ class MainActivity : HelperBaseComponentActivity() {
         BackHandler { moveTaskToBack(false) }
         MainScreen(
             mainViewModel = mainViewModel,
+            dnsModeViewModel = dnsModeViewModel,
             onAction = { action ->
                 when (action) {
                     MainAction.ToggleService -> handleFabAction()
@@ -231,6 +234,8 @@ class MainActivity : HelperBaseComponentActivity() {
             MainDestination.Subscriptions -> Intent(this, SubSettingActivity::class.java)
             MainDestination.PerAppProxy -> Intent(this, PerAppProxyActivity::class.java)
             MainDestination.Routing -> Intent(this, RoutingSettingActivity::class.java)
+            // Shown as a card by the main screen; there is no activity to open.
+            MainDestination.DnsMode -> return
             MainDestination.Cloudflare -> Intent(this, CloudflareActivity::class.java)
             MainDestination.SpeedTest -> Intent(this, SpeedTestActivity::class.java)
             MainDestination.Settings -> Intent(this, SettingsActivity::class.java)

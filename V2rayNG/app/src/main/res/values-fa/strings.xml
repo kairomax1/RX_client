@@ -751,4 +751,27 @@
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
     <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>
+    <string name="dns_mode_title">حالت DNS</string>
+    <string name="dns_mode_about">فقط سایت‌های فیلتر و تحریم از کانفیگ رد می‌شن؛ بازی و بقیهٔ چیزها مستقیم می‌رن و سرعت و پینگشون دست نمی‌خوره.</string>
+    <string name="dns_mode_state_on">روشنه</string>
+    <string name="dns_mode_state_off">خاموشه</string>
+    <string name="dns_mode_turn_on">روشنش کن</string>
+    <string name="dns_mode_turn_off">خاموشش کن</string>
+    <string name="dns_mode_add_site">یه سایت باز نشد؟ اضافه‌اش کن</string>
+    <string name="dns_mode_devices">کنسول و دستگاه‌های دیگه</string>
+    <string name="dns_mode_add_site_ask">اسم سایتی که باز نشد رو بنویس</string>
+    <string name="dns_mode_site_add">اضافه کن</string>
+    <string name="dns_mode_site_added">اضافه شد</string>
+    <string name="dns_mode_site_clear">فهرست من رو پاک کن</string>
+    <string name="dns_mode_back">برگرد</string>
+    <string name="dns_mode_copy">کپی آدرس</string>
+    <string name="dns_mode_copied">کپی شد</string>
+    <string name="dns_mode_devices_about">کنسول یا تلویزیون می‌تونه از اینترنتِ همین گوشی رد بشه. اول باید اجازه بدی دستگاه‌های دیگه به گوشی وصل بشن.</string>
+    <string name="dns_mode_devices_on">اجازه بده</string>
+    <string name="dns_mode_devices_off">اجازه رو بردار</string>
+    <string name="dns_mode_devices_how">دستگاه رو به هات‌اسپات یا وای‌فای همین گوشی وصل کن و توی تنظیمات شبکه‌اش، بخش Proxy Server، این دو تا رو وارد کن. VPN گوشی باید روشن بمونه.</string>
+    <string name="dns_mode_devices_address">آدرس: %s</string>
+    <string name="dns_mode_devices_port">پورت: %s</string>
+    <string name="dns_mode_devices_no_network">گوشی به وای‌فای وصل نیست و هات‌اسپاتش هم روشن نیست. یکی رو روشن کن و دوباره این کارت رو باز کن.</string>
+    <string name="dns_mode_devices_password">برای پراکسی برنامه رمز گذاشتی و کنسول‌ها جایی برای وارد کردن رمز ندارن. رمز رو از تنظیمات بردار.</string>
 </resources>

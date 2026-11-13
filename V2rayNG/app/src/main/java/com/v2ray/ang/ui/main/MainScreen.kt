@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MainScreen(
     mainViewModel: MainViewModel,
+    dnsModeViewModel: DnsModeViewModel,
     onAction: (MainAction) -> Unit,
     onNavigate: (MainDestination) -> Unit,
 ) {
@@ -80,6 +81,7 @@ fun MainScreen(
     var showDelDuplicateConfirm by remember { mutableStateOf(false) }
     var showDelInvalidConfirm by remember { mutableStateOf(false) }
     var showQuickSheet by remember { mutableStateOf(false) }
+    var showDnsMode by remember { mutableStateOf(false) }
     var showCopySelected by remember { mutableStateOf(false) }
     var showRemoveConfirm by rememberSaveable(stateSaver = ServerDeleteTarget.Saver) {
         mutableStateOf<ServerDeleteTarget?>(null)
@@ -350,8 +352,27 @@ fun MainScreen(
                 onDismiss = { showQuickSheet = false },
                 onNavigate = { destination ->
                     showQuickSheet = false
-                    onNavigate(destination)
+                    if (destination == MainDestination.DnsMode) {
+                        dnsModeViewModel.refresh()
+                        showDnsMode = true
+                    } else {
+                        onNavigate(destination)
+                    }
                 },
+            )
+        }
+
+        if (showDnsMode) {
+            val dnsState by dnsModeViewModel.state.collectAsStateWithLifecycle()
+            MainDnsModeCard(
+                state = dnsState,
+                onSetEnabled = dnsModeViewModel::setEnabled,
+                onAddDomain = dnsModeViewModel::addDomain,
+                onClearDomains = dnsModeViewModel::clearDomains,
+                onSetSharing = dnsModeViewModel::setSharing,
+                // A running tunnel is rebuilt with the new rules; a stopped one is left alone.
+                onChanged = { if (isRunning) onAction(MainAction.RestartService) },
+                onDismiss = { showDnsMode = false },
             )
         }
     }

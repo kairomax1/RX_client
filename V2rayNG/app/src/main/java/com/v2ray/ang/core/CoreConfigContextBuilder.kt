@@ -9,6 +9,7 @@ import com.v2ray.ang.enums.CoreResolvedType
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.DnsMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.LogUtil
@@ -99,7 +100,7 @@ object CoreConfigContextBuilder {
      * Invalid or empty targets are skipped and handled by fallback logic later.
      */
     private fun resolveRoutingOutbounds(): List<CoreConfigContext.ResolvedOutbound> {
-        val rulesetItems = MmkvManager.decodeRoutingRulesets() ?: return emptyList()
+        val rulesetItems = DnsMode.effectiveRulesets() ?: return emptyList()
         val resolvedOutbounds = mutableListOf<CoreConfigContext.ResolvedOutbound>()
         val processedTags = mutableSetOf<String>()
 
@@ -226,7 +227,7 @@ object CoreConfigContextBuilder {
      * outbounds are normalized into three tags only: proxy / direct / block.
      */
     private fun collectRoutingDomainRulesForDns(): List<CoreConfigContext.RoutingDomainRule> {
-        val rulesetItems = MmkvManager.decodeRoutingRulesets() ?: return emptyList()
+        val rulesetItems = DnsMode.effectiveRulesets() ?: return emptyList()
         val result = mutableListOf<CoreConfigContext.RoutingDomainRule>()
 
         rulesetItems
