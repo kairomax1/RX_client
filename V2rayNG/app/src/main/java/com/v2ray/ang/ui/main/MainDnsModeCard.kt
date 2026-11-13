@@ -94,7 +94,7 @@ fun MainDnsModeCard(
                 var text by remember { mutableStateOf("") }
                 var shake by remember { mutableIntStateOf(0) }
                 val added = stringResource(R.string.dns_mode_site_added)
-                val submit = {
+                val submit: () -> Unit = {
                     if (onAddDomain(text)) {
                         text = ""
                         noteText = added
