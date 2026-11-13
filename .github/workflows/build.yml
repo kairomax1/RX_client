@@ -235,7 +235,7 @@ jobs:
           # can be inspected later without downloading anything.
           set +e
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          APK=RXVPN_1.0.2_arm64-v8a.apk
+          APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
           {
             echo '```'
             echo "== badging =="
