@@ -670,4 +670,5 @@
     <string name="update_installed_version">Installed version: %s</string>
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
+    <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
 </resources>

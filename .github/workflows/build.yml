@@ -133,29 +133,27 @@ jobs:
                       print("::error::" + line.strip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
           PYEOF
 
-      - name: Create signing key
+      - name: Load signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.APP_KEYSTORE_BASE64 }}
         run: |
-          # Android only installs an update when the signature is unchanged, so the key must be
-          # stable: the checked-in V2rayNG/signing/rxclient.p12 (or the same key as a secret).
-          KEYSTORE="$RUNNER_TEMP/rxclient.p12"
-          if [ -n "${{ secrets.APP_KEYSTORE_BASE64 }}" ]; then
-            printf '%s' "${{ secrets.APP_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE"
-            echo "Using the signing key from APP_KEYSTORE_BASE64"
-          else
-            test -f V2rayNG/signing/rxclient.p12 || {
-              echo "::error::V2rayNG/signing/rxclient.p12 is missing; updates would get a new signature"
-              exit 1
-            }
-            cp V2rayNG/signing/rxclient.p12 "$KEYSTORE"
-            echo "Using the checked-in release key V2rayNG/signing/rxclient.p12"
+          # Android only installs an update when the signature is unchanged, so there is exactly
+          # one key, for ever. It lives only in the repository secrets, never in the repository:
+          # a public key file lets anyone sign a fake app as RX VPN. There is no fallback on
+          # purpose - a build without the key must fail instead of shipping another signature.
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Secret APP_KEYSTORE_BASE64 is not set. Add the RX VPN signing key under Settings > Secrets and variables > Actions."
+            exit 1
           fi
+          KEYSTORE="$RUNNER_TEMP/rxvpn.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
           echo "KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
       - name: Build release APKs
         env:
-          STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD || 'mobixvpn' }}
-          KEY_ALIAS: ${{ secrets.APP_KEYSTORE_ALIAS || 'mobix' }}
-          KEY_PASSWORD: ${{ secrets.APP_KEY_PASSWORD || 'mobixvpn' }}
+          STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: rxvpn
+          KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
           cd V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
@@ -173,7 +171,7 @@ jobs:
 
       - name: Verify signing certificate
         env:
-          EXPECTED_SHA256: "52864c67af63074ab2a613643a4b09434e3d320b87dc9c1d6bef514d881a5c83"
+          EXPECTED_SHA256: "845b7323f50757566efeda24c07a6c4f732821d1ee473fbc1ec27998acf39ab8"
         run: |
           # Guards the in-place-update promise: a different certificate means every user would
           # have to uninstall before installing this build.
@@ -266,9 +264,8 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: |
-      (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    # Only on request: a push to master builds and tests, it never publishes by itself.
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
