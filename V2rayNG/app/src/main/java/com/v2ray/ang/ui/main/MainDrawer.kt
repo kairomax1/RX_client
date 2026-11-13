@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.material3.DrawerValue
 import androidx.compose.foundation.layout.Box
 import com.v2ray.ang.ui.compose.RxFogBackground
 import androidx.annotation.DrawableRes
@@ -79,7 +80,11 @@ fun MainDrawerContent(
     ) {
         // The sheet keeps its dark (or paper) tone; the fog drifting across it is the second colour.
         Box(Modifier.fillMaxSize()) {
-        RxFogBackground(Modifier.matchParentSize())
+        // A closed drawer is off screen: its fog must not keep the screen redrawing.
+        RxFogBackground(
+            Modifier.matchParentSize(),
+            active = drawerState.isOpen || drawerState.isAnimating || drawerState.targetValue == DrawerValue.Open,
+        )
         Column(
             modifier = Modifier
                 .verticalScroll(drawerScrollState)

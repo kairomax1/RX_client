@@ -1,5 +1,11 @@
 package com.v2ray.ang.ui.compose
 
+import androidx.compose.runtime.LongState
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.graphics.drawscope.scale
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
@@ -152,12 +158,8 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
     val dark = rxIsDark()
     val animate = rememberAnimationsEnabled()
     val field = remember { DustField() }
-    var frameNanos by remember { mutableLongStateOf(0L) }
-    if (animate) {
-        LaunchedEffect(Unit) {
-            while (true) withFrameNanos { frameNanos = it }
-        }
-    }
+    val frameNanos by rememberFrameClock(animate)
+    val lights = remember(dark) { DustLights() }
     val speck = if (dark) Color(0xFFD7E1F5) else Color(0xFF39465A)
     val speckGain = if (dark) 1f else 0.62f
     val firstLight = if (dark) Color(0x2E8A9CC8) else Color(0x3D9DB2D6)
@@ -166,29 +168,19 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
         field.ensure(size, density)
         field.step(frameNanos)
         val t = field.seconds
-        // Two wide, faint lights on slow, different orbits.
-        val first = Offset(
-            size.width * (0.5f + 0.32f * sin(t * 0.11f)),
-            size.height * (0.36f + 0.10f * cos(t * 0.09f)),
-        )
-        drawRect(
-            Brush.radialGradient(
-                colors = listOf(firstLight, Color.Transparent),
-                center = first,
-                radius = size.height * 0.55f,
-            )
-        )
-        val second = Offset(
-            size.width * (0.5f - 0.36f * sin(t * 0.07f + 1.3f)),
-            size.height * (0.78f + 0.08f * sin(t * 0.13f)),
-        )
-        drawRect(
-            Brush.radialGradient(
-                colors = listOf(secondLight, Color.Transparent),
-                center = second,
-                radius = size.height * 0.42f,
-            )
-        )
+        // Two wide, faint lights on slow, different orbits. Each gradient is built once per
+        // size and moved into place, instead of a new shader on every frame.
+        lights.ensure(size, firstLight, secondLight)
+        val firstX = size.width * (0.5f + 0.32f * sin(t * 0.11f))
+        val firstY = size.height * (0.36f + 0.10f * cos(t * 0.09f))
+        translate(firstX, firstY) {
+            drawRect(lights.first!!, topLeft = Offset(-firstX, -firstY), size = size)
+        }
+        val secondX = size.width * (0.5f - 0.36f * sin(t * 0.07f + 1.3f))
+        val secondY = size.height * (0.78f + 0.08f * sin(t * 0.13f))
+        translate(secondX, secondY) {
+            drawRect(lights.second!!, topLeft = Offset(-secondX, -secondY), size = size)
+        }
         for (i in 0 until field.count) {
             val twinkle = 0.65f + 0.35f * sin(t * 1.4f + field.phase[i])
             drawCircle(
@@ -206,16 +198,14 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
  * on top stays readable. With animations off it is a still mist.
  */
 @Composable
-fun RxFogBackground(modifier: Modifier = Modifier) {
+fun RxFogBackground(modifier: Modifier = Modifier, active: Boolean = true) {
     val dark = rxIsDark()
     val animate = rememberAnimationsEnabled()
-    var frameNanos by remember { mutableLongStateOf(0L) }
+    // [active] is false while the fog cannot be seen (a closed drawer): no frames are asked for
+    // then, and the fog simply continues from where it was when it shows again.
+    val frameNanos by rememberFrameClock(animate && active)
     val clock = remember { FloatArray(2) } // [0] seconds elapsed, [1] last frame in seconds
-    if (animate) {
-        LaunchedEffect(Unit) {
-            while (true) withFrameNanos { frameNanos = it }
-        }
-    }
+    val banks = remember(dark) { FogBanks() }
     val ink = if (dark) Color.White else Color(0xFF5B6B84)
     val strength = if (dark) 1f else 0.75f
     Canvas(modifier) {
@@ -225,6 +215,7 @@ fun RxFogBackground(modifier: Modifier = Modifier) {
         val t = clock[0]
         val w = size.width
         val h = size.height
+        banks.ensure(w, ink)
         for (i in 0 until FOG_BANKS) {
             val seed = i * 1.618f
             // Each bank crosses the sheet at its own pace and wraps around well off screen.
@@ -236,19 +227,71 @@ fun RxFogBackground(modifier: Modifier = Modifier) {
             val radius = w * (0.55f + 0.12f * (i % 3))
             val alpha = (0.115f + 0.03f * (i % 2)) * breathe * strength
             // Stretched sideways so a bank reads as a drifting sheet of mist, not a round spot.
-            scale(scaleX = 1.9f, scaleY = 0.8f, pivot = Offset(x, y)) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(ink.copy(alpha = alpha), ink.copy(alpha = alpha * 0.45f), Color.Transparent),
-                        center = Offset(x, y),
-                        radius = radius,
-                    ),
-                    radius = radius,
-                    center = Offset(x, y),
-                )
+            // The gradient is shared and only moved, scaled and faded per bank.
+            withTransform({
+                translate(x, y)
+                scale(scaleX = 1.9f, scaleY = 0.8f, pivot = Offset.Zero)
+            }) {
+                drawCircle(brush = banks.brushes[i % 3]!!, radius = radius, center = Offset.Zero, alpha = alpha)
             }
         }
     }
+}
+
+/** The three fog gradients (one per bank size), rebuilt only when the width or the ink changes. */
+private class FogBanks {
+    val brushes = arrayOfNulls<Brush>(3)
+    private var width = -1f
+    private var ink = Color.Unspecified
+
+    fun ensure(w: Float, color: Color) {
+        if (w == width && color == ink) return
+        width = w
+        ink = color
+        for (k in 0 until 3) {
+            brushes[k] = Brush.radialGradient(
+                colors = listOf(color, color.copy(alpha = 0.45f), Color.Transparent),
+                center = Offset.Zero,
+                radius = (w * (0.55f + 0.12f * k)).coerceAtLeast(1f),
+            )
+        }
+    }
+}
+
+/** The two wallpaper lights, rebuilt only when the screen size or the colours change. */
+private class DustLights {
+    var first: Brush? = null
+    var second: Brush? = null
+    private var size = Size.Unspecified
+    private var firstColor = Color.Unspecified
+    private var secondColor = Color.Unspecified
+
+    fun ensure(canvas: Size, a: Color, b: Color) {
+        if (canvas == size && a == firstColor && b == secondColor && first != null) return
+        size = canvas
+        firstColor = a
+        secondColor = b
+        first = Brush.radialGradient(listOf(a, Color.Transparent), Offset.Zero, (canvas.height * 0.55f).coerceAtLeast(1f))
+        second = Brush.radialGradient(listOf(b, Color.Transparent), Offset.Zero, (canvas.height * 0.42f).coerceAtLeast(1f))
+    }
+}
+
+/**
+ * Frame time for the decorative layers. It only ticks while [active] and while the screen is
+ * actually on show: in the background, or with the display off, no frame is requested at all.
+ */
+@Composable
+private fun rememberFrameClock(active: Boolean): LongState {
+    val state = remember { mutableLongStateOf(0L) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    if (active) {
+        LaunchedEffect(lifecycle) {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) withFrameNanos { state.longValue = it }
+            }
+        }
+    }
+    return state
 }
 
 private const val FOG_BANKS = 5

@@ -324,7 +324,7 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun importClipboard() {
         try {
             val text = Utils.getClipboard(this)
-            mainViewModel.onAction(MainAction.ImportBatchConfig(text))
+            mainViewModel.onAction(MainAction.ImportBatchConfig(text, askSubName = true))
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to import config from clipboard", e)
         }

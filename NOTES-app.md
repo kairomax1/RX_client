@@ -166,3 +166,18 @@ Not run on a device: none of the above was seen on a phone or emulator.
   (`pref_welcome_shown`). The Persian text is the owner's wording: do not edit it.
 - **Links.** `ExternalLinks.open` turns `t.me/...` into `tg://` so Telegram opens directly, tries
   the YouTube app for YouTube links, and falls back to the browser.
+
+## Third fix round after device tests
+
+Nine items, delivered together.
+
+- **DNS switch** in settings is stored (`pref_show_dns_settings`), so it survives leaving the screen and a restart.
+- **Fragment examples** read `50-100` and `10-20` in Persian too: the range is wrapped in left-to-right marks, otherwise right-to-left text mirrors it.
+- **Persian UI**: the built-in group is stored as "Default" and is shown as «کانفیگ های عادی» (`group_default_name`) at display time, only while the user has not renamed it. Config names, names sent by a subscription server and protocol names are left alone.
+- **Conversational prompts** (`ui/compose/RxPrompt.kt`): one family of cards that rise from the bottom of the screen, written in the Lalezar display face (SIL OFL, `res/font/lalezar_regular.ttf`, licence in `assets/lalezar_OFL.txt`). Used for the subscription name question, the single-config delete check and every backup/restore step. Their texts are the owner's wording, marked `translatable="false"` and shown in Persian in every language; do not edit them.
+- **Subscription name**: asked only when the clipboard holds exactly one subscription link that is not stored yet. No, empty or back gives «اشتراک ها», then «اشتراک ها ۲», «۳» (`MainSubscriptionNaming.kt`).
+- **Automatic test** (`handler/AutoConfigTest.kt`): after an import or a subscription update every new config is pinged, then the five lowest pings are speed-tested with a 600 KB download. A config that is not connected has no tunnel, so each speed test starts a private core for that config with a local HTTP inbound and stops it again; the running VPN is untouched. Numbers are kept in their own storage (`RX_AUTO_TEST`).
+- **Badges** (`handler/ConfigBadges.kt`, rules covered by tests): per group, one config per badge. Winner of both ping and speed is «پیشنهادی» and the titles go to the runners-up; with different winners each keeps its title and the best all-rounder of the rest is recommended.
+- **Battery**, with no visible change: decorative frame loops run only while the screen is on show; the drawer fog asks for no frames while the drawer is closed; wallpaper lights and fog banks reuse their gradients instead of building shaders every frame; the update dot no longer recomposes each frame; backups are built off the main thread.
+- **Config list settings**: the two-column and "all" tab switches are gone (fixed off); speed display and delete confirmation default to on.
+- **Backup screen**: two choices only. A backup is always password protected and leaves out ping results (`SERVER_AFF`) and the automatic test numbers. Older unencrypted backups still restore. Three wrong passwords end the attempt; the file is never locked. WebDAV, share and cleanup code is still in the view model but has no entry on the screen.

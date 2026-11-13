@@ -505,6 +505,7 @@ private fun ServerListItem(
                     contentColor = colors.onSurfaceVariant,
                     containerColor = colors.onSurface.copy(alpha = 0.08f),
                 )
+                row.badge?.let { ConfigBadgeChip(it, Modifier.padding(start = 8.dp)) }
                 if (doubleColumnDisplay && delayText.isNotEmpty()) {
                     RxPill(
                         text = delayText,

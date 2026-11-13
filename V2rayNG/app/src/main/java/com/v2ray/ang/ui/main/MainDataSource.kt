@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.dto.SubscriptionUpdateResult
 import com.v2ray.ang.dto.TestServiceMessage
 import com.v2ray.ang.dto.entities.ProfileItem
@@ -49,8 +50,18 @@ interface MainDataSource : Closeable {
     suspend fun importBatchConfig(
         server: String?,
         subscriptionId: String,
-        updateUI: Boolean
+        updateUI: Boolean,
+        subscriptionName: String? = null,
     ): Pair<Int, Int>
+
+    /** True for a link that would be imported as a subscription. */
+    fun isSubscriptionUrl(value: String): Boolean
+
+    /** Pings [guids], speed-tests the best few and stores the numbers the badges are made from. */
+    suspend fun autoTestConfigs(guids: List<String>)
+
+    /** Badges among [guids], which must be the configs of one group. */
+    fun badgesFor(guids: List<String>): Map<String, ConfigBadge>
 
     fun updateConfigViaSubAll(): SubscriptionUpdateResult
     fun updateConfigViaSub(subscriptionCache: SubscriptionCache): SubscriptionUpdateResult

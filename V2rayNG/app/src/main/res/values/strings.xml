@@ -726,4 +726,37 @@
     <string name="welcome_body">This app is developed by Aimobix, a maker active on Telegram and YouTube.\n\nThank you sincerely for choosing us. ❤️\n\nWe have one request:\n\nWe would be glad if you supported us on our GitHub page. It helps us keep developing this app, add more services and features, and give you a better and more complete experience.\n\nWe also suggest joining our Telegram group, so you hear the latest news, announcements and app updates and never miss anything.</string>
     <string name="welcome_closing">Thank you for your valuable company and support. ❤️\n\nWith respect, the Aimobix team</string>
     <string name="welcome_continue">Enter the app</string>
+    <!-- Conversational prompts: the owner's own wording, shown in Persian in every language. Do not edit or translate. -->
+    <string name="sub_name_ask" translatable="false">"میخوای برای لینک سابت اسم بذاری"</string>
+    <string name="sub_name_no" translatable="false">"نه عامو ولمون کن"</string>
+    <string name="sub_name_yes" translatable="false">"اره،میخوام بذارم"</string>
+    <string name="sub_name_default" translatable="false">"اشتراک ها"</string>
+    <string name="delete_ask" translatable="false">"مطمئن هستی از حذف کانفیگت؟"</string>
+    <string name="delete_warn" translatable="false">"👉🏻 حواست باشه اشتباهی حذف نکنی"</string>
+    <string name="delete_no" translatable="false">"نه عامو،حذف نکن"</string>
+    <string name="delete_yes" translatable="false">"حواسم هست،خیالت تخت"</string>
+    <string name="backup_pass_ask" translatable="false">"ی رمز مطمئن بذار،اگه یادت بره،دیگه قابل بازگشت نیست"</string>
+    <string name="prompt_write_hint" translatable="false">"بنویس..."</string>
+    <string name="prompt_dots_hint" translatable="false">"..."</string>
+    <string name="prompt_do_it" translatable="false">"انجامش بده"</string>
+    <string name="prompt_cancel" translatable="false">"منصرف شدم"</string>
+    <string name="restore_hello" translatable="false">"هممم،میبینم که برگشتی بازیابی انجام بدی"</string>
+    <string name="restore_pass_ask" translatable="false">"رمز فایل پشتیبان رو بنویس"</string>
+    <string name="restore_wrong" translatable="false">"رمزت اشتباست،"</string>
+    <string name="restore_give_up" translatable="false">"ما که گفتیم رمز مطمئن بذار،الانم که یادت نمیاد،از قیدش بزن"</string>
+    <string name="restore_give_up_ok" translatable="false">"باشه..."</string>
+    <string name="restore_ok_plain" translatable="false">"فایلت به آسونی  دریافت شد،برو حالشو ببر"</string>
+    <string name="restore_ok_plain_btn" translatable="false">"دمت گرم حلالت مرد"</string>
+    <string name="restore_ok_locked" translatable="false">"تبریک،رمز درست بود،الان راحتی!"</string>
+    <string name="restore_ok_locked_btn" translatable="false">"باشه،ممنون بابت تبریک"</string>
+    <string name="group_default_name">Regular configs</string>
+    <string name="backup_file_title">Back up to a file</string>
+    <string name="backup_file_desc">Settings, configs, subscriptions and layout in one password-protected file. Ping results are not saved.</string>
+    <string name="restore_file_title">Restore from a file</string>
+    <string name="restore_file_desc">Pick your backup file from the phone to bring everything back.</string>
+    <string name="backup_saved">Backup file saved</string>
+    <string name="badge_recommended">Recommended</string>
+    <string name="badge_lowest_ping">Lowest ping</string>
+    <string name="badge_fastest">Fastest</string>
+    <string name="auto_test_running">Measuring the new configs…</string>
 </resources>

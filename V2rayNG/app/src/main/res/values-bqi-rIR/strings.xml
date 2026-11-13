@@ -633,9 +633,9 @@
     <string name="settings_fragment_packets_title">کدام بسته‌ها تکه شوند</string>
     <string name="settings_fragment_packets_hint">برای بیشتر اینترنت‌ها «tlshello» بهترین انتخاب است</string>
     <string name="settings_fragment_length_title">اندازهٔ هر تکه</string>
-    <string name="settings_fragment_length_hint">کمترین-بیشترین، به بایت. مثال: 50-100</string>
+    <string name="settings_fragment_length_hint">کمترین-بیشترین، به بایت. مثال: ‎50-100‎</string>
     <string name="settings_fragment_interval_title">فاصلهٔ بین تکه‌ها</string>
-    <string name="settings_fragment_interval_hint">کمترین-بیشترین، به میلی‌ثانیه. مثال: 10-20</string>
+    <string name="settings_fragment_interval_hint">کمترین-بیشترین، به میلی‌ثانیه. مثال: ‎10-20‎</string>
     <string name="settings_fragment_maxsplit_title">بیشترین تعداد تکه</string>
     <string name="settings_fragment_maxsplit_hint">خالی یا 0 یعنی بدون محدودیت</string>
     <string name="settings_maintenance_switch_title">فعال باشد</string>
@@ -643,4 +643,14 @@
     <string name="welcome_body">این برنامه توسط سازنده Aimobix توسعه داده شده است؛ سازنده‌ای که در پلتفرم‌های تلگرام و یوتیوب فعالیت دارد.\n\nاز اینکه ما را انتخاب کرده‌اید، صمیمانه سپاسگزاریم. ❤️\n\nدرخواستی از شما داریم:\n\nخوشحال می‌شویم با حمایت از ما در صفحه گیت‌هاب، به ادامه مسیر توسعه این برنامه کمک کنید تا بتوانیم سرویس‌ها و امکانات بیشتری به آن اضافه کنیم و تجربه بهتر و کامل‌تری برای شما فراهم سازیم.\n\nهمچنین پیشنهاد می‌کنیم حتماً در گروه تلگرامی ما عضو شوید تا از آخرین اخبار، اطلاعیه‌ها و به‌روزرسانی‌های برنامه مطلع بمانید و هیچ خبری را از دست ندهید.</string>
     <string name="welcome_closing">از همراهی و حمایت ارزشمند شما سپاسگزاریم. ❤️\n\nبا احترام، تیم Aimobix</string>
     <string name="welcome_continue">ورود به برنامه</string>
+    <string name="group_default_name">کانفیگ های عادی</string>
+    <string name="backup_file_title">پشتیبان گیری فایل</string>
+    <string name="backup_file_desc">تنظیمات، کانفیگ‌ها، اشتراک‌ها و چیدمان در یک فایل رمزدار. نتیجهٔ پینگ‌ها ذخیره نمی‌شود.</string>
+    <string name="restore_file_title">بازیابی فایل</string>
+    <string name="restore_file_desc">فایل پشتیبان را از گوشی انتخاب کن تا همه‌چیز برگردد.</string>
+    <string name="backup_saved">فایل پشتیبان ذخیره شد</string>
+    <string name="badge_recommended">پیشنهادی</string>
+    <string name="badge_lowest_ping">کم پینگ ترین</string>
+    <string name="badge_fastest">پرسرعت ترین</string>
+    <string name="auto_test_running">در حال سنجش کانفیگ‌های تازه…</string>
 </resources>

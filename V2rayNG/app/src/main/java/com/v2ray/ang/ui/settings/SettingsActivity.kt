@@ -109,7 +109,8 @@ fun SettingsScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val systemVpnSettingsAvailable by viewModel.systemVpnSettingsAvailable.collectAsStateWithLifecycle()
     var uiSettingsExpanded by rememberSaveable { mutableStateOf(true) }
-    var vpnSettingsExpanded by rememberSaveable { mutableStateOf(false) }
+    // Kept in storage so the switch stays where the user left it, also after a restart.
+    var vpnSettingsExpanded by rememberMmkvBool(AppConfig.PREF_SHOW_DNS_SETTINGS, false)
     var coreSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var muxSettingsExpanded by rememberSaveable { mutableStateOf(false) }
     var fragmentSettingsExpanded by rememberSaveable { mutableStateOf(true) }
@@ -160,10 +161,8 @@ fun SettingsScreen(
     var socksEnableUdp by rememberMmkvBool(AppConfig.PREF_SOCKS_ENABLE_UDP, AppConfig.DEFAULT_SOCKS_ENABLE_UDP)
     var proxySharing by rememberMmkvBool(AppConfig.PREF_PROXY_SHARING, false)
 
-    var speedEnabled by rememberMmkvBool(AppConfig.PREF_SPEED_ENABLED, false)
-    var confirmRemove by rememberMmkvBool(AppConfig.PREF_CONFIRM_REMOVE, false)
-    var doubleColumnDisplay by rememberMmkvBool(AppConfig.PREF_DOUBLE_COLUMN_DISPLAY, false)
-    var groupAllDisplay by rememberMmkvBool(AppConfig.PREF_GROUP_ALL_DISPLAY, false)
+    var speedEnabled by rememberMmkvBool(AppConfig.PREF_SPEED_ENABLED, true)
+    var confirmRemove by rememberMmkvBool(AppConfig.PREF_CONFIRM_REMOVE, true)
     var language by remember {
         mutableStateOf(
             MmkvManager.decodeSettingsString(AppConfig.PREF_LANGUAGE, Language.PERSIAN.code) ?: Language.PERSIAN.code
@@ -414,15 +413,6 @@ fun SettingsScreen(
                 order = 3
             ) {
                 SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_double_column_display),
-                    summary = stringResource(R.string.summary_pref_double_column_display),
-                    checked = doubleColumnDisplay,
-                    onCheckedChange = {
-                        doubleColumnDisplay = it
-                        SettingsChangeManager.makeSetupGroupTab()
-                    }
-                )
-                SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_speed_enabled),
                     summary = stringResource(R.string.summary_pref_speed_enabled),
                     checked = speedEnabled,
@@ -433,15 +423,6 @@ fun SettingsScreen(
                     summary = stringResource(R.string.summary_pref_confirm_remove),
                     checked = confirmRemove,
                     onCheckedChange = { confirmRemove = it }
-                )
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_group_all_display),
-                    summary = stringResource(R.string.summary_pref_group_all_display),
-                    checked = groupAllDisplay,
-                    onCheckedChange = {
-                        groupAllDisplay = it
-                        SettingsChangeManager.makeSetupGroupTab()
-                    }
                 )
             }
 

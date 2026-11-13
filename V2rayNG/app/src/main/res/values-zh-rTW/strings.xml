@@ -641,4 +641,14 @@
     <string name="welcome_body">This app is developed by Aimobix, a maker active on Telegram and YouTube.\n\nThank you sincerely for choosing us. ❤️\n\nWe have one request:\n\nWe would be glad if you supported us on our GitHub page. It helps us keep developing this app, add more services and features, and give you a better and more complete experience.\n\nWe also suggest joining our Telegram group, so you hear the latest news, announcements and app updates and never miss anything.</string>
     <string name="welcome_closing">Thank you for your valuable company and support. ❤️\n\nWith respect, the Aimobix team</string>
     <string name="welcome_continue">Enter the app</string>
+    <string name="group_default_name">Regular configs</string>
+    <string name="backup_file_title">Back up to a file</string>
+    <string name="backup_file_desc">Settings, configs, subscriptions and layout in one password-protected file. Ping results are not saved.</string>
+    <string name="restore_file_title">Restore from a file</string>
+    <string name="restore_file_desc">Pick your backup file from the phone to bring everything back.</string>
+    <string name="backup_saved">Backup file saved</string>
+    <string name="badge_recommended">Recommended</string>
+    <string name="badge_lowest_ping">Lowest ping</string>
+    <string name="badge_fastest">Fastest</string>
+    <string name="auto_test_running">Measuring the new configs…</string>
 </resources>

@@ -145,6 +145,10 @@ fun MainScreen(
         onConfirmRemove = { guid -> showRemoveConfirm = null; onAction(MainAction.RemoveServer(guid)) }
     )
 
+    if (uiState.subNameRequest != null) {
+        SubscriptionNamePrompt(onAnswer = { name -> onAction(MainAction.AnswerSubName(name)) })
+    }
+
     if (shareTarget != null) {
         val (guid, profile, more) = shareTarget!!
         ShareMethodDialog(

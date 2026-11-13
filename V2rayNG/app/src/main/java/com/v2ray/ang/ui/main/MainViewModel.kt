@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.ConfigBadge
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -114,6 +115,12 @@ class MainViewModel(
     /** True while a newer official release is known; drives the red dot on the menu button. */
     val updatePending: StateFlow<Boolean> = UpdateNotifier.pending
     private var bulkTestJob: Job? = null
+
+    // ---------- Automatic test of new configs ----------
+    private var autoTestJob: Job? = null
+
+    @Volatile
+    private var badges: Map<String, ConfigBadge> = emptyMap()
 
     private val initialPageReady = CompletableDeferred<Unit>()
 
@@ -416,7 +423,8 @@ class MainViewModel(
             is MainAction.SelectServer -> updateSelectedGuid(action.guid)
             is MainAction.RemoveServer -> removeServerAndRefresh(action.guid)
             is MainAction.Search -> filterConfig(action.query)
-            is MainAction.ImportBatchConfig -> importBatchConfig(action.configText)
+            is MainAction.ImportBatchConfig -> onImportRequested(action.configText, action.askSubName)
+            is MainAction.AnswerSubName -> onSubNameAnswered(action.name)
             MainAction.LocateHandled -> consumeLocateTarget()
             is MainAction.ShareQRCode -> {
                 val bitmap = dataSource.share2QRCode(action.guid)
@@ -546,7 +554,8 @@ class MainViewModel(
         return servers.map { server ->
             buildServerRowUiModel(
                 server = server,
-                subscriptionRemarks = subscriptionRemarks[server.profile.subscriptionId].orEmpty()
+                subscriptionRemarks = subscriptionRemarks[server.profile.subscriptionId].orEmpty(),
+                badge = badges[server.guid],
             )
         }
     }
@@ -588,10 +597,15 @@ class MainViewModel(
                 if (forceRefresh) {
                     cacheMutex.withLock { groupDataCache.clear() }
                 }
+                badges = computeBadges()
                 val groups = dataSource.getSubscriptions().map {
                     GroupMapItem(
                         id = it.guid,
-                        remarks = it.subscription.remarks,
+                        remarks = if (it.guid == AppConfig.DEFAULT_SUBSCRIPTION_ID && it.subscription.remarks == "Default") {
+                            dataSource.getString(R.string.group_default_name)
+                        } else {
+                            it.subscription.remarks
+                        },
                         usageInfo = it.subscription.usageInfo?.let { info ->
                             SubscriptionInfoParser.withWebPageFallback(info, it.subscription.url)
                         },
@@ -648,12 +662,46 @@ class MainViewModel(
     }
 
     // ---------- Business actions (coroutine-based) ----------
-    private fun importBatchConfig(configText: String) {
+    /**
+     * A single subscription link from the clipboard is first offered a name; everything else is
+     * imported straight away.
+     */
+    private fun onImportRequested(configText: String, askSubName: Boolean) {
+        if (!askSubName) {
+            importBatchConfig(configText)
+            return
+        }
+        viewModelScope.launch(ioDispatcher) {
+            val link = singleSubscriptionLink(configText, dataSource::isSubscriptionUrl)
+                ?.takeIf { url -> dataSource.getSubscriptions().none { it.subscription.url == url } }
+            if (link == null) {
+                withContext(Dispatchers.Main) { importBatchConfig(configText) }
+            } else {
+                _uiState.update { it.copy(subNameRequest = link) }
+            }
+        }
+    }
+
+    private fun onSubNameAnswered(typed: String?) {
+        val link = uiState.value.subNameRequest ?: return
+        _uiState.update { it.copy(subNameRequest = null) }
+        viewModelScope.launch(ioDispatcher) {
+            val name = resolveSubscriptionName(
+                typed = typed,
+                base = dataSource.getString(R.string.sub_name_default),
+                existing = dataSource.getSubscriptions().map { it.subscription.remarks },
+            )
+            withContext(Dispatchers.Main) { importBatchConfig(link, name) }
+        }
+    }
+
+    private fun importBatchConfig(configText: String, subscriptionName: String? = null) {
         launchLoading {
             withContext(ioDispatcher) {
                 try {
+                    val before = allConfigGuids()
                     val (count, countSub) = dataSource.importBatchConfig(
-                        configText, uiState.value.selectedGroupId, true
+                        configText, uiState.value.selectedGroupId, true, subscriptionName
                     )
                     when {
                         count > 0 -> {
@@ -664,6 +712,7 @@ class MainViewModel(
                         countSub > 0 -> setupGroupTab(forceRefresh = true)
                         else -> toastError(R.string.toast_failure)
                     }
+                    if (count > 0 || countSub > 0) startAutoTest(before)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
@@ -674,10 +723,42 @@ class MainViewModel(
         }
     }
 
+    private fun allConfigGuids(): Set<String> =
+        dataSource.getSubscriptions().flatMapTo(HashSet()) { dataSource.getServerGuidList(it.guid) }
+
+    private fun computeBadges(): Map<String, ConfigBadge> {
+        val result = HashMap<String, ConfigBadge>()
+        dataSource.getSubscriptions().forEach { result.putAll(dataSource.badgesFor(dataSource.getServerGuidList(it.guid))) }
+        return result
+    }
+
+    /**
+     * Tests every config that was not there [before], without holding the screen: the list stays
+     * usable and simply shows the numbers and badges when they are ready.
+     */
+    private fun startAutoTest(before: Set<String>) {
+        autoTestJob?.cancel()
+        autoTestJob = viewModelScope.launch(ioDispatcher) {
+            try {
+                val fresh = allConfigGuids().filter { it !in before }
+                if (fresh.isEmpty()) return@launch
+                dataSource.autoTestConfigs(fresh)
+                badges = computeBadges()
+                cacheMutex.withLock { groupDataCache.clear() }
+                reloadAllGroups(_uiState.value.groups.map { it.id })
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Automatic config test failed", e)
+            }
+        }
+    }
+
     private fun importConfigViaSub(subId: String) {
         launchLoading {
             withContext(ioDispatcher) {
                 try {
+                    val before = allConfigGuids()
                     val result = if (subId.isEmpty()) {
                         dataSource.updateConfigViaSubAll()
                     } else {
@@ -703,6 +784,7 @@ class MainViewModel(
                     if (result.configCount > 0) {
                         setupGroupTab(forceRefresh = true)
                         refreshSelectedGuid()
+                        startAutoTest(before)
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -1113,6 +1195,7 @@ class MainViewModel(
         selectedGroupLoadJob?.cancel()
         reloadJob?.cancel()
         filterJob?.cancel()
+        autoTestJob?.cancel()
         cancelAllPing()
         dataSource.close()
         super.onCleared()

@@ -181,7 +181,7 @@ object AngConfigManager {
      * @param append Whether to append the configurations.
      * @return A pair containing the number of configurations and subscriptions imported.
      */
-    fun importBatchConfig(server: String?, subid: String, append: Boolean): Pair<Int, Int> {
+    fun importBatchConfig(server: String?, subid: String, append: Boolean, subName: String? = null): Pair<Int, Int> {
         return try {
             var count = parseBatchConfig(Utils.decode(server), subid, append)
             if (count <= 0) {
@@ -191,9 +191,9 @@ object AngConfigManager {
                 count = parseCustomConfigServer(server, subid, append)
             }
 
-            var countSub = parseBatchSubscription(server)
+            var countSub = parseBatchSubscription(server, subName)
             if (countSub <= 0) {
-                countSub = parseBatchSubscription(Utils.decode(server))
+                countSub = parseBatchSubscription(Utils.decode(server), subName)
             }
             if (countSub > 0) {
                 updateConfigViaSubAll()
@@ -212,7 +212,7 @@ object AngConfigManager {
      * @param servers The servers string.
      * @return The number of subscriptions parsed.
      */
-    private fun parseBatchSubscription(servers: String?): Int {
+    private fun parseBatchSubscription(servers: String?, subName: String? = null): Int {
         try {
             if (servers == null) {
                 return 0
@@ -223,7 +223,7 @@ object AngConfigManager {
                 .distinct()
                 .forEach { str ->
                     if (Utils.isValidSubUrl(str)) {
-                        count += importUrlAsSubscription(str)
+                        count += importUrlAsSubscription(str, subName)
                     }
                 }
             return count
@@ -619,7 +619,7 @@ object AngConfigManager {
      * @param url The URL.
      * @return The number of subscriptions imported.
      */
-    private fun importUrlAsSubscription(url: String): Int {
+    private fun importUrlAsSubscription(url: String, subName: String? = null): Int {
         val subscriptions = MmkvManager.decodeSubscriptions()
         subscriptions.forEach {
             if (it.subscription.url == url) {
@@ -628,7 +628,7 @@ object AngConfigManager {
         }
         val uri = URI(Utils.fixIllegalUrl(url))
         val subItem = SubscriptionItem()
-        subItem.remarks = uri.fragment ?: "import sub"
+        subItem.remarks = subName?.takeIf { it.isNotBlank() } ?: uri.fragment ?: "import sub"
         subItem.url = url
         MmkvManager.encodeSubscription("", subItem)
         return 1

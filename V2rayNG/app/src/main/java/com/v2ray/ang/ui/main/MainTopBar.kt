@@ -189,24 +189,24 @@ fun MainTopBar(
 @Composable
 fun UpdateDotBadge(modifier: Modifier = Modifier) {
     val animate = rememberAnimationsEnabled()
+    // Kept as a State and read only inside graphicsLayer: the dot pulses without recomposing.
     val pulse = if (animate) {
-        val transition = rememberInfiniteTransition(label = "updateDot")
-        val value by transition.animateFloat(
+        rememberInfiniteTransition(label = "updateDot").animateFloat(
             initialValue = 0.75f,
             targetValue = 1.2f,
             animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
             label = "updateDotScale",
         )
-        value
     } else {
-        1f
+        null
     }
     Box(
         modifier
             .size(9.dp)
             .graphicsLayer {
-                scaleX = pulse
-                scaleY = pulse
+                val scale = pulse?.value ?: 1f
+                scaleX = scale
+                scaleY = scale
             }
             .clip(CircleShape)
             .background(UpdateDot)

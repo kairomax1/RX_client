@@ -99,7 +99,7 @@ object CoreConfigManager {
         val json = JsonUtil.parseString(raw)?.takeIf { it.isJsonObject }?.asJsonObject ?: return result
 
         // Inject or remove traffic statistics configuration based on user preference
-        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_SPEED_ENABLED) == true) {
+        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_SPEED_ENABLED, true) == true) {
             if (!json.has("stats")) {
                 json.add("stats", JsonObject())
             }
@@ -728,7 +728,7 @@ object CoreConfigManager {
      * Remove speed-test runtime sections when the feature is disabled.
      */
     private fun applySpeedDisabled(v2rayConfig: V2rayConfig) {
-        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_SPEED_ENABLED) != true) {
+        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_SPEED_ENABLED, true) != true) {
             v2rayConfig.stats = null
             v2rayConfig.policy?.system = null
         }

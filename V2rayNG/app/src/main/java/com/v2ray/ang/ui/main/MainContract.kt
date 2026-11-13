@@ -44,6 +44,8 @@ data class MainUiState(
     /** Address and country the tunnel leaves from, as seen by the last successful test. */
     val exitIp: String? = null,
     val exitCountry: String? = null,
+    /** A pasted subscription link waiting for the user to name it (or decline). */
+    val subNameRequest: String? = null,
 )
 
 /**
@@ -86,7 +88,10 @@ sealed interface MainAction {
     data object DismissQRCodeDialog : MainAction
     data class OpenSubscriptionLink(val url: String) : MainAction
 
-    data class ImportBatchConfig(val configText: String) : MainAction
+    data class ImportBatchConfig(val configText: String, val askSubName: Boolean = false) : MainAction
+
+    /** Answer to the subscription name question; null or blank means "no name". */
+    data class AnswerSubName(val name: String?) : MainAction
 
     data object LocateHandled : MainAction
 }
