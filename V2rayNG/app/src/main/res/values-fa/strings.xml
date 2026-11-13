@@ -750,4 +750,5 @@
     <string name="update_installed_version">نسخهٔ نصب‌شده: %s</string>
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
+    <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>
 </resources>

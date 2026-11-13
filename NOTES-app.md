@@ -215,3 +215,17 @@ Nine items, delivered together.
 - Typing caret alpha is read in the draw phase.
 - Master's `build.yml` publishes `v<versionName>` publicly on every push to `master`; that is
   how an old-code `v1.0.2` appeared. The release was deleted on the owner's request.
+
+## Play Protect round: new signing key, no install permission
+
+- **Signing key replaced, once.** The old key was public in the repository. The current key
+  (SHA-256 `845b7323...9ab8`, alias `rxvpn`) exists only in the secrets `APP_KEYSTORE_BASE64` and
+  `APP_KEYSTORE_PASSWORD` and in the owner's private copy. **Never generate another key**: the
+  owner's standing rule is that the signature stays fixed so updates always install. `build.yml`
+  fails without the secret or on a fingerprint mismatch. See `V2rayNG/signing/README.md`.
+  Anything above in this file about `rxclient.p12` / `mobix` / `mobixvpn` is history.
+- **`REQUEST_INSTALL_PACKAGES` removed.** The in-app download stays; "install" copies the APK to
+  the public Download folder (`UpdateNotifier.handOver`, Android 10+) and opens the downloads
+  list. Android 9 and older open the release page in the browser.
+- **No automatic publishing.** A push to `master` only builds and tests. A release is made by
+  running `build.yml` by hand with `release_tag`.

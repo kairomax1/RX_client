@@ -7,7 +7,11 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.v2ray.ang.service.UpdateWatchWorker
 import java.util.concurrent.TimeUnit
+import android.app.DownloadManager
 import android.app.NotificationChannel
+import android.content.ContentValues
+import android.os.Environment
+import android.provider.MediaStore
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -15,7 +19,6 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.FileProvider
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
@@ -123,11 +126,44 @@ object UpdateNotifier {
         onProgress: (UpdateDownloader.Progress) -> Unit = {},
     ): File? = UpdateDownloader.download(context, version, url, size, sha256, onProgress)
 
-    fun installIntent(context: Context, apk: File): Intent {
-        val uri = FileProvider.getUriForFile(context, BuildConfig.APPLICATION_ID + ".cache", apk)
-        return Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    /**
+     * Hands a downloaded update to the user. The app deliberately does not hold the "install
+     * apps" permission, so it cannot open the installer itself: the file is put into the phone's
+     * Download folder and the downloads list is opened; a tap on the file there installs it.
+     * Returns false when that is not possible (Android 9 and older, or no downloads app).
+     */
+    fun handOver(context: Context, apk: File): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        return try {
+            val resolver = context.contentResolver
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            // An earlier copy of the same version would make the system rename this one "(1)".
+            runCatching {
+                resolver.delete(collection, "${MediaStore.MediaColumns.DISPLAY_NAME} = ?", arrayOf(apk.name))
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, apk.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(collection, values) ?: return false
+            resolver.openOutputStream(uri)?.use { out -> apk.inputStream().use { it.copyTo(out, 64 * 1024) } }
+                ?: return false
+            resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            try {
+                context.startActivity(
+                    Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                // No downloads screen on this phone; the file is in the folder all the same.
+                LogUtil.w(AppConfig.TAG, "Downloads screen could not be opened", e)
+            }
+            true
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Update could not be put into Downloads", e)
+            false
+        }
     }
 
     /** At most once a day per version; tapping opens the update screen with the download button. */

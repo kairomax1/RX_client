@@ -1,6 +1,9 @@
 package com.v2ray.ang.ui.checkupdate
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -92,6 +95,8 @@ import com.v2ray.ang.ui.compose.SettingsSwitchItem
 import com.v2ray.ang.ui.compose.VersionInfoBlock
 import com.v2ray.ang.ui.compose.rememberAnimationsEnabled
 import com.v2ray.ang.util.LogUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class CheckUpdateActivity : BaseComponentActivity() {
 
@@ -126,10 +131,20 @@ fun CheckUpdateScreen(
 
     LaunchedEffect(installFile) {
         val apk = installFile ?: return@LaunchedEffect
-        try {
-            context.startActivity(UpdateNotifier.installIntent(context, apk))
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Could not open the installer", e)
+        // Copying the file takes a moment: off the main thread, so the screen stays smooth.
+        val handed = withContext(Dispatchers.IO) { UpdateNotifier.handOver(context, apk) }
+        if (handed) {
+            Toast.makeText(context, R.string.update_in_downloads, Toast.LENGTH_LONG).show()
+        } else {
+            // Older Android: the release page in the browser is the way to the file.
+            try {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(AppConfig.APP_URL + "/releases/latest"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Could not open the release page", e)
+            }
         }
         viewModel.onInstallHandled()
     }
