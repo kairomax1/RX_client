@@ -45,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -270,7 +271,8 @@ private fun ExitAddressText(ip: String?, country: String?) {
             )
         }
     }
-    val caret by rememberInfiniteTransition(label = "caret").animateFloat(
+    // Handed on as a State and read only while drawing: the blink does not recompose the line.
+    val caret = rememberInfiniteTransition(label = "caret").animateFloat(
         initialValue = 1f,
         targetValue = 0.15f,
         animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
@@ -319,13 +321,13 @@ private fun typedText(units: List<String>, progress: Float, ink: Color): Annotat
 }
 
 @Composable
-private fun TypingCaret(ink: Color, alpha: Float) {
+private fun TypingCaret(ink: Color, alpha: State<Float>) {
     Box(
         Modifier
             .padding(start = 2.dp)
             .width(2.dp)
             .height(15.dp)
-            .graphicsLayer { this.alpha = alpha }
+            .graphicsLayer { this.alpha = alpha.value }
             .background(ink)
     )
 }

@@ -37,9 +37,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -284,15 +283,22 @@ private fun UpdateCard(result: CheckUpdateResult, modifier: Modifier = Modifier)
                 color = colors.onSurface,
             )
             Spacer(Modifier.height(8.dp))
-            Text(
-                text = result.releaseNotes.orEmpty().ifBlank { stringResource(R.string.update_notes_empty) },
-                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp),
-                color = colors.onSurface.copy(alpha = 0.9f),
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-            )
+            // One item per line of the description: only the lines on screen are laid out and
+            // drawn, however long the text is. Looks the same as a single block of text.
+            val notes = result.releaseNotes.orEmpty().ifBlank { stringResource(R.string.update_notes_empty) }
+            val lines = remember(notes) { notes.lines() }
+            val noteStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp)
+            val noteColor = colors.onSurface.copy(alpha = 0.9f)
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(lines.size) { index ->
+                    Text(
+                        text = lines[index],
+                        style = noteStyle,
+                        color = noteColor,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
     }
 }

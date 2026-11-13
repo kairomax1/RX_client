@@ -204,3 +204,14 @@ Nine items, delivered together.
     it and the app shows only it. Everything else is the GitHub text. Without the block the app
     shows the whole description. See `UpdateRelease.appNotes`.
 - `versionName` is `1.0.1`; `versionCode` unchanged (4).
+
+### Lag fix after 1.0.1 device test (no visual change)
+
+- `RxDustBackground` and `RxFogBackground` draw in their own graphics layer. Before, each
+  wallpaper frame invalidated the layer it shared with the screen content, so the whole screen
+  (or, on the update screen, the whole long description) was re-recorded every frame.
+- The decoration clock is capped: dust ~60 fps, fog ~30 fps, instead of the display rate.
+- Update description is a `LazyColumn` of lines instead of one huge scrolling `Text`.
+- Typing caret alpha is read in the draw phase.
+- Master's `build.yml` publishes `v<versionName>` publicly on every push to `master`; that is
+  how an old-code `v1.0.2` appeared. The release was deleted on the owner's request.

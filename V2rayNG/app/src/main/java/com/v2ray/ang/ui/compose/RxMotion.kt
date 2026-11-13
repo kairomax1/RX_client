@@ -158,13 +158,15 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
     val dark = rxIsDark()
     val animate = rememberAnimationsEnabled()
     val field = remember { DustField() }
-    val frameNanos by rememberFrameClock(animate)
+    val frameNanos by rememberFrameClock(animate, DUST_FRAME_NANOS)
     val lights = remember(dark) { DustLights() }
     val speck = if (dark) Color(0xFFD7E1F5) else Color(0xFF39465A)
     val speckGain = if (dark) 1f else 0.62f
     val firstLight = if (dark) Color(0x2E8A9CC8) else Color(0x3D9DB2D6)
     val secondLight = if (dark) Color(0x1FB8C4DC) else Color(0x66FFFFFF)
-    Canvas(modifier.fillMaxSize()) {
+    // Its own layer: a new wallpaper frame repaints the wallpaper alone, instead of making the
+    // whole screen above it (list, bars, text) be recorded again on every frame.
+    Canvas(modifier.fillMaxSize().graphicsLayer()) {
         field.ensure(size, density)
         field.step(frameNanos)
         val t = field.seconds
@@ -203,12 +205,13 @@ fun RxFogBackground(modifier: Modifier = Modifier, active: Boolean = true) {
     val animate = rememberAnimationsEnabled()
     // [active] is false while the fog cannot be seen (a closed drawer): no frames are asked for
     // then, and the fog simply continues from where it was when it shows again.
-    val frameNanos by rememberFrameClock(animate && active)
+    val frameNanos by rememberFrameClock(animate && active, FOG_FRAME_NANOS)
     val clock = remember { FloatArray(2) } // [0] seconds elapsed, [1] last frame in seconds
     val banks = remember(dark) { FogBanks() }
     val ink = if (dark) Color.White else Color(0xFF5B6B84)
     val strength = if (dark) 1f else 0.75f
-    Canvas(modifier) {
+    // Own layer for the same reason as the wallpaper: text lying on the fog is not redrawn with it.
+    Canvas(modifier.graphicsLayer()) {
         val now = frameNanos / 1_000_000_000f
         if (clock[1] != 0f && now != 0f) clock[0] += (now - clock[1]).coerceIn(0f, 0.05f)
         clock[1] = now
@@ -281,13 +284,15 @@ private class DustLights {
  * actually on show: in the background, or with the display off, no frame is requested at all.
  */
 @Composable
-private fun rememberFrameClock(active: Boolean): LongState {
+private fun rememberFrameClock(active: Boolean, minFrameNanos: Long = 0L): LongState {
     val state = remember { mutableLongStateOf(0L) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     if (active) {
         LaunchedEffect(lifecycle) {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (true) withFrameNanos { state.longValue = it }
+                // Slow decoration does not need every frame of a 90 or 120 Hz display: frames
+                // closer together than [minFrameNanos] are skipped, and a skipped frame draws nothing.
+                while (true) withFrameNanos { if (it - state.longValue >= minFrameNanos) state.longValue = it }
             }
         }
     }
@@ -295,6 +300,10 @@ private fun rememberFrameClock(active: Boolean): LongState {
 }
 
 private const val FOG_BANKS = 5
+
+// Just under the nominal frame time, so a display running at exactly that rate skips nothing.
+private const val DUST_FRAME_NANOS = 15_000_000L // at most ~60 frames a second
+private const val FOG_FRAME_NANOS = 30_000_000L // at most ~30: fog drifts far too slowly to show it
 
 /** Dropdown with the app's floating surface: own background, thin border, round corners, shadow. */
 @Composable
