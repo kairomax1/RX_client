@@ -4,7 +4,7 @@
 
 ## سازنده
 
-این برنامه را **Mobix** ساخته و نگه‌داری می‌کند.
+این برنامه را **Aimobix** ساخته و نگه‌داری می‌کند.
 
 - تلگرام: [t.me/aimobix](https://t.me/aimobix)
 - یوتیوب: [youtube.com/@aimobixnet](https://youtube.com/@aimobixnet)
