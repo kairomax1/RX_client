@@ -435,6 +435,7 @@ private fun ServerListItem(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleSmall.copy(lineBreak = LineBreak.Paragraph),
                     fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -457,7 +458,8 @@ private fun ServerListItem(
                     Icon(
                         painterResource(R.drawable.ic_more_vert_24dp),
                         stringResource(R.string.acc_more),
-                        Modifier.size(22.dp)
+                        Modifier.size(22.dp),
+                        tint = colors.onSurface.copy(alpha = 0.85f)
                     )
                 }
             }

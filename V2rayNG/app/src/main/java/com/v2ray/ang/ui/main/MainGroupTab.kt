@@ -238,8 +238,10 @@ private fun GroupTabItem(
         if (!menuOpen && fill.value > 0f) fill.animateTo(0f, tween(260))
     }
 
+    // Ink follows the theme: light on the dark bar, graphite on the light one.
+    val ink = MaterialTheme.colorScheme.onSurface
     val selectedBrush = Brush.verticalGradient(
-        listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.06f))
+        listOf(ink.copy(alpha = 0.16f), ink.copy(alpha = 0.06f))
     )
 
     Box(propagateMinConstraints = true) {
@@ -253,7 +255,7 @@ private fun GroupTabItem(
                     if (selected) {
                         Modifier
                             .background(selectedBrush)
-                            .border(1.dp, Color.White.copy(alpha = 0.14f), TAB_SHAPE)
+                            .border(1.dp, ink.copy(alpha = 0.16f), TAB_SHAPE)
                     } else {
                         Modifier
                     }
@@ -263,7 +265,7 @@ private fun GroupTabItem(
                     if (value > 0f) {
                         // Grows from the start edge and brightens as it goes.
                         drawRect(
-                            color = Color.White.copy(alpha = 0.10f + 0.34f * value),
+                            color = ink.copy(alpha = 0.10f + 0.30f * value),
                             size = Size(this.size.width * value, this.size.height),
                         )
                     }

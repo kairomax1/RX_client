@@ -104,6 +104,9 @@ internal fun SubscriptionInfoCard(
         shape = MaterialTheme.shapes.medium,
         // Almost opaque: the list scrolls underneath without showing through readably.
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = CARD_ALPHA),
+        // A translucent colour is not a scheme role, so the matching ink has to be named;
+        // otherwise the title falls back to black.
+        contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
         Column(Modifier.padding(start = 16.dp, end = 10.dp, top = 8.dp, bottom = 10.dp)) {

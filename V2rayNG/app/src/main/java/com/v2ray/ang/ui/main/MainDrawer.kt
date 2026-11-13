@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.foundation.layout.Box
+import com.v2ray.ang.ui.compose.RxFogBackground
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -28,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -76,6 +77,9 @@ fun MainDrawerContent(
         modifier = Modifier.fillMaxWidth(0.75f),
         drawerContainerColor = MaterialTheme.colorScheme.surface
     ) {
+        // The sheet keeps its dark (or paper) tone; the fog drifting across it is the second colour.
+        Box(Modifier.fillMaxSize()) {
+        RxFogBackground(Modifier.matchParentSize())
         Column(
             modifier = Modifier
                 .verticalScroll(drawerScrollState)
@@ -86,14 +90,6 @@ fun MainDrawerContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                                MaterialTheme.colorScheme.surface,
-                            )
-                        )
-                    )
                     .padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 22.dp)
             ) {
                 Image(
@@ -112,7 +108,7 @@ fun MainDrawerContent(
                 Text(
                     text = stringResource(R.string.splash_tagline),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
@@ -125,16 +121,31 @@ fun MainDrawerContent(
                         null
                     }
                 NavigationDrawerItem(
-                    label = { Text(stringResource(item.labelRes)) },
+                    label = {
+                        Text(
+                            stringResource(item.labelRes),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    },
+                    // Full-strength ink: the default muted tone was hard to read on the dark sheet.
+                    colors = NavigationDrawerItemDefaults.colors(
+                        unselectedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurface,
+                    ),
                     selected = false,
                     onClick = { onNavigate(item) },
                     icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
                     badge = badge,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .padding(NavigationDrawerItemDefaults.ItemPadding)
+                        .padding(vertical = 4.dp)
                 )
             }
             Spacer(Modifier.height(14.dp))
+        }
         }
     }
 }

@@ -1,5 +1,10 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import com.v2ray.ang.ui.compose.rxIsDark
 import android.content.Context
 import android.os.Build
 import android.os.VibrationEffect
@@ -126,20 +131,21 @@ fun MainBottomBar(
                             Modifier
                                 .size(18.dp)
                                 .clip(CircleShape)
-                                .background(ConnectedDot.copy(alpha = 0.22f))
+                                .background(rxLiveColor().copy(alpha = 0.22f))
                         )
                     }
                     Box(
                         Modifier
                             .size(9.dp)
                             .clip(CircleShape)
-                            .background(if (connected) ConnectedDot else colors.outline)
+                            .background(if (connected) rxLiveColor() else colors.outline)
                     )
                 }
                 Text(
                     text = statusText,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (connected) colors.onSurface else colors.onSurfaceVariant,
+                    color = colors.onSurface,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
@@ -226,76 +232,107 @@ private fun DockSideButton(
     }
 }
 
-/** Regional-indicator flag for a two-letter country code; empty for anything else. */
-private fun countryFlag(code: String): String {
-    val upper = code.trim().uppercase()
-    if (upper.length != 2 || upper.any { it !in 'A'..'Z' }) return ""
-    return upper.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")
-}
-
 /**
- * The exit address, typed out one character at a time beside the status, followed by the country.
- * It is typed again whenever a new test reports a different address.
+ * The exit address beside the status: the IP is typed out calmly, each character fading in, then
+ * after a one second pause the country follows the same way. It is typed again only when a test
+ * reports a different address, so a fixed address simply stays.
  */
 @Composable
 private fun ExitAddressText(ip: String?, country: String?) {
     val animate = rememberAnimationsEnabled()
     val locale = LocalConfiguration.current.locales[0]
-    val countryPart = country?.trim().orEmpty().let { code ->
-        val flag = countryFlag(code)
-        // A two-letter code becomes the country's name in the app language; anything else is shown as sent.
-        val name = if (flag.isEmpty()) code else Locale("", code.uppercase()).getDisplayCountry(locale).ifBlank { code }
-        listOf(flag, name).filter { it.isNotEmpty() }.joinToString(" ")
+    val ipText = ip?.trim().orEmpty()
+    val countryText = remember(country, locale) {
+        MainExitAddress.countryLabel(country) { code -> Locale("", code).getDisplayCountry(locale) }
     }
-    val full = listOf(ip?.trim().orEmpty(), countryPart).filter { it.isNotEmpty() }.joinToString("  ·  ")
-    var shown by remember { mutableIntStateOf(0) }
-    LaunchedEffect(full) {
+    if (ipText.isEmpty() && countryText.isEmpty()) return
+    val ipUnits = remember(ipText) { MainExitAddress.typingUnits(ipText) }
+    val countryUnits = remember(countryText) { MainExitAddress.typingUnits(countryText) }
+    val ipProgress = remember { Animatable(0f) }
+    val countryProgress = remember { Animatable(0f) }
+    LaunchedEffect(ipText, countryText, animate) {
         if (!animate) {
-            shown = full.length
+            ipProgress.snapTo(ipUnits.size.toFloat())
+            countryProgress.snapTo(countryUnits.size.toFloat())
             return@LaunchedEffect
         }
-        shown = 0
-        while (shown < full.length) {
-            delay(42)
-            // Never stop between the two halves of a flag or other surrogate pair.
-            var next = shown + 1
-            while (next < full.length && Character.isLowSurrogate(full[next])) next++
-            shown = next
+        ipProgress.snapTo(0f)
+        countryProgress.snapTo(0f)
+        ipProgress.animateTo(
+            ipUnits.size.toFloat(),
+            tween(MainExitAddress.typingMillis(ipUnits.size), easing = LinearEasing),
+        )
+        if (countryUnits.isNotEmpty()) {
+            delay(MainExitAddress.COUNTRY_DELAY_MS)
+            countryProgress.animateTo(
+                countryUnits.size.toFloat(),
+                tween(MainExitAddress.typingMillis(countryUnits.size), easing = LinearEasing),
+            )
         }
     }
     val caret by rememberInfiniteTransition(label = "caret").animateFloat(
         initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        targetValue = 0.15f,
+        animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
         label = "caretAlpha",
     )
-    if (full.isEmpty()) return
-    val typing = shown < full.length
-    // Addresses are Latin: keep them left to right inside a right-to-left status line.
+    val ink = rxLiveColor()
+    val typingIp = ipProgress.value < ipUnits.size
+    val typingCountry = !typingIp && countryUnits.isNotEmpty() && countryProgress.value < countryUnits.size
+    // Addresses are Latin: keep the pair left to right inside a right-to-left status line.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = full.take(shown.coerceAtMost(full.length)),
+                text = typedText(ipUnits, ipProgress.value, ink),
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
-                color = ConnectedDot,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
-            if (typing && animate) {
-                Box(
-                    Modifier
-                        .padding(start = 2.dp)
-                        .width(2.dp)
-                        .height(15.dp)
-                        .graphicsLayer { alpha = caret }
-                        .background(ConnectedDot)
+            if (animate && typingIp) TypingCaret(ink, caret)
+            if (countryProgress.value > 0f || typingCountry) {
+                Text(
+                    text = typedText(countryUnits, countryProgress.value, ink),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 10.dp),
                 )
+                if (animate && typingCountry) TypingCaret(ink, caret)
             }
         }
     }
 }
+
+/** The pieces typed so far at full strength, and the one arriving now fading in. */
+private fun typedText(units: List<String>, progress: Float, ink: Color): AnnotatedString = buildAnnotatedString {
+    val done = progress.toInt().coerceIn(0, units.size)
+    withStyle(SpanStyle(color = ink)) {
+        for (i in 0 until done) append(units[i])
+    }
+    if (done < units.size) {
+        withStyle(SpanStyle(color = ink.copy(alpha = (progress - done).coerceIn(0f, 1f)))) {
+            append(units[done])
+        }
+    }
+}
+
+@Composable
+private fun TypingCaret(ink: Color, alpha: Float) {
+    Box(
+        Modifier
+            .padding(start = 2.dp)
+            .width(2.dp)
+            .height(15.dp)
+            .graphicsLayer { this.alpha = alpha }
+            .background(ink)
+    )
+}
+
+/** Tone of everything that says "live": the status dot and the typed address. */
+@Composable
+private fun rxLiveColor(): Color = if (rxIsDark()) ConnectedDot else Color(0xFF0E62B8)
 
 /** Shows the latency of the live connection; a tap measures it again. */
 @Composable

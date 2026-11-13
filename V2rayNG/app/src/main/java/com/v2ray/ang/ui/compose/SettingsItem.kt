@@ -1,6 +1,20 @@
 package com.v2ray.ang.ui.compose
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -73,6 +87,78 @@ fun CollapsiblePreferenceGroupHeader(
     }
 }
 
+/**
+ * One topic of a settings screen as its own card: an icon, a plain-language title, one line that
+ * says what the group is for, then its rows. Cards rise in one after another the first time.
+ */
+@Composable
+fun SettingsSection(
+    title: String,
+    description: String,
+    icon: Painter,
+    order: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val animate = rememberAnimationsEnabled()
+    val enter = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (enter.value < 1f) {
+            delay(70L * order)
+            enter.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
+        }
+    }
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .graphicsLayer {
+                alpha = enter.value
+                translationY = (1f - enter.value) * 28.dp.toPx()
+            }
+            .clip(shape)
+            .background(colors.surfaceContainer)
+            .border(1.dp, colors.outlineVariant, shape)
+            .padding(bottom = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(colors.primary.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+        HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.7f))
+        content()
+    }
+}
+
 @Composable
 private fun SettingsItemRow(
     icon: Painter?,
@@ -81,6 +167,7 @@ private fun SettingsItemRow(
     enabled: Boolean,
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    value: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val titleColor = if (enabled) MaterialTheme.colorScheme.onSurface
@@ -118,6 +205,16 @@ private fun SettingsItemRow(
                     color = descriptionColor
                 )
             }
+            if (!value.isNullOrEmpty()) {
+                // The current choice, set apart from the explanation above it.
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (enabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.38f),
+                )
+            }
         }
         trailing?.invoke()
     }
@@ -132,7 +229,8 @@ fun SettingsEditItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     isPassword: Boolean = false,
-    keyboardNumber: Boolean = false
+    keyboardNumber: Boolean = false,
+    hint: String? = null
 ) {
     var showDialog by remember { mutableStateOf(false) }
     val description = if (isPassword) {
@@ -144,7 +242,8 @@ fun SettingsEditItem(
     SettingsItemRow(
         icon = icon,
         title = title,
-        description = description,
+        description = hint ?: description,
+        value = if (hint != null) description else null,
         enabled = enabled,
         onClick = if (enabled) {
             { showDialog = true }
@@ -181,7 +280,8 @@ fun SettingsListItem(
     selectedValue: String,
     onSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    hint: String? = null
 ) {
     var showDialog by remember { mutableStateOf(false) }
     val options = entries.zip(values)
@@ -191,7 +291,8 @@ fun SettingsListItem(
     SettingsItemRow(
         icon = icon,
         title = title,
-        description = summary.ifEmpty { null },
+        description = hint ?: summary.ifEmpty { null },
+        value = if (hint != null) summary.ifEmpty { null } else null,
         enabled = enabled,
         onClick = if (enabled) {
             { showDialog = true }

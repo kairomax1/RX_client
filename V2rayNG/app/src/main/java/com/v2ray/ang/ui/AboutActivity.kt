@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui
 
+import com.v2ray.ang.util.ExternalLinks
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -187,7 +188,7 @@ fun AboutScreen(onBackClick: () -> Unit) {
                         MakerLinkButton(
                             link = link,
                             order = index,
-                            onClick = { Utils.openUri(context, link.url) },
+                            onClick = { ExternalLinks.open(context, link.url) },
                             modifier = Modifier.weight(1f),
                         )
                     }

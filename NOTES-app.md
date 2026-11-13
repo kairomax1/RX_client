@@ -140,3 +140,29 @@ Not run on a device: none of the above was seen on a phone or emulator.
   silver rim.
 - `MainUiState.exitIp` / `exitCountry` come from every successful delay test and are typed out in
   the status line (`ExitAddressText`), so a rotating exit address updates on each ping.
+
+### Second fix round after device tests
+
+- **Readable ink.** The home screen is not inside a `Surface`, so text without a colour was drawn
+  black. `MainScreen` now provides `LocalContentColor`; the subscription card names its
+  `contentColor` (a translucent container colour is not a scheme role and falls back to black).
+- **No pure black anywhere.** `DarkColor` in `Theme.kt` is slate (`#0F1218` and lifted containers);
+  window background follows. The splash keeps its own black: it is the brand intro.
+- **Light theme is a real theme.** `LightColor` is paper and graphite (the old amber is gone).
+  `RxDustBackground` draws graphite dust on light instead of switching off; tabs, empty-state mark
+  and the "live" colour (`rxLiveColor`) take their ink from the scheme. Use `rxIsDark()` for any
+  new decorative layer.
+- **Drawer fog.** `RxFogBackground` (five drifting, breathing banks; white on dark, slate on
+  light) sits behind the drawer and the welcome card.
+- **Exit address typing.** `MainExitAddress` holds the pacing (95 ms per character, 1 s pause
+  before the country) and the splitting (a flag is one piece). Each character fades in.
+- **Settings.** One `SettingsSection` card per topic with an icon and a one-line purpose; list and
+  edit rows take a `hint` and show the current value below it; DNS is folded behind a switch and
+  fragment details appear only while fragment is on.
+- **Language.** No first-run question. `LanguageOnboarding.applyDefaultOnce()` sets Persian when
+  nothing explicit is stored. Settings offer Persian, English and the phone language only; the
+  other translations remain reachable through the phone language.
+- **Welcome message.** `WelcomeMessageOverlay`, shown once after the intro
+  (`pref_welcome_shown`). The Persian text is the owner's wording: do not edit it.
+- **Links.** `ExternalLinks.open` turns `t.me/...` into `tg://` so Telegram opens directly, tries
+  the YouTube app for YouTube links, and falls back to the browser.

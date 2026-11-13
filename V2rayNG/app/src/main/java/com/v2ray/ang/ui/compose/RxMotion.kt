@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.compose
 
+import androidx.compose.ui.graphics.drawscope.scale
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -39,7 +40,7 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /** Surface of everything that floats above the screen: menus, the quick card, the failure message. */
-val RxFloatingDark = Color(0xFF15161A)
+val RxFloatingDark = Color(0xFF1B1F27)
 
 @Composable
 fun rxFloatingColor(): Color {
@@ -74,17 +75,20 @@ fun rememberAnimationsEnabled(): Boolean {
     }
 }
 
+/** True while the active scheme is a dark one; decorative layers pick their ink from this. */
+@Composable
+fun rxIsDark(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
 /**
- * Backdrop of the main screen. Pure black next to bright silver is hard on the eyes, so the
- * screen sits on a deep blue-grey that still reads as dark.
+ * Backdrop of the main screen. Pure black next to bright silver is hard on the eyes, so the dark
+ * screen sits on a deep blue-grey; the light one on cool paper rather than plain white.
  */
 @Composable
 fun rxScreenBrush(): Brush {
-    val colors = MaterialTheme.colorScheme
-    return if (colors.background.luminance() < 0.5f) {
-        Brush.verticalGradient(listOf(Color(0xFF12151C), Color(0xFF0D0F14), Color(0xFF101319)))
+    return if (rxIsDark()) {
+        Brush.verticalGradient(listOf(Color(0xFF141821), Color(0xFF0F1218), Color(0xFF12161D)))
     } else {
-        Brush.verticalGradient(listOf(colors.surfaceContainerLow, colors.background))
+        Brush.verticalGradient(listOf(Color(0xFFF5F7FA), Color(0xFFE9EDF2), Color(0xFFF0F3F7)))
     }
 }
 
@@ -139,13 +143,13 @@ private class DustField {
 }
 
 /**
- * The live wallpaper: silver dust drifting upward and twinkling, over two soft lights that wander
- * slowly. Drawn in the draw phase only, so it never recomposes the screen above it. Skipped on
- * light themes, where it would not show.
+ * The live wallpaper: dust drifting upward and twinkling, over two soft lights that wander
+ * slowly. Drawn in the draw phase only, so it never recomposes the screen above it. Silver dust on
+ * the dark theme, graphite dust on the light one, so the screen is alive in both.
  */
 @Composable
 fun RxDustBackground(modifier: Modifier = Modifier) {
-    if (MaterialTheme.colorScheme.background.luminance() >= 0.5f) return
+    val dark = rxIsDark()
     val animate = rememberAnimationsEnabled()
     val field = remember { DustField() }
     var frameNanos by remember { mutableLongStateOf(0L) }
@@ -154,6 +158,10 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
             while (true) withFrameNanos { frameNanos = it }
         }
     }
+    val speck = if (dark) Color(0xFFD7E1F5) else Color(0xFF39465A)
+    val speckGain = if (dark) 1f else 0.62f
+    val firstLight = if (dark) Color(0x2E8A9CC8) else Color(0x3D9DB2D6)
+    val secondLight = if (dark) Color(0x1FB8C4DC) else Color(0x66FFFFFF)
     Canvas(modifier.fillMaxSize()) {
         field.ensure(size, density)
         field.step(frameNanos)
@@ -165,7 +173,7 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
         )
         drawRect(
             Brush.radialGradient(
-                colors = listOf(Color(0x2E8A9CC8), Color.Transparent),
+                colors = listOf(firstLight, Color.Transparent),
                 center = first,
                 radius = size.height * 0.55f,
             )
@@ -176,7 +184,7 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
         )
         drawRect(
             Brush.radialGradient(
-                colors = listOf(Color(0x1FB8C4DC), Color.Transparent),
+                colors = listOf(secondLight, Color.Transparent),
                 center = second,
                 radius = size.height * 0.42f,
             )
@@ -184,13 +192,66 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
         for (i in 0 until field.count) {
             val twinkle = 0.65f + 0.35f * sin(t * 1.4f + field.phase[i])
             drawCircle(
-                color = Color(0xFFD7E1F5).copy(alpha = field.alpha[i] * twinkle),
+                color = speck.copy(alpha = field.alpha[i] * twinkle * speckGain),
                 radius = field.radius[i],
                 center = Offset(field.x[i], field.y[i]),
             )
         }
     }
 }
+
+/**
+ * Living fog: a few wide, soft banks drifting sideways at different speeds and breathing in and
+ * out. White on the dark theme, slate on the light one. It is kept thin enough that text placed
+ * on top stays readable. With animations off it is a still mist.
+ */
+@Composable
+fun RxFogBackground(modifier: Modifier = Modifier) {
+    val dark = rxIsDark()
+    val animate = rememberAnimationsEnabled()
+    var frameNanos by remember { mutableLongStateOf(0L) }
+    val clock = remember { FloatArray(2) } // [0] seconds elapsed, [1] last frame in seconds
+    if (animate) {
+        LaunchedEffect(Unit) {
+            while (true) withFrameNanos { frameNanos = it }
+        }
+    }
+    val ink = if (dark) Color.White else Color(0xFF5B6B84)
+    val strength = if (dark) 1f else 0.75f
+    Canvas(modifier) {
+        val now = frameNanos / 1_000_000_000f
+        if (clock[1] != 0f && now != 0f) clock[0] += (now - clock[1]).coerceIn(0f, 0.05f)
+        clock[1] = now
+        val t = clock[0]
+        val w = size.width
+        val h = size.height
+        for (i in 0 until FOG_BANKS) {
+            val seed = i * 1.618f
+            // Each bank crosses the sheet at its own pace and wraps around well off screen.
+            val span = w * 2.2f
+            val travel = (t * (9f + 5f * i) * density + seed * w * 0.7f) % span
+            val x = if (i % 2 == 0) travel - w * 0.6f else w * 1.6f - travel
+            val y = h * (0.12f + 0.2f * i) + h * 0.05f * sin(t * 0.21f + seed * 2f)
+            val breathe = 0.75f + 0.25f * sin(t * 0.33f + seed * 3f)
+            val radius = w * (0.55f + 0.12f * (i % 3))
+            val alpha = (0.115f + 0.03f * (i % 2)) * breathe * strength
+            // Stretched sideways so a bank reads as a drifting sheet of mist, not a round spot.
+            scale(scaleX = 1.9f, scaleY = 0.8f, pivot = Offset(x, y)) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(ink.copy(alpha = alpha), ink.copy(alpha = alpha * 0.45f), Color.Transparent),
+                        center = Offset(x, y),
+                        radius = radius,
+                    ),
+                    radius = radius,
+                    center = Offset(x, y),
+                )
+            }
+        }
+    }
+}
+
+private const val FOG_BANKS = 5
 
 /** Dropdown with the app's floating surface: own background, thin border, round corners, shadow. */
 @Composable

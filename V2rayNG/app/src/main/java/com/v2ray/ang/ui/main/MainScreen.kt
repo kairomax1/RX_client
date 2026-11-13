@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
 import com.v2ray.ang.ui.compose.rxScreenBrush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -178,6 +180,8 @@ fun MainScreen(
     ) {
         // Live wallpaper, behind everything on the screen.
         RxDustBackground()
+        // Nothing here sits in a Surface, so text without its own colour would be drawn black.
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
@@ -325,6 +329,7 @@ fun MainScreen(
                     )
                 }
             }
+        }
         }
 
         // Rises out of the connect button; the only message shown around connecting.

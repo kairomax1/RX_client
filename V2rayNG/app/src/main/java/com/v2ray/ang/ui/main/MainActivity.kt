@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.util.ExternalLinks
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -45,7 +46,8 @@ import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.checkupdate.CheckUpdateActivity
 import com.v2ray.ang.ui.cloudflare.CloudflareActivity
 import com.v2ray.ang.ui.onboarding.LanguageOnboarding
-import com.v2ray.ang.ui.onboarding.LanguageOnboardingScreen
+import com.v2ray.ang.ui.onboarding.WelcomeMessage
+import com.v2ray.ang.ui.onboarding.WelcomeMessageOverlay
 import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.ui.routing.RoutingSettingActivity
 import com.v2ray.ang.ui.speedtest.SpeedTestActivity
@@ -109,6 +111,8 @@ class MainActivity : HelperBaseComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Persian unless the user already picked something; no question is asked.
+        LanguageOnboarding.applyDefaultOnce()
         mainViewModel.onAction(MainAction.Initialize)
         // Official releases only; shows the red dot and the update notification when one is out.
         lifecycleScope.launch { UpdateNotifier.checkOnAppOpen(applicationContext) }
@@ -125,11 +129,8 @@ class MainActivity : HelperBaseComponentActivity() {
         var showSplash by rememberSaveable {
             mutableStateOf(!ServiceRuntimeState.isRunning(context.applicationContext))
         }
-        // A fresh install answers one question before the home screen. The answer is applied by the
-        // same per-app locale machinery the settings screen uses.
-        var askLanguage by rememberSaveable {
-            mutableStateOf(LanguageOnboarding.shouldAsk(context))
-        }
+        // The maker's greeting: once, the first time the home screen is shown.
+        var showWelcome by rememberSaveable { mutableStateOf(WelcomeMessage.shouldShow()) }
         // The home screen stays hidden under the intro and scales in when the intro starts leaving.
         // Without an intro the target is already 1, so nothing animates.
         var revealContent by rememberSaveable { mutableStateOf(!showSplash) }
@@ -152,17 +153,7 @@ class MainActivity : HelperBaseComponentActivity() {
                         scaleY = scale
                     }
             ) {
-                if (askLanguage) {
-                    LanguageOnboardingScreen(
-                        onSelect = { code ->
-                            askLanguage = false
-                            LanguageOnboarding.markChosen()
-                            AppLocaleManager.setApplicationLanguage(code)
-                        }
-                    )
-                } else {
-                    MainContent()
-                }
+                MainContent()
             }
             if (showSplash) {
                 MainSplashOverlay(
@@ -171,6 +162,15 @@ class MainActivity : HelperBaseComponentActivity() {
                         revealContent = true
                         showSplash = false
                     },
+                )
+            }
+            // Waits for the intro to leave, then rises over the home screen.
+            if (showWelcome && !showSplash) {
+                WelcomeMessageOverlay(
+                    onDismiss = {
+                        WelcomeMessage.markShown()
+                        showWelcome = false
+                    }
                 )
             }
         }
@@ -223,7 +223,7 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun openSubscriptionLink(url: String) {
         // Links come from a remote panel, so only http(s) and tg:// are ever handed to ACTION_VIEW.
         val safeUrl = SubscriptionInfoParser.sanitizeLink(url) ?: return
-        Utils.openUri(this, safeUrl)
+        ExternalLinks.open(this, safeUrl)
     }
 
     private fun navigateTo(destination: MainDestination) {

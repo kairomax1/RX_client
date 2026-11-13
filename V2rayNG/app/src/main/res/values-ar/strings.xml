@@ -616,4 +616,39 @@
     <string name="settings_group_general">عام</string>
     <string name="settings_group_connection">الاتصال</string>
     <string name="settings_group_list">قائمة الإعدادات</string>
+    <string name="settings_group_general_desc">Language, look and general behaviour</string>
+    <string name="settings_group_connection_desc">What shapes how and how well you connect</string>
+    <string name="settings_group_fragment">Getting past filtering (Fragment)</string>
+    <string name="settings_group_fragment_desc">Helps when some configs refuse to connect</string>
+    <string name="settings_group_list_desc">How configs are shown on the home screen</string>
+    <string name="settings_group_maintenance_desc">The app tidies the list by itself once a day</string>
+    <string name="settings_language_hint">Language of the app</string>
+    <string name="settings_theme_title">Appearance</string>
+    <string name="settings_theme_hint">Dark, light, or the same as the phone</string>
+    <string name="settings_mode_title">Connection type</string>
+    <string name="settings_mode_hint">VPN covers the whole phone; \"Proxy only\" covers just the apps you point at it</string>
+    <string name="settings_bypass_lan_title">Home network devices</string>
+    <string name="settings_bypass_lan_hint">Whether your printer, TV and router go through the VPN or stay direct</string>
+    <string name="settings_dns_show_title">Show DNS settings</string>
+    <string name="settings_dns_show_hint">Advanced; leave it off if you are not sure</string>
+    <string name="settings_remote_dns_title">Foreign DNS</string>
+    <string name="settings_remote_dns_hint">Addresses of foreign sites are looked up here. Empty = default</string>
+    <string name="settings_domestic_dns_title">Domestic DNS</string>
+    <string name="settings_domestic_dns_hint">For local sites that open without the VPN. Empty = default</string>
+    <string name="settings_vpn_dns_title">Tunnel DNS</string>
+    <string name="settings_vpn_dns_hint">The server the phone uses while connected. Empty = default</string>
+    <string name="settings_fragment_switch_hint">Sends the first packets in pieces so filtering does not recognise them</string>
+    <string name="settings_fragment_packets_title">Which packets to split</string>
+    <string name="settings_fragment_packets_hint">\"tlshello\" is the best choice on most networks</string>
+    <string name="settings_fragment_length_title">Size of each piece</string>
+    <string name="settings_fragment_length_hint">Minimum-maximum in bytes. Example: 50-100</string>
+    <string name="settings_fragment_interval_title">Gap between pieces</string>
+    <string name="settings_fragment_interval_hint">Minimum-maximum in milliseconds. Example: 10-20</string>
+    <string name="settings_fragment_maxsplit_title">Most pieces allowed</string>
+    <string name="settings_fragment_maxsplit_hint">Empty or 0 means no limit</string>
+    <string name="settings_maintenance_switch_title">Enabled</string>
+    <string name="welcome_heading">Hello and welcome! 👋</string>
+    <string name="welcome_body">This app is developed by Aimobix, a maker active on Telegram and YouTube.\n\nThank you sincerely for choosing us. ❤️\n\nWe have one request:\n\nWe would be glad if you supported us on our GitHub page. It helps us keep developing this app, add more services and features, and give you a better and more complete experience.\n\nWe also suggest joining our Telegram group, so you hear the latest news, announcements and app updates and never miss anything.</string>
+    <string name="welcome_closing">Thank you for your valuable company and support. ❤️\n\nWith respect, the Aimobix team</string>
+    <string name="welcome_continue">Enter the app</string>
 </resources>

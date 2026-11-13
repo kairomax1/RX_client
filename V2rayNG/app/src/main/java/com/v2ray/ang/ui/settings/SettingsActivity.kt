@@ -1,5 +1,9 @@
 package com.v2ray.ang.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.res.painterResource
+import com.v2ray.ang.enums.Language
+import com.v2ray.ang.ui.compose.SettingsSection
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
@@ -105,7 +109,7 @@ fun SettingsScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val systemVpnSettingsAvailable by viewModel.systemVpnSettingsAvailable.collectAsStateWithLifecycle()
     var uiSettingsExpanded by rememberSaveable { mutableStateOf(true) }
-    var vpnSettingsExpanded by rememberSaveable { mutableStateOf(true) }
+    var vpnSettingsExpanded by rememberSaveable { mutableStateOf(false) }
     var coreSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var muxSettingsExpanded by rememberSaveable { mutableStateOf(false) }
     var fragmentSettingsExpanded by rememberSaveable { mutableStateOf(true) }
@@ -162,7 +166,7 @@ fun SettingsScreen(
     var groupAllDisplay by rememberMmkvBool(AppConfig.PREF_GROUP_ALL_DISPLAY, false)
     var language by remember {
         mutableStateOf(
-            MmkvManager.decodeSettingsString(AppConfig.PREF_LANGUAGE, "auto") ?: "auto"
+            MmkvManager.decodeSettingsString(AppConfig.PREF_LANGUAGE, Language.PERSIAN.code) ?: Language.PERSIAN.code
         )
     }
     var uiModeNight by rememberMmkvString(AppConfig.PREF_UI_MODE_NIGHT, ThemeManager.DEFAULT_UI_MODE)
@@ -197,8 +201,14 @@ fun SettingsScreen(
         }
     }
 
-    val languageEntries = stringArrayResource(R.array.language_select).toList()
-    val languageValues = stringArrayResource(R.array.language_select_value).toList()
+    // Persian, English, or whatever the phone uses; the other translations stay reachable
+    // through the phone's own language.
+    val languageEntries = listOf(
+        stringResource(R.string.onboarding_language_persian),
+        stringResource(R.string.onboarding_language_english),
+        stringResource(R.string.onboarding_language_system),
+    )
+    val languageValues = listOf(Language.PERSIAN.code, Language.ENGLISH.code, Language.AUTO.code)
     val uiModeNightEntries = stringArrayResource(R.array.ui_mode_night).toList()
     val uiModeNightValues = stringArrayResource(R.array.ui_mode_night_value).toList()
     val bypassLanEntries = stringArrayResource(R.array.vpn_bypass_lan).toList()
@@ -237,17 +247,19 @@ fun SettingsScreen(
                 .verticalScrollbar(scrollState)
                 .verticalScroll(scrollState)
         ) {
-            // Only the settings an ordinary user reaches for, most used first. The technical ones
-            // (ports, tunnel internals, observatory, root, test addresses) are hidden, not reset:
-            // their stored values keep applying.
-            CollapsiblePreferenceGroupHeader(
+            // Only the settings an ordinary user reaches for, one card per topic, each row with a
+            // sentence saying what it does. The technical ones (ports, tunnel internals,
+            // observatory, root, test addresses) are hidden, not reset: their values keep applying.
+            Spacer(modifier = Modifier.height(6.dp))
+            SettingsSection(
                 title = stringResource(R.string.settings_group_general),
-                expanded = uiSettingsExpanded,
-                onExpandedChange = { uiSettingsExpanded = it }
-            )
-            if (uiSettingsExpanded) {
+                description = stringResource(R.string.settings_group_general_desc),
+                icon = painterResource(R.drawable.ic_settings_24dp),
+                order = 0
+            ) {
                 SettingsListItem(
                     title = stringResource(R.string.title_language),
+                    hint = stringResource(R.string.settings_language_hint),
                     entries = languageEntries,
                     values = languageValues,
                     selectedValue = language,
@@ -257,7 +269,8 @@ fun SettingsScreen(
                     }
                 )
                 SettingsListItem(
-                    title = stringResource(R.string.title_pref_ui_mode_night),
+                    title = stringResource(R.string.settings_theme_title),
+                    hint = stringResource(R.string.settings_theme_hint),
                     entries = uiModeNightEntries,
                     values = uiModeNightValues,
                     selectedValue = uiModeNight,
@@ -273,7 +286,8 @@ fun SettingsScreen(
                     onCheckedChange = { isBooted = it }
                 )
                 SettingsListItem(
-                    title = stringResource(R.string.title_mode),
+                    title = stringResource(R.string.settings_mode_title),
+                    hint = stringResource(R.string.settings_mode_hint),
                     entries = modeEntries,
                     values = modeValues,
                     selectedValue = mode,
@@ -288,41 +302,17 @@ fun SettingsScreen(
                 }
             }
 
-            CollapsiblePreferenceGroupHeader(
+            SettingsSection(
                 title = stringResource(R.string.settings_group_connection),
-                expanded = vpnSettingsExpanded,
-                onExpandedChange = { vpnSettingsExpanded = it }
-            )
-            if (vpnSettingsExpanded) {
+                description = stringResource(R.string.settings_group_connection_desc),
+                icon = painterResource(R.drawable.ic_routing_24dp),
+                order = 1
+            ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_ipv6_enabled),
                     summary = stringResource(R.string.summary_pref_ipv6_enabled),
                     checked = ipv6Enabled,
                     onCheckedChange = { ipv6Enabled = it }
-                )
-                SettingsListItem(
-                    title = stringResource(R.string.title_pref_vpn_bypass_lan),
-                    entries = bypassLanEntries,
-                    values = bypassLanValues,
-                    selectedValue = vpnBypassLan,
-                    enabled = isVpn,
-                    onSelected = { vpnBypassLan = it }
-                )
-                SettingsEditItem(
-                    title = stringResource(R.string.title_pref_remote_dns),
-                    value = remoteDns,
-                    onValueChanged = { remoteDns = it }
-                )
-                SettingsEditItem(
-                    title = stringResource(R.string.title_pref_domestic_dns),
-                    value = domesticDns,
-                    onValueChanged = { domesticDns = it }
-                )
-                SettingsEditItem(
-                    title = stringResource(R.string.title_pref_vpn_dns),
-                    value = vpnDns,
-                    enabled = isVpn && !localDns,
-                    onValueChanged = { vpnDns = it }
                 )
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_mux_enabled),
@@ -330,54 +320,99 @@ fun SettingsScreen(
                     checked = mux,
                     onCheckedChange = { mux = it }
                 )
+                SettingsListItem(
+                    title = stringResource(R.string.settings_bypass_lan_title),
+                    hint = stringResource(R.string.settings_bypass_lan_hint),
+                    entries = bypassLanEntries,
+                    values = bypassLanValues,
+                    selectedValue = vpnBypassLan,
+                    enabled = isVpn,
+                    onSelected = { vpnBypassLan = it }
+                )
+                // DNS is for people who know they need it; it stays folded until asked for.
+                SettingsSwitchItem(
+                    title = stringResource(R.string.settings_dns_show_title),
+                    summary = stringResource(R.string.settings_dns_show_hint),
+                    checked = vpnSettingsExpanded,
+                    onCheckedChange = { vpnSettingsExpanded = it }
+                )
+                AnimatedVisibility(visible = vpnSettingsExpanded) {
+                    Column {
+                        SettingsEditItem(
+                            title = stringResource(R.string.settings_remote_dns_title),
+                            hint = stringResource(R.string.settings_remote_dns_hint),
+                            value = remoteDns,
+                            onValueChanged = { remoteDns = it }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.settings_domestic_dns_title),
+                            hint = stringResource(R.string.settings_domestic_dns_hint),
+                            value = domesticDns,
+                            onValueChanged = { domesticDns = it }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.settings_vpn_dns_title),
+                            hint = stringResource(R.string.settings_vpn_dns_hint),
+                            value = vpnDns,
+                            enabled = isVpn && !localDns,
+                            onValueChanged = { vpnDns = it }
+                        )
+                    }
+                }
             }
 
-            CollapsiblePreferenceGroupHeader(
-                title = stringResource(R.string.title_fragment_settings),
-                expanded = fragmentSettingsExpanded,
-                onExpandedChange = { fragmentSettingsExpanded = it }
-            )
-            if (fragmentSettingsExpanded) {
+            SettingsSection(
+                title = stringResource(R.string.settings_group_fragment),
+                description = stringResource(R.string.settings_group_fragment_desc),
+                icon = painterResource(R.drawable.ic_flash_on_24dp),
+                order = 2
+            ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_fragment_enabled),
+                    summary = stringResource(R.string.settings_fragment_switch_hint),
                     checked = fragment,
                     onCheckedChange = { fragment = it }
                 )
-                SettingsListItem(
-                    title = stringResource(R.string.title_pref_fragment_packets),
-                    entries = fragmentPacketsEntries,
-                    values = fragmentPacketsValues,
-                    selectedValue = fragmentPackets,
-                    enabled = fragment,
-                    onSelected = { fragmentPackets = it }
-                )
-                SettingsEditItem(
-                    title = stringResource(R.string.title_pref_fragment_length),
-                    value = fragmentLength,
-                    enabled = fragment,
-                    onValueChanged = { fragmentLength = it }
-                )
-                SettingsEditItem(
-                    title = stringResource(R.string.title_pref_fragment_interval),
-                    value = fragmentInterval,
-                    enabled = fragment,
-                    onValueChanged = { fragmentInterval = it }
-                )
-                SettingsEditItem(
-                    title = stringResource(R.string.title_pref_fragment_maxsplit),
-                    value = fragmentMaxSplit,
-                    enabled = fragment,
-                    keyboardNumber = true,
-                    onValueChanged = { fragmentMaxSplit = it }
-                )
+                // The details only mean something while fragmenting is on.
+                AnimatedVisibility(visible = fragment) {
+                    Column {
+                        SettingsListItem(
+                            title = stringResource(R.string.settings_fragment_packets_title),
+                            hint = stringResource(R.string.settings_fragment_packets_hint),
+                            entries = fragmentPacketsEntries,
+                            values = fragmentPacketsValues,
+                            selectedValue = fragmentPackets,
+                            onSelected = { fragmentPackets = it }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.settings_fragment_length_title),
+                            hint = stringResource(R.string.settings_fragment_length_hint),
+                            value = fragmentLength,
+                            onValueChanged = { fragmentLength = it }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.settings_fragment_interval_title),
+                            hint = stringResource(R.string.settings_fragment_interval_hint),
+                            value = fragmentInterval,
+                            onValueChanged = { fragmentInterval = it }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.settings_fragment_maxsplit_title),
+                            hint = stringResource(R.string.settings_fragment_maxsplit_hint),
+                            value = fragmentMaxSplit,
+                            keyboardNumber = true,
+                            onValueChanged = { fragmentMaxSplit = it }
+                        )
+                    }
+                }
             }
 
-            CollapsiblePreferenceGroupHeader(
+            SettingsSection(
                 title = stringResource(R.string.settings_group_list),
-                expanded = coreSettingsExpanded,
-                onExpandedChange = { coreSettingsExpanded = it }
-            )
-            if (coreSettingsExpanded) {
+                description = stringResource(R.string.settings_group_list_desc),
+                icon = painterResource(R.drawable.ic_grid_24dp),
+                order = 3
+            ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_double_column_display),
                     summary = stringResource(R.string.summary_pref_double_column_display),
@@ -410,14 +445,14 @@ fun SettingsScreen(
                 )
             }
 
-            CollapsiblePreferenceGroupHeader(
+            SettingsSection(
                 title = stringResource(R.string.title_pref_daily_maintenance),
-                expanded = dailyMaintenanceExpanded,
-                onExpandedChange = { dailyMaintenanceExpanded = it }
-            )
-            if (dailyMaintenanceExpanded) {
+                description = stringResource(R.string.settings_group_maintenance_desc),
+                icon = painterResource(R.drawable.ic_refresh_24dp),
+                order = 4
+            ) {
                 SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_daily_maintenance),
+                    title = stringResource(R.string.settings_maintenance_switch_title),
                     summary = stringResource(R.string.summary_pref_daily_maintenance),
                     checked = dailyMaintenance,
                     onCheckedChange = { enabled ->

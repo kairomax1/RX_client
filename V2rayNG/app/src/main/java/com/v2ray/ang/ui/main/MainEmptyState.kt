@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.ui.compose.rxIsDark
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Brush
@@ -73,12 +74,21 @@ fun MainEmptyState(
                     Text(
                         text = "RX",
                         style = TextStyle(
-                            brush = Brush.linearGradient(
-                                0f to Color(0xFFFFFFFF),
-                                0.35f to Color(0xFFAEB4C0),
-                                0.6f to Color(0xFFF6F8FB),
-                                1f to Color(0xFF7D838F),
-                            ),
+                            brush = if (rxIsDark()) {
+                                Brush.linearGradient(
+                                    0f to Color(0xFFFFFFFF),
+                                    0.35f to Color(0xFFAEB4C0),
+                                    0.6f to Color(0xFFF6F8FB),
+                                    1f to Color(0xFF7D838F),
+                                )
+                            } else {
+                                // Silver on paper disappears; the light theme gets graphite.
+                                Brush.linearGradient(
+                                    0f to Color(0xFF1F2530),
+                                    0.5f to Color(0xFF6B7482),
+                                    1f to Color(0xFF2A313D),
+                                )
+                            },
                             fontSize = 34.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 1.sp,

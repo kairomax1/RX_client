@@ -608,4 +608,39 @@
     <string name="settings_group_general">عمومی</string>
     <string name="settings_group_connection">اتصال</string>
     <string name="settings_group_list">فهرست کانفیگ‌ها</string>
+    <string name="settings_group_general_desc">زبان، ظاهر و رفتار کلی برنامه</string>
+    <string name="settings_group_connection_desc">چیزهایی که روی کیفیت و نحوهٔ اتصال اثر دارند</string>
+    <string name="settings_group_fragment">عبور از فیلترینگ (Fragment)</string>
+    <string name="settings_group_fragment_desc">اگر بعضی کانفیگ‌ها وصل نمی‌شوند، این بخش کمک می‌کند</string>
+    <string name="settings_group_list_desc">شکل نمایش کانفیگ‌ها در صفحهٔ اصلی</string>
+    <string name="settings_group_maintenance_desc">برنامه هر روز خودش فهرست را مرتب نگه می‌دارد</string>
+    <string name="settings_language_hint">زبان نوشته‌های برنامه</string>
+    <string name="settings_theme_title">ظاهر برنامه</string>
+    <string name="settings_theme_hint">تیره، روشن یا هماهنگ با گوشی</string>
+    <string name="settings_mode_title">نوع اتصال</string>
+    <string name="settings_mode_hint">VPN کل گوشی را پوشش می‌دهد؛ «فقط پروکسی» فقط برنامه‌هایی را که خودتان تنظیم کنید</string>
+    <string name="settings_bypass_lan_title">دستگاه‌های شبکهٔ خانگی</string>
+    <string name="settings_bypass_lan_hint">چاپگر، تلویزیون و مودم خانه از VPN رد شوند یا مستقیم بمانند</string>
+    <string name="settings_dns_show_title">نمایش تنظیمات DNS</string>
+    <string name="settings_dns_show_hint">پیشرفته؛ اگر نمی‌دانید چیست، خاموش بماند</string>
+    <string name="settings_remote_dns_title">DNS خارجی</string>
+    <string name="settings_remote_dns_hint">نشانی سایت‌های خارجی از این سرور پرسیده می‌شود. خالی = پیش‌فرض</string>
+    <string name="settings_domestic_dns_title">DNS داخلی</string>
+    <string name="settings_domestic_dns_hint">نشانی سایت‌های داخلی که بدون VPN باز می‌شوند. خالی = پیش‌فرض</string>
+    <string name="settings_vpn_dns_title">DNS تونل</string>
+    <string name="settings_vpn_dns_hint">سروری که گوشی هنگام اتصال از آن استفاده می‌کند. خالی = پیش‌فرض</string>
+    <string name="settings_fragment_switch_hint">بسته‌های اول اتصال را تکه‌تکه می‌فرستد تا فیلترینگ آن را نشناسد</string>
+    <string name="settings_fragment_packets_title">کدام بسته‌ها تکه شوند</string>
+    <string name="settings_fragment_packets_hint">برای بیشتر اینترنت‌ها «tlshello» بهترین انتخاب است</string>
+    <string name="settings_fragment_length_title">اندازهٔ هر تکه</string>
+    <string name="settings_fragment_length_hint">کمترین-بیشترین، به بایت. مثال: 50-100</string>
+    <string name="settings_fragment_interval_title">فاصلهٔ بین تکه‌ها</string>
+    <string name="settings_fragment_interval_hint">کمترین-بیشترین، به میلی‌ثانیه. مثال: 10-20</string>
+    <string name="settings_fragment_maxsplit_title">بیشترین تعداد تکه</string>
+    <string name="settings_fragment_maxsplit_hint">خالی یا 0 یعنی بدون محدودیت</string>
+    <string name="settings_maintenance_switch_title">فعال باشد</string>
+    <string name="welcome_heading">درود و خوش آمدید! 👋</string>
+    <string name="welcome_body">این برنامه توسط سازنده Aimobix توسعه داده شده است؛ سازنده‌ای که در پلتفرم‌های تلگرام و یوتیوب فعالیت دارد.\n\nاز اینکه ما را انتخاب کرده‌اید، صمیمانه سپاسگزاریم. ❤️\n\nدرخواستی از شما داریم:\n\nخوشحال می‌شویم با حمایت از ما در صفحه گیت‌هاب، به ادامه مسیر توسعه این برنامه کمک کنید تا بتوانیم سرویس‌ها و امکانات بیشتری به آن اضافه کنیم و تجربه بهتر و کامل‌تری برای شما فراهم سازیم.\n\nهمچنین پیشنهاد می‌کنیم حتماً در گروه تلگرامی ما عضو شوید تا از آخرین اخبار، اطلاعیه‌ها و به‌روزرسانی‌های برنامه مطلع بمانید و هیچ خبری را از دست ندهید.</string>
+    <string name="welcome_closing">از همراهی و حمایت ارزشمند شما سپاسگزاریم. ❤️\n\nبا احترام، تیم Aimobix</string>
+    <string name="welcome_continue">ورود به برنامه</string>
 </resources>
