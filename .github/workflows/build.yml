@@ -297,11 +297,9 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
+          # The release text is exactly .github/release-notes.md; nothing is appended to it.
           sed -e "s|@TAG@|${TAG}|g" -e "s|@SHA@|${GITHUB_SHA}|g" \
             .github/release-notes.md > "$RUNNER_TEMP/notes.md"
-          if [ -f apk/APK-FACTS.txt ]; then
-            { echo ""; echo "### APK packaging"; echo ""; cat apk/APK-FACTS.txt; } >> "$RUNNER_TEMP/notes.md"
-          fi
           head -5 "$RUNNER_TEMP/notes.md"
 
       - name: Publish APKs to GitHub Releases
