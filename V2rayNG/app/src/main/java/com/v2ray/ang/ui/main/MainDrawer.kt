@@ -83,7 +83,7 @@ fun MainDrawerContent(
         // A closed drawer is off screen: its fog must not keep the screen redrawing.
         RxFogBackground(
             Modifier.matchParentSize(),
-            active = drawerState.isOpen || drawerState.isAnimating || drawerState.targetValue == DrawerValue.Open,
+            active = drawerState.isOpen || drawerState.isAnimationRunning || drawerState.targetValue == DrawerValue.Open,
         )
         Column(
             modifier = Modifier
