@@ -1,5 +1,6 @@
 package com.v2ray.ang.handler
 
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.dto.entities.RulesetItem
 import java.net.Inet4Address
@@ -24,6 +25,7 @@ import java.net.NetworkInterface
 object DnsMode {
 
     const val PREF_ENABLED = "pref_rx_dns_mode"
+    private const val SITES_ASSET = "rx_dns_mode_sites.txt"
     const val PREF_EXTRA_DOMAINS = "pref_rx_dns_mode_extra"
 
     /** Resolvers reachable directly from Iran, used for everything that is not tunnelled. */
@@ -69,8 +71,12 @@ object DnsMode {
     }
 
     /** The routing rules of the mode, in matching order. */
-    fun rulesets(extra: List<String> = emptyList()): MutableList<RulesetItem> {
-        val tunnelled = (FILTERED + SANCTIONED + WHOLE_ENDINGS + extra).distinct().map { "domain:$it" }
+    fun rulesets(
+        extra: List<String> = emptyList(),
+        bundled: List<String> = emptyList(),
+    ): MutableList<RulesetItem> {
+        val tunnelled = ((FILTERED + SANCTIONED + VPN_SERVICES + WHOLE_ENDINGS + extra).map { "domain:$it" } + bundled)
+            .distinct()
         return mutableListOf(
             // First on purpose: inside Iran the names of filtered sites are answered with a
             // private address (10.10.34.x). Matching the name before the local-network rule
@@ -105,9 +111,32 @@ object DnsMode {
         )
     }
 
+    /**
+     * The big site list shipped with the app (assets/rx_dns_mode_sites.txt): several thousand
+     * names of filtered and restricted services and game publishers. Empty if it cannot be read;
+     * the short lists in this file then still cover the best known services.
+     */
+    private val bundledSites: List<String> by lazy {
+        try {
+            AngApplication.application.assets.open(SITES_ASSET).bufferedReader().use { parseSiteList(it.readText()) }
+        } catch (e: Throwable) {
+            emptyList()
+        }
+    }
+
+    /** Keeps the "domain:name" and "full:name" lines of a site list file; drops everything else. */
+    internal fun parseSiteList(text: String): List<String> = text.lineSequence()
+        .map { it.trim() }
+        .filter { line ->
+            val name = line.substringAfter(':', "")
+            (line.startsWith("domain:") || line.startsWith("full:")) &&
+                name.isNotEmpty() && name.all { it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '.' }
+        }
+        .toList()
+
     /** The rules the core must use right now: the mode's when it is on, the user's otherwise. */
     fun effectiveRulesets(): MutableList<RulesetItem>? =
-        if (isEnabled()) rulesets(extraDomains()) else MmkvManager.decodeRoutingRulesets()
+        if (isEnabled()) rulesets(extraDomains(), bundledSites) else MmkvManager.decodeRoutingRulesets()
 
     /**
      * Addresses of this phone on its Wi-Fi or hotspot network. Another device on the same network
@@ -199,6 +228,15 @@ object DnsMode {
         "playstation.com", "sonyentertainmentnetwork.com", "xbox.com", "xboxlive.com", "nintendo.com",
         "supercell.com", "activision.com", "callofduty.com",
     ).filter { !it.contains('/') }
+
+    /** VPN and anti-filter services; their sites and sign-in servers are filtered. */
+    internal val VPN_SERVICES = listOf(
+        "tunnelbear.com", "windscribe.com", "expressvpn.com", "surfshark.com", "mullvad.net", "hotspotshield.com",
+        "cyberghostvpn.com", "privateinternetaccess.com", "ipvanish.com", "hide.me", "vyprvpn.com", "purevpn.com",
+        "getlantern.org", "lantern.io", "betternet.co", "privadovpn.com", "atlasvpn.com", "protonvpn.com",
+        "nordvpn.com", "torguard.net", "strongvpn.com", "zenmate.com", "hola.org", "urban-vpn.com", "turbovpn.com",
+        "ultrasurf.us", "freegate.com", "outline.org", "getoutline.org", "v2ray.com", "xtls.github.io",
+    )
 
     /** Whole name endings that belong to one company (labs.google, deepmind.google, ...). */
     internal val WHOLE_ENDINGS = listOf("google", "goog", "youtube")

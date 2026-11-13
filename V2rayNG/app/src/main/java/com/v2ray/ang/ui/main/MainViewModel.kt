@@ -440,6 +440,7 @@ class MainViewModel(
             MainAction.Initialize -> initialize()
             MainAction.RefreshGroups -> setupGroupTab(forceRefresh = true)
             MainAction.TestAllServers -> testAllRealPing(true)
+            MainAction.PingAndSortAll -> startAutoTest(emptySet())
             MainAction.TestRealAllServers -> testAllRealPing()
             is MainAction.TestGroupRealPing -> testAllRealPing(groupId = action.groupId)
             MainAction.PingThenRemoveInvalid -> pingThenRemoveInvalid()

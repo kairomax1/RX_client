@@ -148,6 +148,12 @@ fun MainTopBar(
                             contentDescription = stringResource(R.string.acc_search),
                         )
                     }
+                    IconButton(onClick = { onAction(MainAction.PingAndSortAll) }) {
+                        Icon(
+                            painterResource(R.drawable.ic_ping_24dp),
+                            contentDescription = stringResource(R.string.acc_ping_sort),
+                        )
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 Text(

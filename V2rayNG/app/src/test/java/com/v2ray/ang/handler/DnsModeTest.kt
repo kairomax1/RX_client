@@ -42,9 +42,27 @@ class DnsModeTest {
 
     @Test
     fun listsHoldOnlyPlainNames() {
-        (DnsMode.FILTERED + DnsMode.SANCTIONED).forEach { name ->
+        (DnsMode.FILTERED + DnsMode.SANCTIONED + DnsMode.VPN_SERVICES).forEach { name ->
             assertEquals(name, DnsMode.normalizeDomain(name), name)
         }
+    }
+
+    @Test
+    fun theBigListIsAddedAsItIsAndBadLinesAreDropped() {
+        val parsed = DnsMode.parseSiteList("# note\ndomain:ea.com\n full:api.example.org \nregexp:.*\ndomain:\nbad line\ndomain:a b.com\n")
+        assertEquals(listOf("domain:ea.com", "full:api.example.org"), parsed)
+        val tunnelled = DnsMode.rulesets(bundled = parsed).first().domain!!
+        assertTrue("domain:ea.com" in tunnelled)
+        assertTrue("full:api.example.org" in tunnelled)
+        assertTrue("domain:tunnelbear.com" in tunnelled)
+        assertTrue("domain:google" in tunnelled)
+    }
+
+    @Test
+    fun tunnelledSitesAreMatchedBeforeTheLocalNetworkRule() {
+        val rules = DnsMode.rulesets()
+        assertEquals(AppConfig.TAG_PROXY, rules.first().outboundTag)
+        assertTrue(rules.indexOfFirst { it.ip == listOf(AppConfig.GEOIP_PRIVATE) } > 0)
     }
 
     @Test

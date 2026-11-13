@@ -57,6 +57,9 @@ sealed interface MainAction {
     data object ToggleService : MainAction
     data object TestCurrentServer : MainAction
     data object TestAllServers : MainAction
+
+    /** Pings every config of every group, then sorts the lists from lowest ping up. */
+    data object PingAndSortAll : MainAction
     data object TestRealAllServers : MainAction
     data object CancelTesting : MainAction
     data object RemoveAllServers : MainAction
