@@ -264,3 +264,20 @@ Nine items, delivered together.
   Tor is an optional cargo feature costing 6-8 MB per ABI). Plan for RX VPN: build it in CI
   without Tor, run it as a process, and point an Xray `socks` outbound at it, so it works as a
   config-less "proxy" for DNS mode and as a standalone connection.
+
+### DNS mode, round 3 + Aether
+
+- Big site list: `assets/rx_dns_mode_sites.txt` (~6,800 entries) generated from
+  v2fly/domain-list-community (MIT, commit 777d056): VPN/anti-censorship services, Google,
+  social, communication, AI, dev, media, entertainment, crypto, game publishers. Iranian sites,
+  IP-check and speed-test sites are removed so they stay direct. Adult sites are not included.
+  Loaded lazily by `DnsMode.bundledSites`; the short Kotlin lists remain as the fallback.
+- Top bar: ping button = `MainAction.PingAndSortAll` (the automatic test over every config:
+  ping, badges, sort by ping).
+- `UpdateRelease.pickApk` ignores assets with "debug" in the name.
+- Aether: `build-aether.sh` builds the engine from the pinned commit in CI (cached; every step
+  is `continue-on-error`, so a failed engine build still yields an APK without it). Arm64,
+  armv7, x86_64 only; Android 8+. `core/AetherEngine.kt` starts it as a process on
+  127.0.0.1:1819 from `CoreServiceManager.launchCore` when the selected profile is the built-in
+  SOCKS profile "Aether", and stops it in `stopCoreLoop`. DNS mode falls back to that profile
+  when no config answers; the card has a "connect with Aether" button. Never run on a device.

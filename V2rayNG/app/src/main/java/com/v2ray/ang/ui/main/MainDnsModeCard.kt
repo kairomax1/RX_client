@@ -38,10 +38,13 @@ private enum class DnsPage { Main, AddSite, Devices, Xbox }
 fun MainDnsModeCard(
     state: DnsModeUiState,
     onSetEnabled: (Boolean) -> Unit,
+    /** Switches the mode without looking for a config to connect to. */
+    onSetEnabledOnly: (Boolean) -> Unit,
     onAddDomain: (String) -> Boolean,
     onClearDomains: () -> Unit,
     onSetSharing: (Boolean) -> Unit,
     onProbeConsoleDns: () -> Unit,
+    onUseAether: () -> Unit,
     onChanged: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -57,6 +60,7 @@ fun MainDnsModeCard(
     ) {
         when (page) {
             DnsPage.Main -> {
+                val aetherNote = stringResource(R.string.dns_mode_aether_note)
                 RxPromptMessage(stringResource(R.string.dns_mode_title))
                 Spacer(Modifier.height(10.dp))
                 CardNote(stringResource(R.string.dns_mode_about))
@@ -74,19 +78,33 @@ fun MainDnsModeCard(
                         },
                         modifier = fullWidth,
                     )
+                    if (state.aetherAvailable) {
+                        RxPromptButton(
+                            text = stringResource(R.string.dns_mode_use_aether),
+                            tone = RxPromptTone.Ghost,
+                            onClick = {
+                                if (!state.enabled) onSetEnabledOnly(true)
+                                noteText = aetherNote
+                                noteTick++
+                                onUseAether()
+                            },
+                            modifier = fullWidth,
+                            order = 1,
+                        )
+                    }
                     RxPromptButton(
                         text = stringResource(R.string.dns_mode_add_site),
                         tone = RxPromptTone.Ghost,
                         onClick = { page = DnsPage.AddSite },
                         modifier = fullWidth,
-                        order = 1,
+                        order = 2,
                     )
                     RxPromptButton(
                         text = stringResource(R.string.dns_mode_devices),
                         tone = RxPromptTone.Ghost,
                         onClick = { page = DnsPage.Devices },
                         modifier = fullWidth,
-                        order = 2,
+                        order = 3,
                     )
                 }
             }

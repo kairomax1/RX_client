@@ -133,6 +133,9 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+        // The Aether profile is only a pointer to the engine's local port; the engine itself
+        // has to be running behind it.
+        if (AetherEngine.isAetherProfile(config)) AetherEngine.start(service) else AetherEngine.stop()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
@@ -216,6 +219,7 @@ object CoreServiceManager {
             browserDialer!!.stop()
             browserDialer = null
         }
+        AetherEngine.stop()
 
         ServiceRuntimeState.markRunning(false)
         MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")

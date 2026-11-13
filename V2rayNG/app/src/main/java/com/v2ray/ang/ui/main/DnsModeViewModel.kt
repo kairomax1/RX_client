@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConsoleDns
 import com.v2ray.ang.handler.DnsMode
 import com.v2ray.ang.handler.MmkvManager
@@ -27,6 +28,8 @@ data class DnsModeUiState(
     val port: Int = 0,
     /** A proxy password is set; consoles cannot enter one. */
     val needsPassword: Boolean = false,
+    /** This build carries the Aether engine, so connecting without a config is possible. */
+    val aetherAvailable: Boolean = false,
     /** A check of the console DNS services is running. */
     val probing: Boolean = false,
     /** Services that answered in the last check, fastest first; null before the first check. */
@@ -50,6 +53,7 @@ class DnsModeViewModel(application: Application) : AndroidViewModel(application)
                     addresses = DnsMode.shareAddresses(),
                     port = SettingsManager.getHttpPort(),
                     needsPassword = SettingsManager.getSocksUsername() != null,
+                    aetherAvailable = AetherEngine.isAvailable(getApplication()),
                 )
             }
             _state.update { fresh.copy(probing = it.probing, consoleDns = it.consoleDns) }

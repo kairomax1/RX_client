@@ -712,4 +712,6 @@
     <string name="dns_mode_xbox_limits">This DNS belongs to a public service; the app did not create it. It only lifts sanctions: it does not open filtered sites and does not lower game ping.</string>
     <string name="dns_mode_xbox_again">Check again</string>
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
+    <string name="dns_mode_use_aether">I have no config; connect with Aether</string>
+    <string name="dns_mode_aether_note">Aether is finding a route; this can take up to a minute</string>
 </resources>

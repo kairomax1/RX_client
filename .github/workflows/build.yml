@@ -90,6 +90,68 @@ jobs:
           mkdir -p V2rayNG/app/libs
           cp -r libs/* V2rayNG/app/libs/
 
+      # ---- Aether engine (optional) ------------------------------------------------------
+      # Built from source once and cached. Every step may fail without failing the build:
+      # the app then simply reports that Aether is not included.
+      - name: Restore cached Aether engine
+        id: cache-aether
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/libs-aether
+          key: aether-engine-${{ runner.os }}-${{ hashFiles('build-aether.sh') }}
+
+      - name: Install toolchain for the Aether engine
+        if: steps.cache-aether.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.3.11579264" > /dev/null
+          echo "AETHER_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Build the Aether engine
+        id: build-aether
+        if: steps.cache-aether.outputs.cache-hit != 'true'
+        continue-on-error: true
+        timeout-minutes: 90
+        run: |
+          set -o pipefail
+          bash build-aether.sh 2>&1 | tee "$RUNNER_TEMP/aether-build.log" | tail -n 400
+
+      - name: Surface Aether build errors
+        if: steps.cache-aether.outputs.cache-hit != 'true' && steps.build-aether.outcome != 'success'
+        continue-on-error: true
+        run: |
+          rm -rf libs-aether
+          echo "::warning::Aether engine was not built; this APK ships without it."
+          if [ -f "$RUNNER_TEMP/aether-build.log" ]; then
+            grep -nE "^error|ERROR|error:|panicked|No such file|not found|failed" "$RUNNER_TEMP/aether-build.log" | tail -n 25 | while IFS= read -r line; do
+              echo "::warning::${line}"
+            done
+          fi
+
+      - name: Cache Aether engine
+        if: steps.cache-aether.outputs.cache-hit != 'true' && steps.build-aether.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/libs-aether
+          key: aether-engine-${{ runner.os }}-${{ hashFiles('build-aether.sh') }}
+
+      - name: Copy the Aether engine into the app module
+        run: |
+          if [ -f libs-aether/arm64-v8a/libaether.so ]; then
+            for abi in arm64-v8a armeabi-v7a x86_64; do
+              mkdir -p "V2rayNG/app/libs/${abi}"
+              cp libs-aether/${abi}/*.so "V2rayNG/app/libs/${abi}/"
+            done
+            echo "Aether engine included (commit $(cat libs-aether/AETHER_COMMIT))"
+            ls -la V2rayNG/app/libs/arm64-v8a
+          else
+            echo "::warning::No Aether engine in this build."
+          fi
+
       - name: Resolve Xray core version
         run: |
           cd AndroidLibXrayLite

@@ -22,6 +22,7 @@ import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.extension.serializable
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
@@ -158,6 +159,9 @@ class MainRepository(
 
     override fun getSubscriptionItem(id: String): SubscriptionItem? =
         MmkvManager.decodeSubscription(id)
+
+    override fun ensureAetherProfile(): String? =
+        if (AetherEngine.isAvailable(app)) AetherEngine.ensureProfile() else null
 
     override fun getTestDelayMillis(guid: String): Long =
         MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L

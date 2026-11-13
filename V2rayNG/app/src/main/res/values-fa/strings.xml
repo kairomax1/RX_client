@@ -784,4 +784,6 @@
     <string name="dns_mode_xbox_limits">این DNS مال یه سرویس عمومیه، نه ساختهٔ برنامه. فقط تحریم رو باز می‌کنه؛ فیلتر رو باز نمی‌کنه و پینگ بازی رو کم نمی‌کنه.</string>
     <string name="dns_mode_xbox_again">دوباره تست کن</string>
     <string name="acc_ping_sort">پینگ همهٔ کانفیگ‌ها و مرتب‌سازی از کم به زیاد</string>
+    <string name="dns_mode_use_aether">کانفیگ ندارم؛ با Aether وصل شو</string>
+    <string name="dns_mode_aether_note">Aether داره راه پیدا می‌کنه؛ ممکنه تا یک دقیقه طول بکشه</string>
 </resources>

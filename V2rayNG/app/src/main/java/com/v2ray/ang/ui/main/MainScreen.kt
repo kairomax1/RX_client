@@ -376,7 +376,9 @@ fun MainScreen(
                     // right after this covers the case where there is nothing to test.
                     if (enabled) mainViewModel.testAllAndConnectBest()
                 },
+                onSetEnabledOnly = dnsModeViewModel::setEnabled,
                 onProbeConsoleDns = dnsModeViewModel::probeConsoleDns,
+                onUseAether = mainViewModel::connectAether,
                 onAddDomain = dnsModeViewModel::addDomain,
                 onClearDomains = dnsModeViewModel::clearDomains,
                 onSetSharing = dnsModeViewModel::setSharing,

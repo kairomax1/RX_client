@@ -34,6 +34,9 @@ interface MainDataSource : Closeable {
 
     fun getServerGuidList(groupId: String): List<String>
 
+    /** Id of the built-in Aether profile (created on demand); null when this build has no engine. */
+    fun ensureAetherProfile(): String? = null
+
     /** Last measured ping of a config; 0 when untested, negative when it failed. */
     fun getTestDelayMillis(guid: String): Long = 0L
     fun decodeServerConfig(guid: String): ProfileItem?

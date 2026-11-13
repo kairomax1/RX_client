@@ -134,7 +134,31 @@ class MainViewModel(
      */
     fun testAllAndConnectBest() {
         connectBestAfterTest = true
-        startAutoTest(emptySet())
+        viewModelScope.launch {
+            // Make sure the built-in Aether profile is there as the fallback for a phone with no
+            // working config, and that the list shows it before the test starts.
+            val added = withContext(ioDispatcher) {
+                val before = dataSource.getSubscriptions().sumOf { dataSource.getServerGuidList(it.guid).size }
+                dataSource.ensureAetherProfile()
+                dataSource.getSubscriptions().sumOf { dataSource.getServerGuidList(it.guid).size } != before
+            }
+            if (added) setupGroupTab(forceRefresh = true).join()
+            if (withContext(ioDispatcher) { allConfigGuids() }.isEmpty()) {
+                connectBestAfterTest = false
+                return@launch
+            }
+            startAutoTest(emptySet())
+        }
+    }
+
+    /** Selects the built-in Aether profile and connects through it. */
+    fun connectAether() {
+        viewModelScope.launch {
+            val guid = withContext(ioDispatcher) { dataSource.ensureAetherProfile() } ?: return@launch
+            setupGroupTab(forceRefresh = true).join()
+            updateSelectedGuid(guid)
+            _connectBestTick.update { it + 1 }
+        }
     }
 
     /** Selects the config with the lowest ping among [guids]; false when none of them answered. */
@@ -142,8 +166,9 @@ class MainViewModel(
         val best = guids
             .mapNotNull { guid -> dataSource.getTestDelayMillis(guid).takeIf { it > 0 }?.let { guid to it } }
             .minByOrNull { it.second }
-            ?: return false
-        updateSelectedGuid(best.first)
+        // No config answered: fall back to the built-in Aether route, when this build has it.
+        val chosen = best?.first ?: dataSource.ensureAetherProfile() ?: return false
+        updateSelectedGuid(chosen)
         return true
     }
 
