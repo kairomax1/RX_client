@@ -23,8 +23,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
 /**
- * The quiet test that runs by itself after configs are added: a real ping for every new config,
- * then a short download through the five with the lowest ping. Its numbers decide the badges.
+ * The quiet test that runs by itself after configs are added: the test service pings every new
+ * config, then this object downloads a small payload through the five with the lowest ping. The
+ * numbers decide the badges and the order of the list.
  *
  * A config that is not connected has no tunnel to measure through, so each speed measurement
  * starts a private core for that one config with a local HTTP door, downloads a small payload
@@ -45,21 +46,30 @@ object AutoConfigTest {
 
     private data class Stored(val pingMs: Long = 0L, val speedKbps: Int? = null)
 
-    /** Runs the whole test for [guids] and stores what it measured. Returns the pings. */
-    suspend fun run(context: Context, guids: List<String>): Map<String, Long> {
-        if (guids.isEmpty()) return emptyMap()
-        val pings = ConfigBenchmark.pingConfigs(context, guids)
-        pings.forEach { (guid, ping) ->
-            // The list shows -1 for "no answer", the same value a manual test writes.
-            MmkvManager.encodeServerTestDelayMillis(guid, if (ping > 0) ping else -1L)
-            save(guid, Stored(pingMs = ping))
-        }
+    /**
+     * Second half of the automatic test. The pings were just measured by the test service (the
+     * same one behind "test all"); this stores them and measures the speed of the best few.
+     */
+    suspend fun finish(context: Context, guids: List<String>) {
+        if (guids.isEmpty()) return
+        val pings = guids.associateWith { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }
+        pings.forEach { (guid, ping) -> save(guid, Stored(pingMs = ping)) }
         for (guid in ConfigBadges.speedCandidates(pings)) {
             coroutineContext.ensureActive()
             val speed = measureSpeed(context, guid)
             save(guid, Stored(pingMs = pings[guid] ?: 0L, speedKbps = speed))
         }
-        return pings
+    }
+
+    /** Puts the configs of [groupId] in badge order and returns whether anything moved. */
+    fun sortGroup(groupId: String): Boolean {
+        val list = MmkvManager.decodeServerList(groupId)
+        if (list.size < 2) return false
+        val badges = ConfigBadges.assign(scores(list))
+        val sorted = ConfigBadges.order(list, badges) { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }
+        if (sorted == list) return false
+        MmkvManager.encodeServerList(ArrayList(sorted), groupId)
+        return true
     }
 
     /** Stored numbers of the given configs, for the badge rules. */

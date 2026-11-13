@@ -62,4 +62,14 @@ object ConfigBadges {
     /** The reachable configs worth a speed measurement: the [limit] lowest pings. */
     fun speedCandidates(pings: Map<String, Long>, limit: Int = 5): List<String> =
         pings.entries.filter { it.value > 0 }.sortedBy { it.value }.take(limit).map { it.key }
+
+    /**
+     * List order after the automatic test: recommended, lowest ping, fastest, then everything
+     * else by ping with unreachable configs last. Equal entries keep their current order.
+     */
+    fun order(guids: List<String>, badges: Map<String, ConfigBadge>, pingOf: (String) -> Long): List<String> =
+        guids.sortedWith(
+            compareBy<String> { badges[it]?.ordinal ?: ConfigBadge.entries.size }
+                .thenBy { guid -> pingOf(guid).let { if (it > 0) it else Long.MAX_VALUE } }
+        )
 }

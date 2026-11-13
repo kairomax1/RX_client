@@ -451,9 +451,21 @@ private fun ServerListItem(
                 }
                 // One entry point for share, edit and delete: the row stays calm and the target
                 // the user has to aim at is a single 40dp button instead of three 36dp ones.
+                // Editing is the most used action on a config, so it gets its own pencil.
+                IconButton(
+                    onClick = { actions.edit(row.guid, row.profile) },
+                    modifier = Modifier.padding(start = 2.dp).size(38.dp)
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_edit_24dp),
+                        stringResource(R.string.action_edit),
+                        Modifier.size(19.dp),
+                        tint = colors.onSurface.copy(alpha = 0.85f)
+                    )
+                }
                 IconButton(
                     onClick = { actions.more(row.guid, row.profile) },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Icon(
                         painterResource(R.drawable.ic_more_vert_24dp),

@@ -90,10 +90,7 @@ class DailyMaintenanceWorker(
             return
         }
 
-        // Fetch the APK ahead of time so a tap on the notification can go straight to the installer.
-        if (UpdateNotifier.downloadApk(applicationContext, version, url) == null) {
-            LogUtil.w(AppConfig.TAG, "Daily maintenance: update download failed; it is fetched on tap instead")
-        }
+        // Nothing is downloaded here: the user is told the size first and decides on the update screen.
         UpdateNotifier.onCheckResult(applicationContext, result)
     }
 

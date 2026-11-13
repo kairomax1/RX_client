@@ -18,6 +18,12 @@ data class GitHubRelease(
         @SerializedName("name")
         val name: String,
         @SerializedName("browser_download_url")
-        val browserDownloadUrl: String
+        val browserDownloadUrl: String,
+        /** Size in bytes. */
+        @SerializedName("size")
+        val size: Long = 0L,
+        /** Checksum as GitHub publishes it, e.g. `sha256:<hex>`; absent on old releases. */
+        @SerializedName("digest")
+        val digest: String? = null
     )
 }

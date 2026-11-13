@@ -207,8 +207,12 @@ class MainRepository(
 
     override fun isSubscriptionUrl(value: String): Boolean = Utils.isValidSubUrl(value)
 
-    override suspend fun autoTestConfigs(guids: List<String>) {
-        AutoConfigTest.run(app, guids)
+    override suspend fun finishAutoTest(guids: List<String>) {
+        AutoConfigTest.finish(app, guids)
+    }
+
+    override fun sortGroupByBadges(groupId: String) {
+        AutoConfigTest.sortGroup(groupId)
     }
 
     override fun badgesFor(guids: List<String>): Map<String, ConfigBadge> =

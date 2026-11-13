@@ -1,5 +1,17 @@
 package com.v2ray.ang.ui.main
 
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import com.v2ray.ang.ui.compose.RxPromptDialog
+import com.v2ray.ang.ui.compose.RxPromptOption
+import com.v2ray.ang.ui.compose.RxPromptSubject
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
@@ -30,14 +42,32 @@ enum class MainMoreMenuAction(@StringRes val labelRes: Int) {
 
 internal enum class ServerMenuAction(
     @StringRes val labelRes: Int,
+    /** One plain line telling what the entry is for. */
+    @StringRes val hintRes: Int,
+    @DrawableRes val iconRes: Int,
     val isShareAction: Boolean,
     val supportsComplexProfiles: Boolean,
 ) {
-    ShareQRCode(R.string.share_method_qrcode, isShareAction = true, supportsComplexProfiles = false),
-    ShareClipboard(R.string.share_method_clipboard, isShareAction = true, supportsComplexProfiles = false),
-    ShareFullContent(R.string.share_method_full_content, isShareAction = true, supportsComplexProfiles = true),
-    Edit(R.string.action_edit, isShareAction = false, supportsComplexProfiles = true),
-    Delete(R.string.action_delete, isShareAction = false, supportsComplexProfiles = true),
+    ShareQRCode(
+        R.string.config_card_qr, R.string.config_card_qr_hint, R.drawable.ic_qr_code_24dp,
+        isShareAction = true, supportsComplexProfiles = false,
+    ),
+    ShareClipboard(
+        R.string.config_card_copy, R.string.config_card_copy_hint, R.drawable.ic_copy,
+        isShareAction = true, supportsComplexProfiles = false,
+    ),
+    ShareFullContent(
+        R.string.config_card_copy_json, R.string.config_card_copy_json_hint, R.drawable.ic_source_code_24dp,
+        isShareAction = true, supportsComplexProfiles = true,
+    ),
+    Edit(
+        R.string.action_edit, R.string.config_card_edit_hint, R.drawable.ic_edit_24dp,
+        isShareAction = false, supportsComplexProfiles = true,
+    ),
+    Delete(
+        R.string.action_delete, R.string.config_card_delete_hint, R.drawable.ic_delete_24dp,
+        isShareAction = false, supportsComplexProfiles = true,
+    ),
 }
 
 internal fun serverMenuActions(
@@ -83,19 +113,31 @@ fun ShareMethodDialog(
         isComplexProfile = profile.configType.isComplexType(),
         includeManagementActions = more,
     )
-    SelectListDialog(
-        options = menuActions,
-        optionText = { stringResource(it.labelRes) },
-        onSelected = { action ->
-            onDismiss()
-            when (action) {
-                ServerMenuAction.ShareQRCode -> onAction(MainAction.ShareQRCode(guid))
-                ServerMenuAction.ShareClipboard -> onAction(MainAction.ShareClipboard(guid))
-                ServerMenuAction.ShareFullContent -> onAction(MainAction.ShareFullContent(guid))
-                ServerMenuAction.Edit -> onAction(MainAction.EditServer(guid, profile))
-                ServerMenuAction.Delete -> onRemove(guid, profile.remarks)
+    // Editing has its own pencil on the row, so the card does not repeat it.
+    val entries = menuActions.filter { it != ServerMenuAction.Edit }
+    RxPromptDialog(onDismissRequest = onDismiss, alwaysRtl = false) {
+        RxPromptSubject(profile.remarks)
+        Spacer(Modifier.height(16.dp))
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            entries.forEachIndexed { index, action ->
+                RxPromptOption(
+                    icon = painterResource(action.iconRes),
+                    title = stringResource(action.labelRes),
+                    hint = stringResource(action.hintRes),
+                    order = index,
+                    danger = action == ServerMenuAction.Delete,
+                    onClick = {
+                        onDismiss()
+                        when (action) {
+                            ServerMenuAction.ShareQRCode -> onAction(MainAction.ShareQRCode(guid))
+                            ServerMenuAction.ShareClipboard -> onAction(MainAction.ShareClipboard(guid))
+                            ServerMenuAction.ShareFullContent -> onAction(MainAction.ShareFullContent(guid))
+                            ServerMenuAction.Edit -> onAction(MainAction.EditServer(guid, profile))
+                            ServerMenuAction.Delete -> onRemove(guid, profile.remarks)
+                        }
+                    },
+                )
             }
-        },
-        onDismiss = onDismiss
-    )
+        }
+    }
 }

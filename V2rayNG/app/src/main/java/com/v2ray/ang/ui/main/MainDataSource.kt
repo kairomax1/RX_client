@@ -57,8 +57,11 @@ interface MainDataSource : Closeable {
     /** True for a link that would be imported as a subscription. */
     fun isSubscriptionUrl(value: String): Boolean
 
-    /** Pings [guids], speed-tests the best few and stores the numbers the badges are made from. */
-    suspend fun autoTestConfigs(guids: List<String>)
+    /** After [guids] were pinged: speed-tests the best few and stores the numbers for the badges. */
+    suspend fun finishAutoTest(guids: List<String>)
+
+    /** Puts a group in badge order (recommended, lowest ping, fastest, then by ping). */
+    fun sortGroupByBadges(groupId: String)
 
     /** Badges among [guids], which must be the configs of one group. */
     fun badgesFor(guids: List<String>): Map<String, ConfigBadge>

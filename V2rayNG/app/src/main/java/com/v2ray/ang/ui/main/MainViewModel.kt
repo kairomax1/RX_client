@@ -118,6 +118,8 @@ class MainViewModel(
 
     // ---------- Automatic test of new configs ----------
     private var autoTestJob: Job? = null
+    private var autoTestRequestId: String? = null
+    private var autoTestGroups: Map<String, List<String>> = emptyMap()
 
     @Volatile
     private var badges: Map<String, ConfigBadge> = emptyMap()
@@ -158,6 +160,11 @@ class MainViewModel(
             MainServiceEvent.StateStartSuccess -> {
                 updateRunningState(true)
                 beginConnectionVerification()
+                // With the tunnel up GitHub is reachable: the best moment to look for an update.
+                viewModelScope.launch {
+                    delay(4000)
+                    UpdateNotifier.checkNow(getApplication<Application>())
+                }
             }
 
             is MainServiceEvent.StateStartFailure -> {
@@ -733,25 +740,68 @@ class MainViewModel(
     }
 
     /**
-     * Tests every config that was not there [before], without holding the screen: the list stays
-     * usable and simply shows the numbers and badges when they are ready.
+     * Tests every config that was not there [before]. The ping runs through the same test
+     * service as "test all", so the list fills in live; when it finishes, [finishAutoTest]
+     * measures speed, hands out the badges and sorts the list.
      */
     private fun startAutoTest(before: Set<String>) {
-        autoTestJob?.cancel()
-        autoTestJob = viewModelScope.launch(ioDispatcher) {
+        viewModelScope.launch {
             try {
-                val fresh = allConfigGuids().filter { it !in before }
-                if (fresh.isEmpty()) return@launch
-                dataSource.autoTestConfigs(fresh)
-                badges = computeBadges()
-                cacheMutex.withLock { groupDataCache.clear() }
-                reloadAllGroups(_uiState.value.groups.map { it.id })
+                val freshByGroup = withContext(ioDispatcher) {
+                    dataSource.getSubscriptions().associate { sub ->
+                        sub.guid to dataSource.getServerGuidList(sub.guid).filter { it !in before }
+                    }.filterValues { it.isNotEmpty() }
+                }
+                if (freshByGroup.isEmpty()) return@launch
+                // Let the reload that follows an import settle, so results land in a loaded list.
+                setupGroupJob?.join()
+                autoTestJob?.cancel()
+                cancelAllPing()
+                removeInvalidAfterRequestId = null
+
+                val fresh = freshByGroup.values.flatten()
+                // Live results are shown in the group that received the most new configs.
+                val liveGroup = freshByGroup.maxByOrNull { it.value.size }?.key.orEmpty()
+                val request = testRequests.beginBulk(liveGroup)
+                autoTestRequestId = request.id
+                autoTestGroups = freshByGroup
+                _uiState.update { it.copy(isTesting = true, status = MainStatus.Testing) }
+                // No subscription id on purpose: the service's "remove failed" and "sort" options
+                // belong to a test the user started, not to this one.
+                dataSource.sendMsg2TestService(
+                    TestServiceMessage(key = AppConfig.MSG_MEASURE_CONFIG_START, serverGuids = fresh),
+                    request.id,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Automatic config test could not start", e)
+            }
+        }
+    }
+
+    private fun finishAutoTest(groups: Map<String, List<String>>) {
+        autoTestJob?.cancel()
+        autoTestJob = viewModelScope.launch(ioDispatcher) {
+            try {
+                // First pass right away: pings are known, so the list is sorted without waiting
+                // for the speed measurements.
+                applyAutoTestOrder(groups.keys)
+                dataSource.finishAutoTest(groups.values.flatten())
+                applyAutoTestOrder(groups.keys)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Throwable) {
                 LogUtil.e(AppConfig.TAG, "Automatic config test failed", e)
             }
         }
+    }
+
+    private suspend fun applyAutoTestOrder(groupIds: Collection<String>) {
+        groupIds.forEach { dataSource.sortGroupByBadges(it) }
+        badges = computeBadges()
+        cacheMutex.withLock { groupDataCache.clear() }
+        reloadAllGroups(_uiState.value.groups.map { it.id })
     }
 
     private fun importConfigViaSub(subId: String) {
@@ -1143,6 +1193,11 @@ class MainViewModel(
     private fun onTestsFinished(requestId: String) {
         if (testRequests.completeBulk(requestId) == null) return
         resetTestStatus()
+        if (autoTestRequestId == requestId) {
+            autoTestRequestId = null
+            finishAutoTest(autoTestGroups)
+            return
+        }
         if (removeInvalidAfterRequestId == requestId) {
             // The removal reloads the groups itself.
             removeInvalidAfterRequestId = null

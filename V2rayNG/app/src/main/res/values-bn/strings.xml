@@ -653,4 +653,21 @@
     <string name="badge_lowest_ping">Lowest ping</string>
     <string name="badge_fastest">Fastest</string>
     <string name="auto_test_running">Measuring the new configs…</string>
+    <string name="config_card_qr">QR code</string>
+    <string name="config_card_qr_hint">To hand the config to another phone by scanning with its camera</string>
+    <string name="config_card_copy">Copy config</string>
+    <string name="config_card_copy_hint">To send the config to others; it is a short link</string>
+    <string name="config_card_copy_json">Copy config as JSON</string>
+    <string name="config_card_copy_json_hint">For technical use; the full config with every detail</string>
+    <string name="config_card_edit_hint">To change the name or details of the config</string>
+    <string name="config_card_delete_hint">To remove this config from the list</string>
+    <string name="update_size_ask">The update is this big. Download it?</string>
+    <string name="update_size_yes">Yes, download</string>
+    <string name="update_size_no">Not now</string>
+    <string name="update_download">Download update</string>
+    <string name="update_install">Install</string>
+    <string name="update_retry">Failed; try again</string>
+    <string name="update_installed_version">Installed version: %s</string>
+    <string name="update_notes_title">What is new</string>
+    <string name="update_notes_empty">No description was written for this version.</string>
 </resources>

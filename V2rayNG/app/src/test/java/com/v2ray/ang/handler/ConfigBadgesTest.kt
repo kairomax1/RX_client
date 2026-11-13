@@ -73,4 +73,14 @@ class ConfigBadgesTest {
         val pings = mapOf("a" to 500L, "b" to 100L, "c" to -1L, "d" to 300L, "e" to 200L, "f" to 400L, "g" to 600L)
         assertEquals(listOf("b", "e", "d", "f", "a"), ConfigBadges.speedCandidates(pings))
     }
+
+    @Test
+    fun listIsOrderedByBadgeThenPingWithUnreachableLast() {
+        val badges = mapOf("f" to ConfigBadge.Fastest, "r" to ConfigBadge.Recommended, "p" to ConfigBadge.LowestPing)
+        val pings = mapOf("dead" to -1L, "slow" to 900L, "f" to 400L, "r" to 90L, "p" to 50L, "mid" to 200L, "new" to 0L)
+        assertEquals(
+            listOf("r", "p", "f", "mid", "slow", "dead", "new"),
+            ConfigBadges.order(listOf("dead", "slow", "f", "r", "p", "mid", "new"), badges) { pings.getValue(it) },
+        )
+    }
 }

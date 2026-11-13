@@ -181,3 +181,26 @@ Nine items, delivered together.
 - **Battery**, with no visible change: decorative frame loops run only while the screen is on show; the drawer fog asks for no frames while the drawer is closed; wallpaper lights and fog banks reuse their gradients instead of building shaders every frame; the update dot no longer recomposes each frame; backups are built off the main thread.
 - **Config list settings**: the two-column and "all" tab switches are gone (fixed off); speed display and delete confirmation default to on.
 - **Backup screen**: two choices only. A backup is always password protected and leaves out ping results (`SERVER_AFF`) and the automatic test numbers. Older unencrypted backups still restore. Three wrong passwords end the attempt; the file is never locked. WebDAV, share and cleanup code is still in the view model but has no entry on the screen.
+
+## Fourth fix round (version 1.0.1)
+
+- **Automatic test after import** now goes through `CoreTestService`, the same path as "test all"
+  (`MainViewModel.startAutoTest` → `finishAutoTest`). The private ping path of round 3 did not work
+  on a real phone and is gone. When the pings are in, `AutoConfigTest.finish` measures speed for the
+  five best, and `AutoConfigTest.sortGroup` rewrites the group order: recommended, lowest ping,
+  fastest, then the rest by ping (`ConfigBadges.order`).
+- **Config card** (three dots): `ShareMethodDialog` is an `RxPromptDialog` with `RxPromptOption`
+  rows (icon, name, one line on what it is for). Follows the app language. Delete is the last,
+  red row. Editing moved to a pencil on the row.
+- **Updates**
+  - Checked on app open (at most every 3 minutes), 4 s after the tunnel comes up, and every
+    15 minutes in the background (`UpdateWatchWorker`, WorkManager minimum). No Google services.
+  - Nothing is downloaded before the user saw the size and agreed. Screen: versions, scrolling
+    description, fixed download button that turns into the progress bar and then "install".
+  - `UpdateDownloader`: routes tunnel proxy → direct → mirrors (mirrors only when the release
+    publishes a SHA-256); 4 parallel ranges, each resumable; size and checksum verified.
+  - "No update" shows the fixed Persian note `update_none_note` (owner's wording, do not edit).
+  - **Release description format**: text for the app goes inside `<!--app` … `-->`; GitHub hides
+    it and the app shows only it. Everything else is the GitHub text. Without the block the app
+    shows the whole description. See `UpdateRelease.appNotes`.
+- `versionName` is `1.0.1`; `versionCode` unchanged (4).

@@ -653,4 +653,21 @@
     <string name="badge_lowest_ping">کم پینگ ترین</string>
     <string name="badge_fastest">پرسرعت ترین</string>
     <string name="auto_test_running">در حال سنجش کانفیگ‌های تازه…</string>
+    <string name="config_card_qr">کد QR</string>
+    <string name="config_card_qr_hint">برای اینکه کانفیگ رو با اسکن دوربین به یه گوشی دیگه بدی</string>
+    <string name="config_card_copy">کپی کانفیگ</string>
+    <string name="config_card_copy_hint">برای فرستادن کانفیگ به بقیه؛ یه لینک کوتاهه</string>
+    <string name="config_card_copy_json">کپی کانفیگ با فرمت JSON</string>
+    <string name="config_card_copy_json_hint">برای کارهای فنی؛ متن کامل کانفیگ با همهٔ جزئیات</string>
+    <string name="config_card_edit_hint">برای عوض کردن اسم یا مشخصات کانفیگ</string>
+    <string name="config_card_delete_hint">برای پاک کردن این کانفیگ از فهرست</string>
+    <string name="update_size_ask">حجم آپدیت اینقدره. دانلودش کنم؟</string>
+    <string name="update_size_yes">آره، دانلود کن</string>
+    <string name="update_size_no">الان نه</string>
+    <string name="update_download">دانلود آپدیت</string>
+    <string name="update_install">نصب کن</string>
+    <string name="update_retry">نشد؛ دوباره امتحان کن</string>
+    <string name="update_installed_version">نسخهٔ نصب‌شده: %s</string>
+    <string name="update_notes_title">توضیحات</string>
+    <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
 </resources>

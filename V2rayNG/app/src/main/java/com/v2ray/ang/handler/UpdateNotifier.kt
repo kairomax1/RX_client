@@ -1,5 +1,12 @@
 package com.v2ray.ang.handler
 
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.v2ray.ang.service.UpdateWatchWorker
+import java.util.concurrent.TimeUnit
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -40,7 +47,9 @@ object UpdateNotifier {
     private const val PREF_LAST_NOTIFIED = "pref_update_last_notified"
     private const val CHANNEL_ID = "app_update_channel"
     private const val NOTIFICATION_ID = 22
-    private const val OPEN_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    // Short on purpose: a new release should be noticed quickly. It only keeps rapid reopening from
+    // using up GitHub's hourly request allowance.
+    private const val OPEN_CHECK_INTERVAL_MS = 3 * 60 * 1000L
     private const val RENOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
     private val _pending = MutableStateFlow(readPending())
@@ -68,7 +77,14 @@ object UpdateNotifier {
      * Check made when the app opens. Rate limited so opening the app repeatedly does not hit the
      * GitHub API every time. Never throws: without network the old state simply stays.
      */
-    suspend fun checkOnAppOpen(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun checkOnAppOpen(context: Context) = checkNow(context)
+
+    /**
+     * Asks GitHub whether a newer release exists and notifies when it does. Called when the app
+     * opens, when the tunnel comes up (the moment GitHub is surely reachable) and by the
+     * background check that runs every 15 minutes.
+     */
+    suspend fun checkNow(context: Context) = withContext(Dispatchers.IO) {
         // A build that is already the newest must not keep an old dot after it was updated.
         _pending.value = readPending()
         val now = System.currentTimeMillis()
@@ -79,7 +95,7 @@ object UpdateNotifier {
             MmkvManager.encodeSettings(PREF_LAST_CHECK_MS, now)
             onCheckResult(context, result)
         } catch (e: Exception) {
-            LogUtil.w(AppConfig.TAG, "Update check on app open failed", e)
+            LogUtil.w(AppConfig.TAG, "Update check failed", e)
         }
     }
 
@@ -95,43 +111,17 @@ object UpdateNotifier {
         notifyUpdate(context, version)
     }
 
-    fun cachedApk(context: Context, version: String): File {
-        val dir = File(context.cacheDir, "update").apply { mkdirs() }
-        return File(dir, "RX-VPN-$version.apk")
-    }
+    fun cachedApk(context: Context, version: String): File = UpdateDownloader.targetFile(context, version)
 
-    /**
-     * Downloads the release APK, directly first and through the local proxy when that fails (GitHub
-     * is often only reachable while connected). A finished file from an earlier pass is reused.
-     */
-    suspend fun downloadApk(context: Context, version: String, url: String): File? =
-        withContext(Dispatchers.IO) {
-            val target = cachedApk(context, version)
-            if (target.length() > 0) return@withContext target
-            val partial = File(target.parentFile, target.name + ".part")
-            partial.delete()
-            var ok = HttpUtil.downloadToFile(UrlContentRequest(url = url, timeout = 60_000), partial)
-            if (!ok) {
-                partial.delete()
-                ok = HttpUtil.downloadToFile(
-                    UrlContentRequest(
-                        url = url,
-                        timeout = 60_000,
-                        httpPort = SettingsManager.getHttpPort(),
-                        proxyUsername = SettingsManager.getSocksUsername(),
-                        proxyPassword = SettingsManager.getSocksPassword(),
-                    ),
-                    partial
-                )
-            }
-            if (!ok || partial.length() <= 0 || !partial.renameTo(target)) {
-                partial.delete()
-                return@withContext null
-            }
-            // Older builds accumulate in the cache; keep only the one being offered.
-            target.parentFile?.listFiles()?.filter { it != target }?.forEach { it.delete() }
-            target
-        }
+    /** See [UpdateDownloader]; kept here so callers have one place for everything about updates. */
+    suspend fun downloadApk(
+        context: Context,
+        version: String,
+        url: String,
+        size: Long = 0L,
+        sha256: String? = null,
+        onProgress: (UpdateDownloader.Progress) -> Unit = {},
+    ): File? = UpdateDownloader.download(context, version, url, size, sha256, onProgress)
 
     fun installIntent(context: Context, apk: File): Intent {
         val uri = FileProvider.getUriForFile(context, BuildConfig.APPLICATION_ID + ".cache", apk)
@@ -140,7 +130,7 @@ object UpdateNotifier {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
-    /** At most once a day per version; tapping opens the update screen, which downloads and installs. */
+    /** At most once a day per version; tapping opens the update screen with the download button. */
     fun notifyUpdate(context: Context, version: String, force: Boolean = false) {
         val now = System.currentTimeMillis()
         val stamp = MmkvManager.decodeSettingsString(PREF_LAST_NOTIFIED).orEmpty()
@@ -156,7 +146,6 @@ object UpdateNotifier {
         ensureChannel(context)
 
         val intent = Intent(context, CheckUpdateActivity::class.java)
-            .putExtra(EXTRA_AUTO_INSTALL, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(
             context,
@@ -193,5 +182,26 @@ object UpdateNotifier {
                 NotificationManager.IMPORTANCE_HIGH
             )
         )
+    }
+
+    private const val WATCH_WORK_NAME = "rx_update_watch"
+
+    /**
+     * Keeps looking for a new release while the app is closed: every 15 minutes, the shortest
+     * period Android allows, and only while a network is connected.
+     */
+    fun scheduleWatch(context: Context) {
+        try {
+            val request = PeriodicWorkRequestBuilder<UpdateWatchWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WATCH_WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        } catch (e: Exception) {
+            LogUtil.w(AppConfig.TAG, "Update watch could not be scheduled", e)
+        }
     }
 }

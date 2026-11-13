@@ -1,5 +1,6 @@
 package com.v2ray.ang
 
+import com.v2ray.ang.handler.UpdateNotifier
 import android.app.Application
 import android.content.Context
 import androidx.core.content.ContextCompat
@@ -51,5 +52,6 @@ class AngApplication : Application() {
 
         // Keep the daily maintenance job in sync with the preference
         DailyMaintenance.sync(this)
+        UpdateNotifier.scheduleWatch(this)
     }
 }

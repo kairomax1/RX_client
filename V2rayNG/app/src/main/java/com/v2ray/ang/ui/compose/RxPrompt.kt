@@ -17,6 +17,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -120,6 +126,8 @@ internal fun rxTypingUnits(text: String): List<String> {
 fun RxPromptDialog(
     onDismissRequest: () -> Unit,
     dismissOnOutsideTap: Boolean = true,
+    /** The owner's Persian prompts are always right to left; translated cards follow the app. */
+    alwaysRtl: Boolean = true,
     overlay: @Composable BoxScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -136,7 +144,7 @@ fun RxPromptDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
         CompositionLocalProvider(
-            LocalLayoutDirection provides LayoutDirection.Rtl,
+            LocalLayoutDirection provides if (alwaysRtl) LayoutDirection.Rtl else LocalLayoutDirection.current,
             LocalContentColor provides colors.onSurface,
         ) {
             Box(
@@ -449,6 +457,95 @@ fun RxPromptButton(
     }
 }
 
+/**
+ * One choice of a card that offers several: icon, name and a plain line saying what it is for.
+ * Arrives after the one above it and sinks under the finger. [danger] tints it a soft red.
+ */
+@Composable
+fun RxPromptOption(
+    icon: Painter,
+    title: String,
+    hint: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    order: Int = 0,
+    danger: Boolean = false,
+) {
+    val colors = MaterialTheme.colorScheme
+    val animate = rememberAnimationsEnabled()
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(
+        targetValue = if (pressed) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium),
+        label = "promptOptionPress",
+    )
+    val arrive = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (arrive.value < 1f) {
+            delay(200L + 90L * order)
+            arrive.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow))
+        }
+    }
+    val accent = if (danger) Color(0xFFC98A8F) else colors.onSurface
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val shape = RoundedCornerShape(20.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                val value = arrive.value
+                // Slides in from the side it reads from, growing to full size as it lands.
+                translationX = (1f - value) * 48.dp.toPx() * if (rtl) 1f else -1f
+                val scale = (0.9f + 0.1f * value) * press
+                scaleX = scale
+                scaleY = scale
+                alpha = value.coerceIn(0f, 1f)
+            }
+            .clip(shape)
+            .background(accent.copy(alpha = if (danger) 0.13f else 0.07f))
+            .border(1.dp, accent.copy(alpha = if (danger) 0.45f else 0.16f), shape)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    if (danger) Brush.linearGradient(listOf(Color(0xFFB98488), Color(0xFF93595E)))
+                    else Brush.linearGradient(listOf(colors.primary, colors.secondary))
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = icon,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = if (danger) Color(0xFFFFF4F4) else colors.onPrimary,
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = TextStyle(fontFamily = RxPromptFont, fontSize = 18.sp),
+                color = if (danger) Color(0xFFE2A9AD) else colors.onSurface,
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 /** Buttons of a prompt, one under the other, full width. */
 @Composable
 fun RxPromptButtons(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
@@ -464,7 +561,7 @@ fun RxPromptButtons(modifier: Modifier = Modifier, content: @Composable ColumnSc
  * fades. Shown again each time [tick] changes; nothing is shown while it is 0.
  */
 @Composable
-fun BoxScope.RxRisingNote(text: String, tick: Int) {
+fun BoxScope.RxRisingNote(text: String, tick: Int, calm: Boolean = false, holdMillis: Long = 1500) {
     if (tick <= 0) return
     val animate = rememberAnimationsEnabled()
     val travel = remember { Animatable(0f) }
@@ -473,7 +570,7 @@ fun BoxScope.RxRisingNote(text: String, tick: Int) {
         travel.snapTo(if (animate) 0f else 1f)
         fade.snapTo(1f)
         travel.animateTo(1f, tween(620, easing = FastOutSlowInEasing))
-        delay(1500)
+        delay(holdMillis)
         fade.animateTo(0f, tween(380))
     }
     val shape = RoundedCornerShape(22.dp)
@@ -488,14 +585,18 @@ fun BoxScope.RxRisingNote(text: String, tick: Int) {
                 alpha = fade.value
             }
             .clip(shape)
-            .background(Brush.linearGradient(listOf(Color(0xFFC0696F), Color(0xFF8A3E45))))
+            .background(
+                // Red for "that was wrong"; the app's silver for a calm piece of news.
+                if (calm) Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))
+                else Brush.linearGradient(listOf(Color(0xFFC0696F), Color(0xFF8A3E45)))
+            )
             .border(1.dp, Color.White.copy(alpha = 0.35f), shape)
             .padding(horizontal = 26.dp, vertical = 16.dp),
     ) {
         Text(
             text = text,
-            style = TextStyle(fontFamily = RxPromptFont, fontSize = 22.sp),
-            color = Color.White,
+            style = TextStyle(fontFamily = RxPromptFont, fontSize = 22.sp, textAlign = TextAlign.Center),
+            color = if (calm) MaterialTheme.colorScheme.onPrimary else Color.White,
         )
     }
 }
