@@ -694,4 +694,13 @@
     <string name="dns_mode_devices_port">پورت: %s</string>
     <string name="dns_mode_devices_no_network">گوشی به وای‌فای وصل نیست و هات‌اسپاتش هم روشن نیست. یکی رو روشن کن و دوباره این کارت رو باز کن.</string>
     <string name="dns_mode_devices_password">برای پراکسی برنامه رمز گذاشتی و کنسول‌ها جایی برای وارد کردن رمز ندارن. رمز رو از تنظیمات بردار.</string>
+    <string name="dns_mode_xbox">ایکس‌باکس (فقط DNS)</string>
+    <string name="dns_mode_xbox_checking">دارم DNSهای ضدتحریم رو از روی همین اینترنت تست می‌کنم…</string>
+    <string name="dns_mode_xbox_none">الان هیچ‌کدوم از DNSهای ضدتحریم جواب ندادن. چند دقیقه بعد دوباره تست کن.</string>
+    <string name="dns_mode_xbox_how">توی ایکس‌باکس برو به Settings ← Network ← Advanced settings ← DNS settings ← Manual و این دو تا رو وارد کن.</string>
+    <string name="dns_mode_xbox_service">%1$s — %2$s میلی‌ثانیه</string>
+    <string name="dns_mode_xbox_primary">Primary: %s</string>
+    <string name="dns_mode_xbox_secondary">Secondary: %s</string>
+    <string name="dns_mode_xbox_limits">این DNS مال یه سرویس عمومیه، نه ساختهٔ برنامه. فقط تحریم رو باز می‌کنه؛ فیلتر رو باز نمی‌کنه و پینگ بازی رو کم نمی‌کنه.</string>
+    <string name="dns_mode_xbox_again">دوباره تست کن</string>
 </resources>

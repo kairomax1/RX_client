@@ -159,6 +159,9 @@ class MainRepository(
     override fun getSubscriptionItem(id: String): SubscriptionItem? =
         MmkvManager.decodeSubscription(id)
 
+    override fun getTestDelayMillis(guid: String): Long =
+        MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L
+
     override fun getServerGuidList(groupId: String): List<String> =
         if (groupId.isEmpty()) {
             MmkvManager.decodeAllServerList()

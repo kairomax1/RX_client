@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.handler.ConsoleDns
 import com.v2ray.ang.handler.DnsMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
@@ -26,6 +27,10 @@ data class DnsModeUiState(
     val port: Int = 0,
     /** A proxy password is set; consoles cannot enter one. */
     val needsPassword: Boolean = false,
+    /** A check of the console DNS services is running. */
+    val probing: Boolean = false,
+    /** Services that answered in the last check, fastest first; null before the first check. */
+    val consoleDns: List<ConsoleDns.Result>? = null,
 )
 
 /** State of the DNS mode card. Every change that the running tunnel must pick up returns true. */
@@ -47,7 +52,7 @@ class DnsModeViewModel(application: Application) : AndroidViewModel(application)
                     needsPassword = SettingsManager.getSocksUsername() != null,
                 )
             }
-            _state.value = fresh
+            _state.update { fresh.copy(probing = it.probing, consoleDns = it.consoleDns) }
         }
     }
 
@@ -66,6 +71,16 @@ class DnsModeViewModel(application: Application) : AndroidViewModel(application)
     fun clearDomains() {
         DnsMode.clearExtraDomains()
         _state.update { it.copy(extraDomains = emptyList()) }
+    }
+
+    /** Checks from this phone which console DNS services answer right now. */
+    fun probeConsoleDns() {
+        if (_state.value.probing) return
+        _state.update { it.copy(probing = true) }
+        viewModelScope.launch {
+            val results = withContext(Dispatchers.IO) { ConsoleDns.probeAll() }
+            _state.update { it.copy(probing = false, consoleDns = results) }
+        }
     }
 
     fun setSharing(enabled: Boolean) {

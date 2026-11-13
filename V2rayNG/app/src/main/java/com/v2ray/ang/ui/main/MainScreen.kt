@@ -82,6 +82,10 @@ fun MainScreen(
     var showDelInvalidConfirm by remember { mutableStateOf(false) }
     var showQuickSheet by remember { mutableStateOf(false) }
     var showDnsMode by remember { mutableStateOf(false) }
+    val connectBestTick by mainViewModel.connectBestTick.collectAsStateWithLifecycle()
+    LaunchedEffect(connectBestTick) {
+        if (connectBestTick > 0) onAction(MainAction.RestartService)
+    }
     var showCopySelected by remember { mutableStateOf(false) }
     var showRemoveConfirm by rememberSaveable(stateSaver = ServerDeleteTarget.Saver) {
         mutableStateOf<ServerDeleteTarget?>(null)
@@ -366,7 +370,13 @@ fun MainScreen(
             val dnsState by dnsModeViewModel.state.collectAsStateWithLifecycle()
             MainDnsModeCard(
                 state = dnsState,
-                onSetEnabled = dnsModeViewModel::setEnabled,
+                onSetEnabled = { enabled ->
+                    dnsModeViewModel.setEnabled(enabled)
+                    // Switching on: find the best config and connect to it. The plain restart
+                    // right after this covers the case where there is nothing to test.
+                    if (enabled) mainViewModel.testAllAndConnectBest()
+                },
+                onProbeConsoleDns = dnsModeViewModel::probeConsoleDns,
                 onAddDomain = dnsModeViewModel::addDomain,
                 onClearDomains = dnsModeViewModel::clearDomains,
                 onSetSharing = dnsModeViewModel::setSharing,

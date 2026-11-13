@@ -244,3 +244,23 @@ Nine items, delivered together.
 - UI: fifth tile of the quick sheet (`MainDestination.DnsMode`) opens `MainDnsModeCard`;
   state in `DnsModeViewModel`. A running tunnel is restarted after each change.
 - Not tested on a device. With the "dynamic port" setting on, the port changes at every start.
+
+### DNS mode, round 2
+
+- Fix: the tunnelled-sites rule now comes before the local-network rule. Inside Iran filtered
+  names resolve to 10.10.34.x, which the local-network rule used to send out directly.
+  `routeOnly` is forced off in the mode so the sniffed name replaces that fake address.
+- The Google family is tunnelled whole (YouTube and Play need googleapis/gstatic/...), plus the
+  `.google`/`.goog` endings (labs.google = Flow) and more AI services.
+- Switching the mode on runs the automatic test over every config and connects to the lowest
+  ping (`MainViewModel.testAllAndConnectBest` → `connectBestTick` → `MainAction.RestartService`).
+- Xbox page (`handler/ConsoleDns.kt`): probes public anti-sanction DNS services from the phone
+  and shows the fastest one whose two addresses both answer. The addresses are from memory and
+  were not checked from the build machine; the probe on the phone is the check.
+- Aether engine, researched (not integrated yet): `QW-AI-Code/Aether` vendors the engine in
+  `native/aether` (Rust, core 2.4.0, AGPL-3.0). It is a command-line executable shipped as
+  `libaether.so`, started as a process (`core/AetherProcess.kt`) and offering SOCKS on
+  127.0.0.1:1819; built with `cargo ndk` (`scripts/build-natives.sh`, needs quiche/BoringSSL;
+  Tor is an optional cargo feature costing 6-8 MB per ABI). Plan for RX VPN: build it in CI
+  without Tor, run it as a process, and point an Xray `socks` outbound at it, so it works as a
+  config-less "proxy" for DNS mode and as a standalone connection.

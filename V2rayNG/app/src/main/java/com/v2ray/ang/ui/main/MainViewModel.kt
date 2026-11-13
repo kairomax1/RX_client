@@ -121,6 +121,32 @@ class MainViewModel(
     private var autoTestRequestId: String? = null
     private var autoTestGroups: Map<String, List<String>> = emptyMap()
 
+    /** Set while a test is running whose winner is to be selected and connected. */
+    private var connectBestAfterTest = false
+    private val _connectBestTick = MutableStateFlow(0)
+
+    /** Goes up each time a tested winner was selected; the screen then (re)starts the tunnel. */
+    val connectBestTick: StateFlow<Int> = _connectBestTick.asStateFlow()
+
+    /**
+     * Pings every config and connects to the one that answers fastest. Used when DNS mode is
+     * switched on, so the user does not have to find a working config first.
+     */
+    fun testAllAndConnectBest() {
+        connectBestAfterTest = true
+        startAutoTest(emptySet())
+    }
+
+    /** Selects the config with the lowest ping among [guids]; false when none of them answered. */
+    private fun selectFastest(guids: List<String>): Boolean {
+        val best = guids
+            .mapNotNull { guid -> dataSource.getTestDelayMillis(guid).takeIf { it > 0 }?.let { guid to it } }
+            .minByOrNull { it.second }
+            ?: return false
+        updateSelectedGuid(best.first)
+        return true
+    }
+
     @Volatile
     private var badges: Map<String, ConfigBadge> = emptyMap()
 
@@ -752,7 +778,10 @@ class MainViewModel(
                         sub.guid to dataSource.getServerGuidList(sub.guid).filter { it !in before }
                     }.filterValues { it.isNotEmpty() }
                 }
-                if (freshByGroup.isEmpty()) return@launch
+                if (freshByGroup.isEmpty()) {
+                    connectBestAfterTest = false
+                    return@launch
+                }
                 // Let the reload that follows an import settle, so results land in a loaded list.
                 setupGroupJob?.join()
                 autoTestJob?.cancel()
@@ -787,6 +816,11 @@ class MainViewModel(
                 // First pass right away: pings are known, so the list is sorted without waiting
                 // for the speed measurements.
                 applyAutoTestOrder(groups.keys)
+                if (connectBestAfterTest) {
+                    connectBestAfterTest = false
+                    // Connect on ping alone; the speed measurements below can take a while.
+                    if (selectFastest(groups.values.flatten())) _connectBestTick.update { it + 1 }
+                }
                 dataSource.finishAutoTest(groups.values.flatten())
                 applyAutoTestOrder(groups.keys)
             } catch (cancelled: CancellationException) {

@@ -551,8 +551,10 @@ object CoreConfigManager {
         val sniffAllTlsAndHttp = DnsMode.isEnabled() ||
             MmkvManager.decodeSettingsBool(AppConfig.PREF_SNIFFING_ENABLED, true) != false
         inbound1.sniffing?.enabled = fakedns || sniffAllTlsAndHttp
+        // In DNS mode the site name must also replace the address the app was given: for a
+        // filtered site that address is a fake one, and only the name leads to the real site.
         inbound1.sniffing?.routeOnly =
-            MmkvManager.decodeSettingsBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
+            !DnsMode.isEnabled() && MmkvManager.decodeSettingsBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
         if (!sniffAllTlsAndHttp) {
             inbound1.sniffing?.destOverride?.clear()
         }

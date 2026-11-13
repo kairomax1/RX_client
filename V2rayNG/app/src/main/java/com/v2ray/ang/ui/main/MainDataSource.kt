@@ -33,6 +33,9 @@ interface MainDataSource : Closeable {
     fun getSubscriptionItem(id: String): SubscriptionItem?
 
     fun getServerGuidList(groupId: String): List<String>
+
+    /** Last measured ping of a config; 0 when untested, negative when it failed. */
+    fun getTestDelayMillis(guid: String): Long = 0L
     fun decodeServerConfig(guid: String): ProfileItem?
     fun decodeAffiliationInfo(guid: String): ServerAffiliationInfo?
 

@@ -70,13 +70,11 @@ object DnsMode {
 
     /** The routing rules of the mode, in matching order. */
     fun rulesets(extra: List<String> = emptyList()): MutableList<RulesetItem> {
-        val tunnelled = (FILTERED + SANCTIONED + extra).distinct().map { "domain:$it" }
+        val tunnelled = (FILTERED + SANCTIONED + WHOLE_ENDINGS + extra).distinct().map { "domain:$it" }
         return mutableListOf(
-            RulesetItem(
-                remarks = "DNS mode: local network",
-                outboundTag = AppConfig.TAG_DIRECT,
-                ip = listOf(AppConfig.GEOIP_PRIVATE),
-            ),
+            // First on purpose: inside Iran the names of filtered sites are answered with a
+            // private address (10.10.34.x). Matching the name before the local-network rule
+            // keeps such a connection in the tunnel instead of sending it out directly.
             RulesetItem(
                 remarks = "DNS mode: filtered and restricted sites",
                 outboundTag = AppConfig.TAG_PROXY,
@@ -87,6 +85,11 @@ object DnsMode {
                 remarks = "DNS mode: Telegram addresses",
                 outboundTag = AppConfig.TAG_PROXY,
                 ip = TELEGRAM_NETWORKS,
+            ),
+            RulesetItem(
+                remarks = "DNS mode: local network",
+                outboundTag = AppConfig.TAG_DIRECT,
+                ip = listOf(AppConfig.GEOIP_PRIVATE),
             ),
             // Named explicitly so that their names are also resolved outside the tunnel.
             RulesetItem(
@@ -127,9 +130,15 @@ object DnsMode {
 
     /** Services that are filtered in Iran. */
     internal val FILTERED = listOf(
-        // Google video and stores
-        "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "ggpht.com",
-        "play.google.com", "play-fe.googleapis.com", "play.googleapis.com", "android.clients.google.com",
+        // Google, whole: YouTube, the Play Store and the Google apps load their parts from many
+        // shared Google names, so tunnelling only "youtube.com" leaves them half working.
+        "youtube.com", "youtu.be", "yt.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "ggpht.com",
+        "youtubekids.com", "withyoutube.com", "youtubeeducation.com",
+        "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "withgoogle.com", "gvt1.com",
+        "gvt2.com", "gvt3.com", "1e100.net", "g.co", "goo.gl", "android.com", "appspot.com", "blogger.com",
+        "recaptcha.net", "gmail.com", "googlemail.com", "chrome.com", "chromium.org", "googletagmanager.com",
+        "google-analytics.com", "googlesyndication.com", "googleadservices.com", "doubleclick.net",
+        "googlesource.com", "googlecode.com", "web.dev", "page.link", "app.goo.gl", "firebaseapp.com",
         // Meta
         "instagram.com", "cdninstagram.com", "facebook.com", "fbcdn.net", "fb.com", "fbsbx.com", "facebook.net",
         "messenger.com", "whatsapp.com", "whatsapp.net", "wa.me", "threads.net", "threads.com",
@@ -160,6 +169,12 @@ object DnsMode {
         "gemini.google.com", "aistudio.google.com", "generativelanguage.googleapis.com", "bard.google.com",
         "notebooklm.google.com", "copilot.microsoft.com", "perplexity.ai", "x.ai", "grok.com", "midjourney.com",
         "huggingface.co", "hf.co", "cursor.com", "cursor.sh",
+        "sora.com", "claudeusercontent.com", "deepmind.com", "poe.com", "elevenlabs.io", "runwayml.com",
+        "suno.com", "stability.ai", "replicate.com", "openrouter.ai", "groq.com", "mistral.ai", "cohere.com",
+        "together.ai", "character.ai", "meta.ai", "githubcopilot.com", "ideogram.ai", "leonardo.ai", "pika.art",
+        "lovable.dev", "bolt.new", "v0.dev", "replit.com", "windsurf.com", "codeium.com", "manus.im",
+        "genspark.ai", "krea.ai", "luma.ai", "lumalabs.ai", "heygen.com", "gamma.app", "you.com", "phind.com",
+        "civitai.com", "kaggle.com", "colab.research.google.com", "wandb.ai", "langchain.com", "pinecone.io",
         // Google developer and paid services
         "developers.google.com", "developer.android.com", "source.android.com", "firebase.google.com",
         "firebaseio.com", "cloud.google.com", "console.cloud.google.com", "dl.google.com", "golang.org", "go.dev",
@@ -184,6 +199,9 @@ object DnsMode {
         "playstation.com", "sonyentertainmentnetwork.com", "xbox.com", "xboxlive.com", "nintendo.com",
         "supercell.com", "activision.com", "callofduty.com",
     ).filter { !it.contains('/') }
+
+    /** Whole name endings that belong to one company (labs.google, deepmind.google, ...). */
+    internal val WHOLE_ENDINGS = listOf("google", "goog", "youtube")
 
     internal val TELEGRAM_NETWORKS = listOf(
         "91.108.4.0/22", "91.108.8.0/22", "91.108.12.0/22", "91.108.16.0/22", "91.108.20.0/22",

@@ -27,7 +27,7 @@ import com.v2ray.ang.ui.compose.RxPromptSubject
 import com.v2ray.ang.ui.compose.RxPromptTone
 import com.v2ray.ang.ui.compose.RxRisingNote
 
-private enum class DnsPage { Main, AddSite, Devices }
+private enum class DnsPage { Main, AddSite, Devices, Xbox }
 
 /**
  * The DNS mode card: switch it, add a site that did not open, or get the address another device
@@ -41,6 +41,7 @@ fun MainDnsModeCard(
     onAddDomain: (String) -> Boolean,
     onClearDomains: () -> Unit,
     onSetSharing: (Boolean) -> Unit,
+    onProbeConsoleDns: () -> Unit,
     onChanged: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -200,9 +201,73 @@ fun MainDnsModeCard(
                         )
                     }
                     RxPromptButton(
+                        text = stringResource(R.string.dns_mode_xbox),
+                        tone = RxPromptTone.Ghost,
+                        onClick = {
+                            onProbeConsoleDns()
+                            page = DnsPage.Xbox
+                        },
+                        modifier = fullWidth,
+                        order = 2,
+                    )
+                    RxPromptButton(
                         text = stringResource(R.string.dns_mode_back),
                         tone = RxPromptTone.Ghost,
                         onClick = { page = DnsPage.Main },
+                        modifier = fullWidth,
+                        order = 3,
+                    )
+                }
+            }
+
+            DnsPage.Xbox -> {
+                val clipboard = LocalClipboardManager.current
+                val copied = stringResource(R.string.dns_mode_copied)
+                val best = state.consoleDns?.firstOrNull()
+                RxPromptMessage(stringResource(R.string.dns_mode_xbox), fontSize = 20)
+                Spacer(Modifier.height(10.dp))
+                when {
+                    state.probing || state.consoleDns == null -> CardNote(stringResource(R.string.dns_mode_xbox_checking))
+                    best == null -> CardNote(stringResource(R.string.dns_mode_xbox_none))
+                    else -> {
+                        CardNote(stringResource(R.string.dns_mode_xbox_how))
+                        Spacer(Modifier.height(14.dp))
+                        RxPromptSubject(
+                            stringResource(R.string.dns_mode_xbox_service, best.service.name, best.millis.toString())
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        RxPromptSubject(stringResource(R.string.dns_mode_xbox_primary, best.service.primary))
+                        Spacer(Modifier.height(8.dp))
+                        RxPromptSubject(stringResource(R.string.dns_mode_xbox_secondary, best.service.secondary))
+                        Spacer(Modifier.height(12.dp))
+                        CardNote(stringResource(R.string.dns_mode_xbox_limits))
+                    }
+                }
+                RxPromptButtons {
+                    if (best != null && !state.probing) {
+                        RxPromptButton(
+                            text = stringResource(R.string.dns_mode_copy),
+                            tone = RxPromptTone.Silver,
+                            onClick = {
+                                clipboard.setText(AnnotatedString("${best.service.primary}\n${best.service.secondary}"))
+                                noteText = copied
+                                noteTick++
+                            },
+                            modifier = fullWidth,
+                        )
+                    }
+                    RxPromptButton(
+                        text = stringResource(R.string.dns_mode_xbox_again),
+                        tone = RxPromptTone.Ghost,
+                        onClick = onProbeConsoleDns,
+                        enabled = !state.probing,
+                        modifier = fullWidth,
+                        order = 1,
+                    )
+                    RxPromptButton(
+                        text = stringResource(R.string.dns_mode_back),
+                        tone = RxPromptTone.Ghost,
+                        onClick = { page = DnsPage.Devices },
                         modifier = fullWidth,
                         order = 2,
                     )

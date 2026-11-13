@@ -801,4 +801,13 @@
     <string name="dns_mode_devices_port">Port: %s</string>
     <string name="dns_mode_devices_no_network">The phone is not on Wi-Fi and its hotspot is off. Turn one on and open this card again.</string>
     <string name="dns_mode_devices_password">A password is set for the proxy of the app, and consoles have nowhere to enter one. Remove it in settings.</string>
+    <string name="dns_mode_xbox">Xbox (DNS only)</string>
+    <string name="dns_mode_xbox_checking">Checking the anti-sanction DNS services on this connection…</string>
+    <string name="dns_mode_xbox_none">None of the anti-sanction DNS services answered just now. Check again in a few minutes.</string>
+    <string name="dns_mode_xbox_how">On the Xbox go to Settings → Network → Advanced settings → DNS settings → Manual and enter these two.</string>
+    <string name="dns_mode_xbox_service">%1$s — %2$s ms</string>
+    <string name="dns_mode_xbox_primary">Primary: %s</string>
+    <string name="dns_mode_xbox_secondary">Secondary: %s</string>
+    <string name="dns_mode_xbox_limits">This DNS belongs to a public service; the app did not create it. It only lifts sanctions: it does not open filtered sites and does not lower game ping.</string>
+    <string name="dns_mode_xbox_again">Check again</string>
 </resources>
