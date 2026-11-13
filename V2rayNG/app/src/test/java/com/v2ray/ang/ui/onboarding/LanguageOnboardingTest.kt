@@ -1,24 +1,31 @@
 package com.v2ray.ang.ui.onboarding
 
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class LanguageOnboardingTest {
 
     @Test
-    fun freshInstallIsAsked() {
-        assertTrue(LanguageOnboarding.shouldAsk(chosen = false, freshInstall = true))
+    fun freshInstallStartsInPersian() {
+        assertEquals("fa", LanguageOnboarding.defaultToApply(settled = false, storedCode = null))
+        assertEquals("fa", LanguageOnboarding.defaultToApply(settled = false, storedCode = ""))
     }
 
     @Test
-    fun upgradeIsNotAsked() {
-        assertFalse(LanguageOnboarding.shouldAsk(chosen = false, freshInstall = false))
+    fun unsettledAutoCountsAsNoChoice() {
+        assertEquals("fa", LanguageOnboarding.defaultToApply(settled = false, storedCode = "auto"))
     }
 
     @Test
-    fun answeredInstallIsNeverAskedAgain() {
-        assertFalse(LanguageOnboarding.shouldAsk(chosen = true, freshInstall = true))
-        assertFalse(LanguageOnboarding.shouldAsk(chosen = true, freshInstall = false))
+    fun explicitChoiceIsKept() {
+        assertNull(LanguageOnboarding.defaultToApply(settled = false, storedCode = "en"))
+        assertNull(LanguageOnboarding.defaultToApply(settled = false, storedCode = "ru"))
+    }
+
+    @Test
+    fun phoneLanguagePickedLaterIsRespected() {
+        assertNull(LanguageOnboarding.defaultToApply(settled = true, storedCode = "auto"))
+        assertNull(LanguageOnboarding.defaultToApply(settled = true, storedCode = null))
     }
 }

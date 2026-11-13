@@ -55,11 +55,10 @@ fun MainDialogs(
         )
     }
     showRemoveConfirm?.let { target ->
-        DeleteConfirmDialog(
-            message = stringResource(R.string.confirm_delete_profile),
-            itemName = target.profileName,
-            onConfirm = { onConfirmRemove(target.guid) },
-            onDismiss = onDismissRemove
+        ConfigDeletePrompt(
+            configName = target.profileName,
+            onKeep = onDismissRemove,
+            onDelete = { onConfirmRemove(target.guid) },
         )
     }
 }

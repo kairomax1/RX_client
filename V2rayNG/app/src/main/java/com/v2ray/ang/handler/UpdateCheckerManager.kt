@@ -62,45 +62,41 @@ object UpdateCheckerManager {
         )
 
         return@withContext if (compareVersions(latestVersion, BuildConfig.VERSION_NAME) > 0) {
-            val downloadUrl = getDownloadUrl(latestRelease, Build.SUPPORTED_ABIS[0])
+            val asset = pickAsset(latestRelease)
             CheckUpdateResult(
                 hasUpdate = true,
                 latestVersion = latestVersion,
-                releaseNotes = latestRelease.body,
-                downloadUrl = downloadUrl,
-                isPreRelease = latestRelease.prerelease
+                // Only the part of the description written for the app.
+                releaseNotes = UpdateRelease.appNotes(latestRelease.body),
+                downloadUrl = asset.browserDownloadUrl,
+                isPreRelease = latestRelease.prerelease,
+                downloadSize = asset.size,
+                sha256 = UpdateRelease.sha256Of(asset.digest),
             )
         } else {
             CheckUpdateResult(hasUpdate = false)
         }
     }
 
-    private fun compareVersions(version1: String, version2: String): Int {
+    /** Numeric comparison of dotted versions; a suffix such as "-test" on a part is ignored. */
+    fun compareVersions(version1: String, version2: String): Int {
         val v1 = version1.split(".")
         val v2 = version2.split(".")
 
         for (i in 0 until maxOf(v1.size, v2.size)) {
-            val num1 = if (i < v1.size) v1[i].toInt() else 0
-            val num2 = if (i < v2.size) v2[i].toInt() else 0
+            val num1 = v1.getOrNull(i)?.takeWhile { it.isDigit() }?.toIntOrNull() ?: 0
+            val num2 = v2.getOrNull(i)?.takeWhile { it.isDigit() }?.toIntOrNull() ?: 0
             if (num1 != num2) return num1 - num2
         }
         return 0
     }
 
-    private fun getDownloadUrl(release: GitHubRelease, abi: String): String {
+    /** The APK built for this phone's processor; the universal build when there is none. */
+    private fun pickAsset(release: GitHubRelease): GitHubRelease.Asset {
         val fDroid = "fdroid"
-
-        val assetsByAbi = release.assets.filter {
-            (it.name.contains(abi, true))
-        }
-
-        val asset = if (BuildConfig.APPLICATION_ID.contains(fDroid, ignoreCase = true)) {
-            assetsByAbi.firstOrNull { it.name.contains(fDroid) }
-        } else {
-            assetsByAbi.firstOrNull { !it.name.contains(fDroid) }
-        }
-
-        return asset?.browserDownloadUrl
+        val wantsFdroid = BuildConfig.APPLICATION_ID.contains(fDroid, ignoreCase = true)
+        val candidates = release.assets.filter { it.name.contains(fDroid, ignoreCase = true) == wantsFdroid }
+        return UpdateRelease.pickApk(candidates, Build.SUPPORTED_ABIS.toList()) { it.name }
             ?: throw IllegalStateException("No compatible APK found")
     }
 }

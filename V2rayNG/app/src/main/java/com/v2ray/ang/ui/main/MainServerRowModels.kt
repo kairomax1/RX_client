@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.ServersCache
 import com.v2ray.ang.extension.isComplexType
@@ -14,6 +15,8 @@ internal data class ServerRowUiModel(
     val typeDescription: String,
     val testDelayMillis: Long,
     val subscriptionBadge: String,
+    /** Title earned in the automatic test, if any. */
+    val badge: ConfigBadge? = null,
 )
 
 internal data class ServerGroupUiState(
@@ -24,6 +27,7 @@ internal data class ServerGroupUiState(
 internal fun buildServerRowUiModel(
     server: ServersCache,
     subscriptionRemarks: String,
+    badge: ConfigBadge? = null,
 ): ServerRowUiModel {
     val profile = server.profile
     return ServerRowUiModel(
@@ -35,6 +39,7 @@ internal fun buildServerRowUiModel(
         typeDescription = serverProtocolDescription(profile),
         testDelayMillis = server.testDelayMillis,
         subscriptionBadge = subscriptionRemarks.firstOrNull()?.toString().orEmpty(),
+        badge = badge,
     )
 }
 

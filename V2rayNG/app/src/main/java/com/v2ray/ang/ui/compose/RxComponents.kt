@@ -74,14 +74,12 @@ fun RxGlassButton(
     enabled: Boolean = true,
     accent: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+    shape: Shape = RoundedCornerShape(18.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(18.dp)
     val background = if (accent && enabled) {
-        Brush.verticalGradient(
-            listOf(colors.primary.copy(alpha = 0.96f), colors.primary.copy(alpha = 0.82f))
-        )
+        Brush.linearGradient(listOf(colors.primary, colors.secondary))
     } else rxGlassBrush()
     val contentColor = when {
         !enabled -> colors.onSurfaceVariant

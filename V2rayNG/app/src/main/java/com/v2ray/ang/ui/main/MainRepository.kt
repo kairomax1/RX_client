@@ -1,5 +1,8 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.AutoConfigTest
+import com.v2ray.ang.handler.ConfigBadge
+import com.v2ray.ang.handler.ConfigBadges
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -118,13 +121,13 @@ class MainRepository(
     override fun setSelectServer(guid: String) = MmkvManager.setSelectServer(guid)
 
     override fun getConfirmRemove(): Boolean =
-        MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE, false)
+        MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE, true)
 
     override fun getDoubleColumnDisplay(): Boolean =
-        MmkvManager.decodeSettingsBool(AppConfig.PREF_DOUBLE_COLUMN_DISPLAY, false)
+        false // the list is always one column; the switch was removed from settings
 
     override fun isGroupAllDisplayEnabled(): Boolean =
-        MmkvManager.decodeSettingsBool(AppConfig.PREF_GROUP_ALL_DISPLAY)
+        false // there is no "all" tab any more; the switch was removed from settings
 
     override fun getPerAppRoutingMode(): PerAppRoutingMode = PerAppRoutingMode.fromSettings(
         MmkvManager.decodeSettingsBool(AppConfig.PREF_PER_APP_PROXY, false),
@@ -198,8 +201,22 @@ class MainRepository(
     override suspend fun importBatchConfig(
         server: String?,
         subscriptionId: String,
-        updateUI: Boolean
-    ): Pair<Int, Int> = AngConfigManager.importBatchConfig(server, subscriptionId, updateUI)
+        updateUI: Boolean,
+        subscriptionName: String?,
+    ): Pair<Int, Int> = AngConfigManager.importBatchConfig(server, subscriptionId, updateUI, subscriptionName)
+
+    override fun isSubscriptionUrl(value: String): Boolean = Utils.isValidSubUrl(value)
+
+    override suspend fun finishAutoTest(guids: List<String>) {
+        AutoConfigTest.finish(app, guids)
+    }
+
+    override fun sortGroupByBadges(groupId: String) {
+        AutoConfigTest.sortGroup(groupId)
+    }
+
+    override fun badgesFor(guids: List<String>): Map<String, ConfigBadge> =
+        ConfigBadges.assign(AutoConfigTest.scores(guids))
 
     override fun updateConfigViaSubAll(): SubscriptionUpdateResult =
         AngConfigManager.updateConfigViaSubAll()

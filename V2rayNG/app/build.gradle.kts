@@ -14,7 +14,7 @@ android {
         minSdk = 24
         targetSdk = 37
         versionCode = 4
-        versionName = "1.0.2"
+        versionName = "1.0.1"
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
@@ -58,6 +58,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A runner's default debug key is new on every CI run, so a debug APK could never be
+            // installed over an earlier build. With the release key supplied it shares the release
+            // signature; without it (local builds) the default debug key still applies.
+            signingConfigs.getByName("rxRelease").takeIf { it.storeFile != null }
+                ?.let { signingConfig = it }
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("rxRelease").takeIf { it.storeFile != null }

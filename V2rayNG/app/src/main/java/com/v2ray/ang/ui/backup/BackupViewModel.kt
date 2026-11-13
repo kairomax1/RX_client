@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.backup
 
+import com.v2ray.ang.handler.AutoConfigTest
 import android.app.Application
 import android.net.Uri
 import com.tencent.mmkv.MMKV
@@ -40,7 +41,11 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
 
         /** The password did not open the backup. */
         data class RestorePasswordMismatch(val cachedFile: File) : BackupViewModelEvent
-        object RestoreSuccess : BackupViewModelEvent
+        /** Everything is back. [wasLocked] tells whether the file needed a password. */
+        data class RestoreSuccess(val wasLocked: Boolean) : BackupViewModelEvent
+
+        /** The file could be opened but is not a usable backup. */
+        object RestoreFailed : BackupViewModelEvent
     }
 
     private sealed interface Archive {
@@ -86,7 +91,8 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
 
     fun prepareBackupForUri(cacheDir: File, appName: String, targetUri: Uri, password: String?) {
         launchLoading {
-            val ret = backupFileToCache(cacheDir, appName, password)
+            // Zipping and key stretching are heavy: keep them off the main thread.
+            val ret = withContext(Dispatchers.IO) { backupFileToCache(cacheDir, appName, password) }
             if (ret.first) {
                 _viewModelEvent.send(BackupViewModelEvent.ExportLocal(ret.second, targetUri))
             } else {
@@ -181,14 +187,17 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
         when (val archive = openArchive(sourceFile, password)) {
             is Archive.Ready -> {
                 val success = performRestore(cacheDir, archive.zipFile)
-                if (archive.zipFile != sourceFile) archive.zipFile.delete()
+                val wasLocked = archive.zipFile != sourceFile
+                if (wasLocked) archive.zipFile.delete()
                 if (success) {
                     pendingRestoreFile?.delete()
                     pendingRestoreFile = null
-                    toastSuccess(R.string.toast_success)
-                    _viewModelEvent.send(BackupViewModelEvent.RestoreSuccess)
+                    // No toast: the screen answers with its own card.
+                    _viewModelEvent.send(BackupViewModelEvent.RestoreSuccess(wasLocked))
                 } else {
-                    toastError(R.string.toast_restore_failed)
+                    pendingRestoreFile?.delete()
+                    pendingRestoreFile = null
+                    _viewModelEvent.send(BackupViewModelEvent.RestoreFailed)
                 }
             }
 
@@ -240,6 +249,11 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
             return Pair(false, "")
         }
 
+        // Measurements are not part of a backup: ping results and the automatic test's numbers.
+        backupDir.listFiles()?.forEach { file ->
+            if (EXCLUDED_STORAGES.any { file.name == it || file.name.startsWith("$it.") }) file.delete()
+        }
+
         val zipped = ZipUtil.zipFromFolder(backupDir.absolutePath, zipFile.absolutePath)
         backupDir.deleteRecursively()
         if (!zipped) {
@@ -270,4 +284,8 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
                 backupDir.deleteRecursively()
             }
         }
+
+    private companion object {
+        val EXCLUDED_STORAGES = listOf("SERVER_AFF", AutoConfigTest.STORAGE_ID)
+    }
 }

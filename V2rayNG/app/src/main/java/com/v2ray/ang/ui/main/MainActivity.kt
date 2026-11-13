@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.util.ExternalLinks
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -8,6 +9,8 @@ import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -16,11 +19,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.UpdateNotifier
 import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
@@ -41,7 +46,8 @@ import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.checkupdate.CheckUpdateActivity
 import com.v2ray.ang.ui.cloudflare.CloudflareActivity
 import com.v2ray.ang.ui.onboarding.LanguageOnboarding
-import com.v2ray.ang.ui.onboarding.LanguageOnboardingScreen
+import com.v2ray.ang.ui.onboarding.WelcomeMessage
+import com.v2ray.ang.ui.onboarding.WelcomeMessageOverlay
 import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.ui.routing.RoutingSettingActivity
 import com.v2ray.ang.ui.speedtest.SpeedTestActivity
@@ -105,7 +111,11 @@ class MainActivity : HelperBaseComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Persian unless the user already picked something; no question is asked.
+        LanguageOnboarding.applyDefaultOnce()
         mainViewModel.onAction(MainAction.Initialize)
+        // Official releases only; shows the red dot and the update notification when one is out.
+        lifecycleScope.launch { UpdateNotifier.checkOnAppOpen(applicationContext) }
 
         checkAndRequestPermission(PermissionType.POST_NOTIFICATIONS) {}
     }
@@ -119,25 +129,49 @@ class MainActivity : HelperBaseComponentActivity() {
         var showSplash by rememberSaveable {
             mutableStateOf(!ServiceRuntimeState.isRunning(context.applicationContext))
         }
-        // A fresh install answers one question before the home screen. The answer is applied by the
-        // same per-app locale machinery the settings screen uses.
-        var askLanguage by rememberSaveable {
-            mutableStateOf(LanguageOnboarding.shouldAsk(context))
-        }
+        // The maker's greeting: once, the first time the home screen is shown.
+        var showWelcome by rememberSaveable { mutableStateOf(WelcomeMessage.shouldShow()) }
+        // The home screen stays hidden under the intro and scales in when the intro starts leaving.
+        // Without an intro the target is already 1, so nothing animates.
+        var revealContent by rememberSaveable { mutableStateOf(!showSplash) }
+        val reveal by animateFloatAsState(
+            targetValue = if (revealContent) 1f else 0f,
+            animationSpec = tween(
+                durationMillis = MainSplashTimeline.REVEAL_MS,
+                delayMillis = MainSplashTimeline.REVEAL_DELAY_MS,
+            ),
+            label = "mainReveal",
+        )
         Box(modifier = Modifier.fillMaxSize()) {
-            if (askLanguage) {
-                LanguageOnboardingScreen(
-                    onSelect = { code ->
-                        askLanguage = false
-                        LanguageOnboarding.markChosen()
-                        AppLocaleManager.setApplicationLanguage(code)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = MainSplashTimeline.revealScale(reveal)
+                        alpha = reveal
+                        scaleX = scale
+                        scaleY = scale
                     }
-                )
-            } else {
+            ) {
                 MainContent()
             }
             if (showSplash) {
-                MainSplashOverlay(onFinished = { showSplash = false })
+                MainSplashOverlay(
+                    onLeaving = { revealContent = true },
+                    onFinished = {
+                        revealContent = true
+                        showSplash = false
+                    },
+                )
+            }
+            // Waits for the intro to leave, then rises over the home screen.
+            if (showWelcome && !showSplash) {
+                WelcomeMessageOverlay(
+                    onDismiss = {
+                        WelcomeMessage.markShown()
+                        showWelcome = false
+                    }
+                )
             }
         }
     }
@@ -189,7 +223,7 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun openSubscriptionLink(url: String) {
         // Links come from a remote panel, so only http(s) and tg:// are ever handed to ACTION_VIEW.
         val safeUrl = SubscriptionInfoParser.sanitizeLink(url) ?: return
-        Utils.openUri(this, safeUrl)
+        ExternalLinks.open(this, safeUrl)
     }
 
     private fun navigateTo(destination: MainDestination) {
@@ -208,10 +242,16 @@ class MainActivity : HelperBaseComponentActivity() {
     }
 
     private fun handleFabAction() {
-        if (mainViewModel.uiState.value.isRunning) {
-            LauncherManager.stopService(this)
-        } else {
-            requestServiceStart()
+        val state = mainViewModel.uiState.value
+        when {
+            state.isRunning -> LauncherManager.stopService(this)
+            // A tap while still connecting cancels the attempt.
+            state.connectPhase == ConnectPhase.Connecting -> {
+                mainViewModel.onConnectCancelled()
+                LauncherManager.stopService(this)
+            }
+
+            else -> requestServiceStart()
         }
     }
 
@@ -246,7 +286,10 @@ class MainActivity : HelperBaseComponentActivity() {
         ) {
             checkAndRequestPermission(PermissionType.ACCESS_LOCAL_NETWORK) {}
         }
-        LauncherManager.startService(this)
+        mainViewModel.onConnectRequested()
+        if (!LauncherManager.startService(this, quiet = true)) {
+            mainViewModel.onConnectFailed()
+        }
     }
 
     private fun importManually(createConfigType: Int) {
@@ -281,7 +324,7 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun importClipboard() {
         try {
             val text = Utils.getClipboard(this)
-            mainViewModel.onAction(MainAction.ImportBatchConfig(text))
+            mainViewModel.onAction(MainAction.ImportBatchConfig(text, askSubName = true))
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to import config from clipboard", e)
         }

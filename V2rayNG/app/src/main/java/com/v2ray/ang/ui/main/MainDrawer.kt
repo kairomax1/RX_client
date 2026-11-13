@@ -1,5 +1,8 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.material3.DrawerValue
+import androidx.compose.foundation.layout.Box
+import com.v2ray.ang.ui.compose.RxFogBackground
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -26,8 +29,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,23 +51,26 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
 
-private val primaryDrawerItems = listOf(
+/** Subscriptions, per-app, routing and settings live in the quick card beside the connect button. */
+internal val quickSheetItems = listOf(
     MainDestination.Subscriptions,
     MainDestination.PerAppProxy,
     MainDestination.Routing,
-    MainDestination.Cloudflare,
-    MainDestination.SpeedTest,
-    MainDestination.Settings
+    MainDestination.Settings,
 )
 
-private val drawerItems = primaryDrawerItems + listOf(
+private val drawerItems = listOf(
     MainDestination.CheckUpdate,
     MainDestination.BackupRestore,
-    MainDestination.About
+    MainDestination.About,
 )
 
 @Composable
-fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) -> Unit) {
+fun MainDrawerContent(
+    drawerState: DrawerState,
+    updatePending: Boolean,
+    onNavigate: (MainDestination) -> Unit,
+) {
     val drawerScrollState = rememberScrollState()
 
     ModalDrawerSheet(
@@ -72,6 +78,13 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
         modifier = Modifier.fillMaxWidth(0.75f),
         drawerContainerColor = MaterialTheme.colorScheme.surface
     ) {
+        // The sheet keeps its dark (or paper) tone; the fog drifting across it is the second colour.
+        Box(Modifier.fillMaxSize()) {
+        // A closed drawer is off screen: its fog must not keep the screen redrawing.
+        RxFogBackground(
+            Modifier.matchParentSize(),
+            active = drawerState.isOpen || drawerState.isAnimationRunning || drawerState.targetValue == DrawerValue.Open,
+        )
         Column(
             modifier = Modifier
                 .verticalScroll(drawerScrollState)
@@ -82,20 +95,12 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                MaterialTheme.colorScheme.surface,
-                            )
-                        )
-                    )
                     .padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 22.dp)
             ) {
                 Image(
                     painter = painterResource(R.drawable.ic_brand_logo),
                     contentDescription = null,
-                    modifier = Modifier.size(92.dp)
+                    modifier = Modifier.size(84.dp).clip(RoundedCornerShape(20.dp))
                 )
                 Text(
                     text = stringResource(R.string.app_name),
@@ -108,27 +113,44 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
                 Text(
                     text = stringResource(R.string.splash_tagline),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
             Spacer(Modifier.height(8.dp))
-            drawerItems.forEachIndexed { index, item ->
-                if (index == primaryDrawerItems.size) {
-                    Spacer(Modifier.height(10.dp))
-                    AppDivider()
-                    Spacer(Modifier.height(10.dp))
-                }
+            drawerItems.forEach { item ->
+                val badge: (@Composable () -> Unit)? =
+                    if (updatePending && item == MainDestination.CheckUpdate) {
+                        { UpdateDotBadge() }
+                    } else {
+                        null
+                    }
                 NavigationDrawerItem(
-                    label = { Text(stringResource(item.labelRes)) },
+                    label = {
+                        Text(
+                            stringResource(item.labelRes),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    },
+                    // Full-strength ink: the default muted tone was hard to read on the dark sheet.
+                    colors = NavigationDrawerItemDefaults.colors(
+                        unselectedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurface,
+                    ),
                     selected = false,
                     onClick = { onNavigate(item) },
                     icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    badge = badge,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .padding(NavigationDrawerItemDefaults.ItemPadding)
+                        .padding(vertical = 4.dp)
                 )
             }
             Spacer(Modifier.height(14.dp))
+        }
         }
     }
 }

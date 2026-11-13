@@ -1,5 +1,8 @@
 package com.v2ray.ang.ui.compose
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.v2ray.ang.R
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -76,22 +79,10 @@ fun RxMonogramTile(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 22.dp,
 ) {
-    val colors = MaterialTheme.colorScheme
-    val letterR = remember { rxLetterR() }
-    val letterX = remember { rxLetterX() }
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(
-                Brush.verticalGradient(listOf(colors.surfaceContainerHigh, colors.background))
-            )
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val unit = size.minDimension / 512f
-            withTransform({ scale(unit, unit, Offset.Zero) }) {
-                drawPath(letterR, colors.onSurface)
-                drawPath(letterX, colors.primary)
-            }
-        }
-    }
+    // The real logo artwork; the tile, its rim and the letters are all part of the image.
+    Image(
+        painter = painterResource(R.drawable.ic_brand_logo),
+        contentDescription = null,
+        modifier = modifier.clip(RoundedCornerShape(cornerRadius)),
+    )
 }
