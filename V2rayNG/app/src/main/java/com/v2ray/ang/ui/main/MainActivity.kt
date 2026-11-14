@@ -111,6 +111,12 @@ class MainActivity : HelperBaseComponentActivity() {
             if (restartService) LauncherManager.restartService(this)
         }
 
+    private val publicConfigsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val keep = result.data?.getIntExtra(com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity.EXTRA_KEEP, 0) ?: 0
+            if (result.resultCode == RESULT_OK && keep > 0) mainViewModel.testPublicConfigsAndConnect(keep)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Persian unless the user already picked something; no question is asked.
@@ -231,6 +237,10 @@ class MainActivity : HelperBaseComponentActivity() {
 
     private fun navigateTo(destination: MainDestination) {
         val intent = when (destination) {
+            MainDestination.PublicConfigs -> {
+                publicConfigsLauncher.launch(Intent(this, com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity::class.java))
+                return
+            }
             MainDestination.Subscriptions -> Intent(this, SubSettingActivity::class.java)
             MainDestination.PerAppProxy -> Intent(this, PerAppProxyActivity::class.java)
             MainDestination.Routing -> Intent(this, RoutingSettingActivity::class.java)

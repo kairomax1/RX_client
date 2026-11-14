@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
@@ -150,6 +151,27 @@ class MainViewModel(
                 return@launch
             }
             startAutoTest(emptySet())
+        }
+    }
+
+    /** How many public configs stay after the running test; 0 when the test is not theirs. */
+    private var publicKeep = 0
+
+    /**
+     * Runs the real test (a request through each config) on the freshly collected public
+     * configs, keeps the [keep] quickest that answered and connects to the best.
+     */
+    fun testPublicConfigsAndConnect(keep: Int) {
+        viewModelScope.launch {
+            setupGroupTab(forceRefresh = true).join()
+            subscriptionIdChanged(PublicConfigs.GROUP_ID)
+            val others = withContext(ioDispatcher) {
+                dataSource.getSubscriptions().filter { it.guid != PublicConfigs.GROUP_ID }
+                    .flatMap { dataSource.getServerGuidList(it.guid) }.toSet()
+            }
+            publicKeep = keep
+            connectBestAfterTest = true
+            startAutoTest(others)
         }
     }
 
@@ -564,6 +586,7 @@ class MainViewModel(
                 delay(32)
                 dataSource.initAssets()
                 dataSource.syncSubscriptions()
+                dataSource.refreshPublicConfigs()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -884,15 +907,19 @@ class MainViewModel(
         autoTestJob?.cancel()
         autoTestJob = viewModelScope.launch(ioDispatcher) {
             try {
+                val keep = publicKeep
+                publicKeep = 0
+                if (keep > 0 && PublicConfigs.GROUP_ID in groups) PublicConfigs.prune(keep)
+                val tested = groups.values.flatten().filter { keep == 0 || dataSource.getTestDelayMillis(it) > 0 }
                 // First pass right away: pings are known, so the list is sorted without waiting
                 // for the speed measurements.
                 applyAutoTestOrder(groups.keys)
                 if (connectBestAfterTest) {
                     connectBestAfterTest = false
                     // Connect on ping alone; the speed measurements below can take a while.
-                    if (selectFastest(groups.values.flatten())) _connectBestTick.update { it + 1 }
+                    if (selectFastest(tested)) _connectBestTick.update { it + 1 }
                 }
-                dataSource.finishAutoTest(groups.values.flatten())
+                dataSource.finishAutoTest(tested)
                 applyAutoTestOrder(groups.keys)
             } catch (cancelled: CancellationException) {
                 throw cancelled

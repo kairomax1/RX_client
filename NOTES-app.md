@@ -404,3 +404,24 @@ Nine items, delivered together.
 - Not verified on a device: everything above. In particular whether real Microsoft addresses
   outside `MICROSOFT` show up as false relays, and whether a network that answers all DNS
   itself (transparent DNS proxy) hides every relay (the log says so when over 90% answer).
+
+## Free public configs
+
+`handler/PublicConfigs.kt` is the whole feature; `ui/publicconfigs/PublicConfigsActivity.kt` is its screen
+(cloud button beside the app name, and the first drawer entry).
+
+- List, best first: the sources (GitHub raw, then the jsDelivr mirror of the same file), the copy
+  kept from the last download (`files/rx-public-configs.txt`), the pack in
+  `assets/rx_public_configs.txt` (900 links; regenerate before a release, it ages in weeks).
+- Refused: certificate checking off, VLESS/Trojan without TLS, Shadowsocks without AEAD, VMess with
+  alterId, SOCKS/HTTP, sorts the core cannot run (TUIC, SSR), Cloudflare Workers/Pages hosts.
+  A server behind Cloudflare's ordinary proxy is NOT recognised yet.
+- Two tests: a TCP connect from the phone (UDP sorts skip it), then the app's usual real test
+  through the core on three times the wanted number; `prune` keeps the quickest that answered and
+  the main screen connects to the best (`MainViewModel.testPublicConfigsAndConnect`).
+- Mux and Fragment are the app-wide settings, set from the screen; they are not tried per config.
+- Lists are re-downloaded at most every three hours, when the app opens and in the daily
+  maintenance run. New lists only light the dot on the button; the group changes when the user
+  runs the collection again.
+- The notification's small icon is the vector `drawable/ic_stat_name.xml`; the old PNG sets and the
+  proxy/direct icon swap are gone. The old logcat screen is deleted.

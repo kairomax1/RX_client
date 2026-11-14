@@ -139,10 +139,10 @@
             android:name=".ui.ScannerActivity"
             android:exported="false" />
         <activity
-            android:name=".ui.logcat.LogcatActivity"
+            android:name=".ui.applog.AppLogActivity"
             android:exported="false" />
         <activity
-            android:name=".ui.applog.AppLogActivity"
+            android:name=".ui.publicconfigs.PublicConfigsActivity"
             android:exported="false" />
         <activity
             android:name=".ui.xboxdns.XboxDnsActivity"

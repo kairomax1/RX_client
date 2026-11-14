@@ -51,6 +51,7 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     CheckUpdate(R.drawable.ic_check_update_24dp, R.string.update_check_for_update),
     BackupRestore(R.drawable.ic_restore_24dp, R.string.title_configuration_backup_restore),
     XboxDns(R.drawable.ic_search_24dp, R.string.xbox_dns_title),
+    PublicConfigs(R.drawable.ic_cloud_download_24dp, R.string.public_title),
     Log(R.drawable.ic_logcat_24dp, R.string.drawer_app_log),
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
@@ -65,6 +66,7 @@ internal val quickSheetItems = listOf(
 )
 
 private val drawerItems = listOf(
+    MainDestination.PublicConfigs,
     MainDestination.XboxDns,
     MainDestination.CheckUpdate,
     MainDestination.BackupRestore,

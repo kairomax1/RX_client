@@ -832,4 +832,20 @@
     <string name="xbox_dns_country">مایکروسافت از این مسیر کشور %1$s را می‌بیند</string>
     <string name="xbox_dns_country_bad">مایکروسافت از این مسیر هنوز ایران را می‌بیند</string>
     <string name="xbox_dns_how">برای امتحان، نشانی را کپی کن، در برنامهٔ تغییر DNS یا در کنسول بگذار و برنامهٔ Xbox را باز کن. حکم آخر با خود برنامهٔ Xbox است.</string>
+    <string name="public_title">کانفیگ رایگان عمومی</string>
+    <string name="public_group_name">کانفیگ عمومی</string>
+    <string name="public_test_on">تست روی: %1$s • IP: %2$s</string>
+    <string name="public_ip_unknown">پیدا نشد</string>
+    <string name="public_intro">برنامه خودش کانفیگ‌های رایگان را از فهرست‌های عمومی می‌گیرد، ناامن‌ها را دور می‌ریزد، هر کدام را روی اینترنت خودت امتحان می‌کند، سالم‌ها را در زبانه‌ی «کانفیگ عمومی» می‌گذارد و به سریع‌ترین وصل می‌شود.</string>
+    <string name="public_warning">این سرورها مال افراد ناشناس است. برای کار بانکی و کارهای حساس از آن‌ها استفاده نکن.</string>
+    <string name="public_kinds">نوع کانفیگ</string>
+    <string name="public_count">چند تا بماند: %1$s</string>
+    <string name="public_start">کانفیگ بگیر</string>
+    <string name="public_step_fetch">در حال گرفتن فهرست‌ها…</string>
+    <string name="public_step_try">امتحان شد: %1$s از %2$s • در دسترس: %3$s</string>
+    <string name="public_none">از این اینترنت به هیچ سروری نرسیدیم. نوع‌ها را عوض کن یا با شبکه‌ی دیگری امتحان کن.</string>
+    <string name="public_origin_saved">به منبع‌ها راه نبود؛ از فهرست ذخیره‌شده‌ی دفعه‌ی قبل استفاده شد.</string>
+    <string name="public_origin_bundled">به منبع‌ها راه نبود؛ از فهرست داخل خود برنامه استفاده شد (ممکن است قدیمی باشد).</string>
+    <string name="notification_action_disconnect">کانفیگم رو قطع کن</string>
+    <string name="notification_action_reconnect">کانفیگم رو دوباره بروزرسانی کن</string>
 </resources>

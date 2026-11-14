@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.v2ray.ang.handler.PublicConfigs
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -67,6 +69,7 @@ fun MainTopBar(
     onSearchClose: () -> Unit,
     onSearchToggle: (Boolean) -> Unit,
     onMenuClick: () -> Unit,
+    onPublicConfigs: () -> Unit,
     onAction: (MainAction) -> Unit,
     onMoreMenuAction: (MainMoreMenuAction) -> Unit
 ) {
@@ -156,6 +159,19 @@ fun MainTopBar(
                     }
                 }
                 Spacer(Modifier.weight(1f))
+                // Free public configs: the dot says that newer lists are waiting.
+                val publicFresh by PublicConfigs.fresh.collectAsStateWithLifecycle()
+                Box {
+                    IconButton(onClick = onPublicConfigs) {
+                        Icon(
+                            painterResource(R.drawable.ic_cloud_download_24dp),
+                            contentDescription = stringResource(R.string.public_title),
+                        )
+                    }
+                    if (publicFresh) {
+                        UpdateDotBadge(Modifier.align(Alignment.TopEnd).padding(top = 9.dp, end = 9.dp))
+                    }
+                }
                 Text(
                     text = stringResource(R.string.app_name),
                     fontSize = 22.sp,

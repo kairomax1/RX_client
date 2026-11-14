@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.AutoConfigTest
 import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.handler.ConfigBadges
@@ -265,6 +266,10 @@ class MainRepository(
 
     override fun syncSubscriptions() {
         SubscriptionUpdater.sync(app)
+    }
+
+    override fun refreshPublicConfigs() {
+        PublicConfigs.refreshIfDue(app)
     }
 
     override fun initAssets() {

@@ -756,4 +756,20 @@
     <string name="xbox_dns_country">Through this one Microsoft sees country %1$s</string>
     <string name="xbox_dns_country_bad">Through this one Microsoft still sees Iran</string>
     <string name="xbox_dns_how">To try one, copy the address, set it in a DNS changer app or on the console, and open the Xbox app. The Xbox app itself has the last word.</string>
+    <string name="public_title">Free public configs</string>
+    <string name="public_group_name">Public configs</string>
+    <string name="public_test_on">Testing on: %1$s • IP: %2$s</string>
+    <string name="public_ip_unknown">not found</string>
+    <string name="public_intro">The app collects free configs from open lists, removes the unsafe ones, tries each on your own connection, puts the ones that work in the \"Public configs\" tab and connects to the fastest.</string>
+    <string name="public_warning">These servers belong to strangers. Do not use them for banking or other sensitive work.</string>
+    <string name="public_kinds">Config types</string>
+    <string name="public_count">How many to keep: %1$s</string>
+    <string name="public_start">Get configs</string>
+    <string name="public_step_fetch">Getting the lists…</string>
+    <string name="public_step_try">Tried %1$s of %2$s • reachable: %3$s</string>
+    <string name="public_none">No server could be reached from this connection. Change the types or try another network.</string>
+    <string name="public_origin_saved">No way to the sources; using the list saved last time.</string>
+    <string name="public_origin_bundled">No way to the sources; using the list shipped inside the app (may be old).</string>
+    <string name="notification_action_disconnect">Disconnect my config</string>
+    <string name="notification_action_reconnect">Refresh my config</string>
 </resources>

@@ -93,4 +93,7 @@ interface MainDataSource : Closeable {
 
     fun syncSubscriptions()
     fun initAssets()
+
+    /** Downloads the public config lists when the kept copy is old. */
+    fun refreshPublicConfigs() {}
 }

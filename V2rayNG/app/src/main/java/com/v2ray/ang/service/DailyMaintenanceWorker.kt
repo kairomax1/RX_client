@@ -64,6 +64,9 @@ class DailyMaintenanceWorker(
         runCatching { refreshSubscriptions() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: subscription refresh failed", it) }
 
+        runCatching { com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext) }
+            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
+
         runCatching { repairCloudflareConfig() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Cloudflare repair failed", it) }
 

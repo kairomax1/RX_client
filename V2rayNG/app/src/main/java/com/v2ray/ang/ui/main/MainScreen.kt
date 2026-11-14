@@ -229,6 +229,7 @@ fun MainScreen(
                         },
                         onSearchToggle = { show: Boolean -> showSearch = show },
                         onMenuClick = { scope.launch { drawerState.open() } },
+                        onPublicConfigs = { onNavigate(MainDestination.PublicConfigs) },
                         onAction = onAction,
                         onMoreMenuAction = { action ->
                             when (action) {
