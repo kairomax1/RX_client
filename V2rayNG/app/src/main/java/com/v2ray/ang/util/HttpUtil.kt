@@ -92,7 +92,7 @@ object HttpUtil {
 
             val ipList = sortedAddresses.mapNotNull { it.hostAddress }
 
-            LogUtil.i(AppConfig.TAG, "Resolved IPs for $host: ${ipList.joinToString()}")
+            LogUtil.i(AppConfig.TAG, "Resolved the server name to ${ipList.size} address(es)")
 
             return ipList
         } catch (e: Exception) {

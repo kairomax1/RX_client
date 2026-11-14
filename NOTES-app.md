@@ -319,3 +319,25 @@ Nine items, delivered together.
   code and its last lines. Speed comparison between several working routes is NOT done yet:
   the first route that carries data wins (the engine's own `--balanced` scan picks the
   fastest gateway inside a route).
+
+### Aether, round 4: racing routes
+
+- Device log (Hamrah Aval, cellular): the sequential search needed 5 minutes; ten routes failed
+  one after the other and the eleventh (MASQUE IPv6) connected in 26 s. Three of four ECH key
+  sources did not answer; only `crypto.cloudflare.com` via 8.8.8.8 gave a key.
+- `AetherEngine` now races up to `PARALLEL` (4) engines, each on a private port (1830+). A
+  route is ready once a web request went through it; after the first one, others get 2.5 s to
+  be compared and the one with the quickest answer stays. A relay on 1819 forwards TCP to the
+  winner (SOCKS UDP goes to the engine's own UDP port directly).
+- Remembered per network: the winner (by label) and failure counts (`rx-failed-<network>`);
+  the winner searches alone for 12 s, failed routes go to the back. IPv6-only routes are
+  skipped without a public IPv6 address. A route gets 40 s, up to 75 s while the engine reports
+  progress.
+- The ECH key is fetched by the app (HTTPS record over UDP from 8 resolvers × 2 names, first
+  well-formed answer) and passed with `--ech <base64>`; ECH routes are skipped without a key.
+- Identities are registered once, alone (`--register masque`, `--register wg`), before any
+  race, marker `rx-identities`.
+- Not verified on a device: the relay under load, several engines sharing one working
+  directory (`lastconn` files), CPU/battery cost of four concurrent scans.
+- Log: the exported file follows the chosen tab and mode; server names/addresses are no longer
+  logged by `HttpUtil`; the update-check line no longer says "new version" before comparing.

@@ -84,18 +84,20 @@ class AppLogViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Writes the complete log (every section, every level: the file is for finding a fault) to
-     * a text file in the cache and returns it; null when there is nothing to write.
+     * Writes what the screen shows (the chosen tab in the chosen mode, but all of it, oldest
+     * first) to a text file in the cache and returns it; null when there is nothing to write.
      */
     suspend fun buildFile(): File? = withContext(Dispatchers.IO) {
-        val entries = AppLog.read()
+        val shown = state.value
+        val entries = AppLog.filter(AppLog.read(), shown.section, shown.mode)
         if (entries.isEmpty()) return@withContext null
         try {
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val folder = File(getApplication<Application>().cacheDir, "logs").apply { mkdirs() }
             folder.listFiles()?.forEach { it.delete() }
             val header = "RX VPN ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) - Android ${android.os.Build.VERSION.RELEASE} - " +
-                "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} - ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}"
+                "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} - ${android.os.Build.SUPPORTED_ABIS.firstOrNull()}\n" +
+                "Section: ${shown.section?.name ?: "all"} - Mode: ${shown.mode.name}"
             File(folder, "rxvpn-log-$stamp.txt").apply { writeText(AppLog.export(entries, header)) }
         } catch (e: Exception) {
             null

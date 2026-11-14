@@ -58,7 +58,7 @@ object UpdateCheckerManager {
         val latestVersion = latestRelease.tagName.removePrefix("v")
         LogUtil.i(
             AppConfig.TAG,
-            "Found new version: $latestVersion (current: ${BuildConfig.VERSION_NAME})"
+            "Update check: latest release is $latestVersion, installed is ${BuildConfig.VERSION_NAME}"
         )
 
         return@withContext if (compareVersions(latestVersion, BuildConfig.VERSION_NAME) > 0) {
