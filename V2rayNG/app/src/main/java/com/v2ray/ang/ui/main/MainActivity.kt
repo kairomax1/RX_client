@@ -241,7 +241,7 @@ class MainActivity : HelperBaseComponentActivity() {
             MainDestination.Settings -> Intent(this, SettingsActivity::class.java)
             MainDestination.CheckUpdate -> Intent(this, CheckUpdateActivity::class.java)
             MainDestination.BackupRestore -> Intent(this, BackupActivity::class.java)
-            MainDestination.Log -> Intent(this, com.v2ray.ang.ui.logcat.LogcatActivity::class.java)
+            MainDestination.Log -> Intent(this, com.v2ray.ang.ui.applog.AppLogActivity::class.java)
             MainDestination.About -> Intent(this, AboutActivity::class.java)
         }
         settingsActivityLauncher.launch(intent)

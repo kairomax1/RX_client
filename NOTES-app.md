@@ -298,3 +298,24 @@ Nine items, delivered together.
 - DNS card: shows primary/secondary of the best anti-sanction DNS on its first page.
 - Still open from the user's list: Xbox DNS scanner with a large resolver list, in-app Xbox
   web section, half-price (Iranian server) badge, ad blocking.
+
+### App log + Aether, round 3
+
+- Second device test: the search stayed on route 1 and then failed; the cause is not known,
+  because the old log screen (Android logcat) is empty on the user's phone (Xiaomi).
+- `handler/AppLog.kt`: the app's own log file (`files/logs/rx-app.log`, rotated at 400 KB),
+  written by both processes. Sections (Connection, Core, Aether, DnsMode, Test, Subscription,
+  Update, Other), levels (Debug/Info/Error), modes (Normal/Errors/Debug). Whole configs and
+  share links are refused by `sanitize`. Every `LogUtil` call is mirrored into it regardless of
+  the Android log level; key steps are also logged explicitly. Log messages are English
+  diagnostic text; the screen chrome is localised.
+- `ui/applog/`: new log screen in the app's own style (fog background, chips for mode and
+  section with counts, glass lines, staggered arrival, rising notes). "Make a log file" writes
+  the complete log to the cache and opens the share sheet. The drawer entry opens this screen;
+  the old `ui/logcat` screen is no longer reachable.
+- Aether: 14 routes (several ECH key sources: default, Google DoH, Quad9 DoH, 8.8.8.8 with
+  crypto.cloudflare.com; HTTP/2+fragment with and without ECH; WireGuard; dual stack; IPv6;
+  Gool; MASQUE x2), two rounds. Early exits and timeouts are logged with the engine's exit
+  code and its last lines. Speed comparison between several working routes is NOT done yet:
+  the first route that carries data wins (the engine's own `--balanced` scan picks the
+  fastest gateway inside a route).

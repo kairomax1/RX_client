@@ -36,10 +36,16 @@ class AetherEngineTest {
     @Test
     fun everyRouteNamesItsProtocolAndAddressFamilySoTheEngineAsksNothing() {
         AetherEngine.ROUTES.forEach { route ->
-            assertTrue(route.args.any { it in setOf("--masque", "--wg", "--gool") }, route.label)
-            assertTrue(route.args.any { it in setOf("-4", "-6") }, route.label)
+            assertTrue(route.args.any { it in setOf("--masque", "--wg", "--gool", "--mim") }, route.label)
+            assertTrue(route.args.any { it in setOf("-4", "-6", "--dual") }, route.label)
             assertTrue(route.args.any { it in setOf("--turbo", "--balanced", "--thorough") }, route.label)
         }
         assertEquals(AetherEngine.ROUTES.size, AetherEngine.ROUTES.map { it.label }.toSet().size)
+    }
+
+    @Test
+    fun socksConnectRequestNamesHostAndPort() {
+        val request = AetherEngine.socksConnectRequest("a.bc", 80)
+        assertEquals(listOf<Byte>(5, 1, 0, 3, 4, 'a'.code.toByte(), '.'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 0, 80), request.toList())
     }
 }

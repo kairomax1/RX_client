@@ -34,6 +34,7 @@ object DnsMode {
     fun isEnabled(): Boolean = MmkvManager.decodeSettingsBool(PREF_ENABLED, false)
 
     fun setEnabled(enabled: Boolean) {
+        AppLog.info(AppLog.Section.DnsMode, if (enabled) "DNS mode switched on" else "DNS mode switched off")
         MmkvManager.encodeSettings(PREF_ENABLED, enabled)
     }
 

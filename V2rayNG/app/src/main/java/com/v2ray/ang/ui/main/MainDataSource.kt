@@ -39,7 +39,7 @@ interface MainDataSource : Closeable {
     fun isAetherSelected(): Boolean = false
 
     /** How far the Aether engine is with finding a route; null when it was never started. */
-    fun aetherStatus(): AetherEngine.Status? = null
+    fun aetherStatus(notBefore: Long = 0): AetherEngine.Status? = null
 
     /** Id of the built-in Aether profile (created on demand); null when this build has no engine. */
     fun ensureAetherProfile(): String? = null

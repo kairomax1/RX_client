@@ -790,4 +790,24 @@
     <string name="aether_searching">Aether: راه %1$s از %2$s (%3$s)</string>
     <string name="aether_starting">Aether داره راه می‌افته…</string>
     <string name="dns_mode_console_dns">DNS ضدتحریم برای کنسول و دستگاه‌های دیگه (%s)</string>
+    <string name="log_section_all">همه</string>
+    <string name="log_section_connection">اتصال و کانفیگ</string>
+    <string name="log_section_core">هسته</string>
+    <string name="log_section_aether">Aether</string>
+    <string name="log_section_dns_mode">حالت DNS</string>
+    <string name="log_section_test">تست و پینگ</string>
+    <string name="log_section_subscription">اشتراک‌ها</string>
+    <string name="log_section_update">به‌روزرسانی</string>
+    <string name="log_section_other">بقیه</string>
+    <string name="log_mode_normal">عادی</string>
+    <string name="log_mode_errors">فقط خطاها</string>
+    <string name="log_mode_debug">اشکال‌یابی</string>
+    <string name="log_make_file">ساختن فایل لاگ</string>
+    <string name="log_clear">پاک کن</string>
+    <string name="log_cleared">لاگ پاک شد</string>
+    <string name="log_file_nothing">هنوز چیزی برای فرستادن نیست</string>
+    <string name="log_empty">اینجا هنوز خبری نیست</string>
+    <string name="log_empty_errors">خطایی ثبت نشده</string>
+    <string name="log_tag_error">خطا</string>
+    <string name="log_back">برگشت</string>
 </resources>

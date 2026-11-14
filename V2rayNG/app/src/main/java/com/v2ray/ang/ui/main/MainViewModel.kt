@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
 import android.app.Application
@@ -323,6 +324,9 @@ class MainViewModel(
     fun onConnectRequested() {
         failureResetJob?.cancel()
         verifyAttempts = 0
+        AppLog.info(AppLog.Section.Connection, "Connect requested")
+        // A little slack: file times are coarse on some storage.
+        connectRequestedAt = System.currentTimeMillis() - 2000
         _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null, exitIp = null, exitCountry = null) }
         connectWatchdog?.cancel()
         connectWatchdog = viewModelScope.launch {
@@ -331,6 +335,7 @@ class MainViewModel(
             val aether = withContext(ioDispatcher) { dataSource.isAetherSelected() }
             delay(if (aether) AetherEngine.MAX_SEARCH_MILLIS + CONNECT_TIMEOUT_MS else CONNECT_TIMEOUT_MS)
             if (uiState.value.connectPhase == ConnectPhase.Connecting) {
+                AppLog.error(AppLog.Section.Connection, "No working connection within the time limit")
                 val wasRunning = uiState.value.isRunning
                 onConnectFailed()
                 if (wasRunning) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
@@ -357,12 +362,15 @@ class MainViewModel(
      * True once a route works; false when none did (the attempt is then failed and stopped)
      * or the user gave up meanwhile.
      */
+    /** When the current attempt began; an Aether status written before it belongs to an older one. */
+    private var connectRequestedAt = 0L
+
     private suspend fun awaitAetherRoute(): Boolean {
         try {
             val deadline = System.currentTimeMillis() + AetherEngine.MAX_SEARCH_MILLIS
             while (System.currentTimeMillis() < deadline) {
                 if (!uiState.value.isRunning) return false
-                val status = withContext(ioDispatcher) { dataSource.aetherStatus() }
+                val status = withContext(ioDispatcher) { dataSource.aetherStatus(connectRequestedAt) }
                 when (status?.phase) {
                     AetherEngine.Phase.Ready -> return true
                     AetherEngine.Phase.Failed -> break
@@ -387,6 +395,7 @@ class MainViewModel(
             return
         }
         if (delayMillis >= 0) {
+            AppLog.info(AppLog.Section.Connection, "Connected; traffic flows ($delayMillis ms)")
             connectWatchdog?.cancel()
             _uiState.update { it.copy(connectPhase = ConnectPhase.Connected, pingMillis = delayMillis) }
             return
@@ -401,18 +410,21 @@ class MainViewModel(
                 }
             }
         } else {
+            AppLog.error(AppLog.Section.Connection, "Two connection tests in a row failed")
             onConnectFailed()
             dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
         }
     }
 
     fun onConnectCancelled() {
+        AppLog.info(AppLog.Section.Connection, "Connecting was cancelled by the user")
         connectWatchdog?.cancel()
         _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
     }
 
     /** Red button, shake, vibration and the floating message; then back to the idle button. */
     fun onConnectFailed() {
+        AppLog.error(AppLog.Section.Connection, "Connection attempt failed; the service is being stopped")
         connectWatchdog?.cancel()
         _uiState.update {
             it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, exitIp = null, exitCountry = null, failureTick = it.failureTick + 1)

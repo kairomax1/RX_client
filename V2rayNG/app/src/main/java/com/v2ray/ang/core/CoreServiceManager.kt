@@ -1,5 +1,7 @@
 package com.v2ray.ang.core
 
+import com.v2ray.ang.handler.DnsMode
+import com.v2ray.ang.handler.AppLog
 import android.app.Activity
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -133,12 +135,19 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+        AppLog.info(
+            AppLog.Section.Connection,
+            "Starting with config '${config.remarks}' (${config.configType.name})" +
+                (if (isReload) ", reload after a network change" else "") +
+                (if (DnsMode.isEnabled()) ", DNS mode on" else ""),
+        )
         // The Aether profile is only a pointer to the engine's local port; the engine itself
         // has to be running behind it.
         if (AetherEngine.isAetherProfile(config)) AetherEngine.start(service) else AetherEngine.stop()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
+            AppLog.error(AppLog.Section.Core, "The config could not be turned into core settings: ${result.errorMessage}")
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }
 
@@ -220,6 +229,7 @@ object CoreServiceManager {
             browserDialer = null
         }
         AetherEngine.stop()
+        AppLog.info(AppLog.Section.Connection, "Service stopped")
 
         ServiceRuntimeState.markRunning(false)
         MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")
@@ -354,6 +364,11 @@ object CoreServiceManager {
 
             ensureActive()
             val endpoint = if (time >= 0) SpeedtestManager.getRemoteIPInfo() else null
+            if (time >= 0) {
+                AppLog.info(AppLog.Section.Test, "Connection test passed: $time ms")
+            } else {
+                AppLog.error(AppLog.Section.Test, "Connection test failed: ${errorStr.ifBlank { "no answer through the tunnel" }}")
+            }
             val result = ConnectionTestResult(
                 delayMillis = time,
                 errorMessage = errorStr,

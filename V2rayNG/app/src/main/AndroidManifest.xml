@@ -142,6 +142,9 @@
             android:name=".ui.logcat.LogcatActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.applog.AppLogActivity"
+            android:exported="false" />
+        <activity
             android:name=".ui.routing.RoutingSettingActivity"
             android:exported="false" />
         <activity

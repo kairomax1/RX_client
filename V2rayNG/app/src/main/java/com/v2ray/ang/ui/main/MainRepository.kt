@@ -163,7 +163,7 @@ class MainRepository(
     override fun isAetherSelected(): Boolean =
         AetherEngine.isAetherProfile(MmkvManager.getSelectServer()?.let { MmkvManager.decodeServerConfig(it) })
 
-    override fun aetherStatus(): AetherEngine.Status? = AetherEngine.readStatus(app)
+    override fun aetherStatus(notBefore: Long): AetherEngine.Status? = AetherEngine.readStatus(app, notBefore)
 
     override fun ensureAetherProfile(): String? =
         if (AetherEngine.isAvailable(app)) AetherEngine.ensureProfile() else null

@@ -2,6 +2,7 @@ package com.v2ray.ang.util
 
 import android.util.Log
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.MmkvManager
 import java.util.Locale
 
@@ -53,6 +54,16 @@ object LogUtil {
     }
 
     private fun log(priority: Int, tag: String, message: String, throwable: Throwable? = null) {
+        // The app's own log keeps every line, whatever the Android log level is set to.
+        AppLog.write(
+            AppLog.sectionOf(message),
+            when {
+                priority >= Log.ERROR -> AppLog.Level.Error
+                priority >= Log.INFO -> AppLog.Level.Info
+                else -> AppLog.Level.Debug
+            },
+            if (throwable == null) message else "$message (${throwable.javaClass.simpleName}: ${throwable.message})",
+        )
         if (!isEnabled(priority)) return
 
         when {

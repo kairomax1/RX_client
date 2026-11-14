@@ -5,11 +5,11 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.telephony.TelephonyManager
-import com.v2ray.ang.AppConfig
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
+import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.AppLog.Section
 import com.v2ray.ang.handler.MmkvManager
-import com.v2ray.ang.util.LogUtil
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -23,7 +23,7 @@ import java.net.Socket
  *
  * The engine opens its port only after a route has been proven to carry data. Which protocol,
  * address family and disguise get through differs from network to network, so the app walks
- * through [ROUTES] until one works and remembers the winner for that network.
+ * through [ROUTES] (up to [ROUNDS] times) until one works and remembers the winner for that network.
  *
  * How fast the route is, and whether any gets through at all, is up to that free network.
  */
@@ -42,22 +42,48 @@ object AetherEngine {
 
     /**
      * Tried in this order. Starts with what is fastest when it works (MASQUE over QUIC), then
-     * changes one thing at a time: Encrypted Client Hello, TCP with a split handshake for
-     * networks that drop QUIC, WireGuard with rising disguise, IPv6, and last the two-hop mode.
+     * changes one thing at a time: Encrypted Client Hello with its key fetched from several
+     * different places (the key changes often, so it is always looked up fresh; when one
+     * resolver is blocked another may not be), TCP with a split handshake for networks that
+     * drop QUIC, WireGuard with rising disguise, IPv6, and last the two-hop modes.
      */
     val ROUTES = listOf(
-        Route("MASQUE", listOf("--masque", "--turbo", "-4"), 40),
-        Route("MASQUE + ECH", listOf("--masque", "--balanced", "-4", "--ech", "auto"), 45),
-        Route("MASQUE HTTP/2", listOf("--masque", "--balanced", "-4", "--http2", "--fragment"), 45),
-        Route("WireGuard", listOf("--wg", "--balanced", "-4", "--noize", "balanced"), 45),
-        Route("WireGuard GFW", listOf("--wg", "--thorough", "-4", "--noize", "gfw"), 60),
-        Route("MASQUE IPv6", listOf("--masque", "--balanced", "-6"), 40),
-        Route("WireGuard IPv6", listOf("--wg", "--balanced", "-6", "--noize", "balanced"), 40),
-        Route("Gool", listOf("--gool", "--balanced", "-4"), 60),
+        Route("MASQUE", listOf("--masque", "--quic", "--turbo", "-4"), 45),
+        Route("MASQUE + ECH", listOf("--masque", "--quic", "--balanced", "-4", "--ech", "auto"), 35),
+        Route(
+            "MASQUE + ECH (Google DoH)",
+            listOf("--masque", "--quic", "--balanced", "-4", "--ech", "auto", "--ech-dns", "https://dns.google/dns-query"),
+            35,
+        ),
+        Route(
+            "MASQUE + ECH (Quad9 DoH)",
+            listOf("--masque", "--quic", "--balanced", "-4", "--ech", "auto", "--ech-dns", "https://dns.quad9.net/dns-query"),
+            35,
+        ),
+        Route(
+            "MASQUE + ECH (8.8.8.8)",
+            listOf(
+                "--masque", "--quic", "--balanced", "-4", "--ech", "auto",
+                "--ech-dns", "udp://8.8.8.8", "--ech-domain", "crypto.cloudflare.com",
+            ),
+            35,
+        ),
+        Route("MASQUE HTTP/2", listOf("--masque", "--http2", "--fragment", "--balanced", "-4"), 35),
+        Route("MASQUE HTTP/2 + ECH", listOf("--masque", "--http2", "--fragment", "--balanced", "-4", "--ech", "auto"), 35),
+        Route("WireGuard", listOf("--wg", "--balanced", "-4", "--noize", "balanced"), 35),
+        Route("WireGuard GFW", listOf("--wg", "--thorough", "-4", "--noize", "gfw"), 50),
+        Route("MASQUE IPv4+IPv6", listOf("--masque", "--quic", "--balanced", "--dual"), 35),
+        Route("MASQUE IPv6", listOf("--masque", "--quic", "--balanced", "-6"), 30),
+        Route("WireGuard IPv6", listOf("--wg", "--balanced", "-6", "--noize", "balanced"), 30),
+        Route("Gool", listOf("--gool", "--balanced", "-4"), 50),
+        Route("MASQUE x2", listOf("--mim", "--balanced", "-4"), 50),
     )
 
-    /** Longest a full walk through [ROUTES] can take, plus slack; the screen waits this long. */
-    val MAX_SEARCH_MILLIS: Long = (ROUTES.sumOf { it.waitSeconds } + 30) * 1000L
+    /** Every route is tried this many times over before the network is declared closed. */
+    const val ROUNDS = 2
+
+    /** Longest the whole search can take, plus slack; the screen waits this long. */
+    val MAX_SEARCH_MILLIS: Long = (ROUTES.sumOf { it.waitSeconds } * ROUNDS + 60) * 1000L
 
     enum class Phase { Searching, Ready, Failed }
 
@@ -118,8 +144,10 @@ object AetherEngine {
     }
 
     /** Latest status; null when the engine has not been started. Safe to call from any process. */
-    fun readStatus(context: Context): Status? = try {
-        statusFile(context).takeIf { it.exists() }?.readText().let(::decodeStatus)
+    fun readStatus(context: Context, notBefore: Long = 0): Status? = try {
+        // A status older than [notBefore] was left behind by an earlier run and says nothing
+        // about this one.
+        statusFile(context).takeIf { it.exists() && it.lastModified() >= notBefore }?.readText().let(::decodeStatus)
     } catch (e: Exception) {
         null
     }
@@ -128,7 +156,7 @@ object AetherEngine {
         try {
             statusFile(context).writeText(encodeStatus(status))
         } catch (e: Exception) {
-            LogUtil.w(AppConfig.TAG, "Aether: status could not be written: ${e.message}")
+            AppLog.error(Section.Aether, "Status could not be written: ${e.message}")
         }
     }
 
@@ -141,7 +169,7 @@ object AetherEngine {
         if (supervisor?.isAlive == true) return
         val appContext = context.applicationContext
         if (!isAvailable(appContext)) {
-            LogUtil.w(AppConfig.TAG, "Aether: engine is not included in this build")
+            AppLog.error(Section.Aether, "The engine is not included in this build or needs Android 8+")
             writeStatus(appContext, Status(Phase.Failed))
             return
         }
@@ -172,47 +200,53 @@ object AetherEngine {
                     null
                 }
                 val order = routeOrder(ROUTES.size, winner)
-                LogUtil.w(AppConfig.TAG, "Aether: looking for a route on network '$network' (remembered: ${winner ?: "none"})")
+                val total = order.size * ROUNDS
+                AppLog.info(Section.Aether, "Looking for a route on network '$network' (remembered route: ${winner?.let { ROUTES.getOrNull(it)?.label } ?: "none"})")
                 var served = false
-                for ((position, index) in order.withIndex()) {
-                    if (stopped()) return
-                    val route = ROUTES[index]
-                    writeStatus(context, Status(Phase.Searching, position + 1, order.size, route.label))
-                    LogUtil.w(AppConfig.TAG, "Aether: trying ${position + 1}/${order.size}: ${route.label} ${route.args}")
-                    if (!launch(context, route)) continue
-                    if (waitForPort(route.waitSeconds)) {
-                        LogUtil.w(AppConfig.TAG, "Aether: connected with ${route.label}")
-                        try {
-                            winnerFile(context, network).writeText(index.toString())
-                        } catch (_: Exception) {
-                        }
-                        writeStatus(context, Status(Phase.Ready, position + 1, order.size, route.label))
-                        served = true
-                        // Stay here while the engine lives; it reconnects by itself after a drop.
-                        process?.waitFor()
+                search@ for (round in 0 until ROUNDS) {
+                    if (round > 0) AppLog.info(Section.Aether, "No route worked; trying all of them once more")
+                    for ((position, index) in order.withIndex()) {
                         if (stopped()) return
-                        LogUtil.w(AppConfig.TAG, "Aether: engine exited while connected; searching again")
-                        break
+                        val route = ROUTES[index]
+                        val step = round * order.size + position + 1
+                        writeStatus(context, Status(Phase.Searching, step, total, route.label))
+                        AppLog.info(Section.Aether, "Route $step of $total: ${route.label}")
+                        AppLog.debug(Section.Aether, "Engine options: ${route.args.joinToString(" ")}")
+                        if (!launch(context, route)) continue
+                        if (waitForPort(route)) {
+                            AppLog.info(Section.Aether, "Connected with ${route.label}")
+                            try {
+                                winnerFile(context, network).writeText(index.toString())
+                            } catch (_: Exception) {
+                            }
+                            writeStatus(context, Status(Phase.Ready, step, total, route.label))
+                            served = true
+                            // Stay here while the engine lives; it reconnects by itself after a drop.
+                            process?.waitFor()
+                            if (stopped()) return
+                            AppLog.error(Section.Aether, "Engine stopped while connected (${lastOutput()}); searching again")
+                            break@search
+                        }
+                        killProcess()
                     }
-                    LogUtil.w(AppConfig.TAG, "Aether: ${route.label} did not connect within ${route.waitSeconds}s")
-                    killProcess()
                 }
                 if (!served) {
-                    LogUtil.w(AppConfig.TAG, "Aether: no route worked on this network")
-                    writeStatus(context, Status(Phase.Failed, order.size, order.size, ""))
+                    AppLog.error(Section.Aether, "No route worked on this network after $ROUNDS rounds")
+                    writeStatus(context, Status(Phase.Failed, total, total, ""))
                     return
                 }
             }
         } catch (_: InterruptedException) {
             // Stopped on purpose.
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Aether: search stopped by an error", e)
+            AppLog.error(Section.Aether, "Search stopped by an error: ${e.javaClass.simpleName}: ${e.message}")
             writeStatus(context, Status(Phase.Failed))
         }
     }
 
     private fun launch(context: Context, route: Route): Boolean = try {
         killProcess()
+        synchronized(recentOutput) { recentOutput.clear() }
         val nativeDir = context.applicationInfo.nativeLibraryDir
         // Persistent, so the engine keeps its identity instead of registering a new one each time.
         val dir = workDir(context)
@@ -234,35 +268,123 @@ object AetherEngine {
             }
             process = started
         }
-        // The output must be read, or the engine blocks once the pipe fills up. Logged as
-        // warnings so it shows in the app's log screen at the default level.
+        // The output must be read, or the engine blocks once the pipe fills up.
         Thread({
             try {
-                started.inputStream.bufferedReader().forEachLine { LogUtil.w(AppConfig.TAG, "Aether> $it") }
+                started.inputStream.bufferedReader().forEachLine { line ->
+                    val clean = line.replace(ANSI_COLOURS, "").trim()
+                    if (clean.isNotEmpty()) {
+                        rememberOutput(clean)
+                        AppLog.debug(Section.Aether, "engine: $clean")
+                    }
+                }
             } catch (_: Exception) {
             }
         }, "aether-log").apply { isDaemon = true }.start()
         true
     } catch (e: Exception) {
-        LogUtil.e(AppConfig.TAG, "Aether: engine could not start (${e.message})", e)
+        AppLog.error(Section.Aether, "Engine could not be started: ${e.javaClass.simpleName}: ${e.message}")
         process = null
         false
     }
 
+    private const val PROBE_TIMEOUT_MILLIS = 6000
+    private val ANSI_COLOURS = Regex("\u001B\\[[0-9;]*[A-Za-z]")
+    private val recentOutput = ArrayDeque<String>()
+
+    private fun rememberOutput(line: String) = synchronized(recentOutput) {
+        recentOutput.addLast(line)
+        while (recentOutput.size > 4) recentOutput.removeFirst()
+    }
+
+    /** The engine's last few lines: what it said right before it gave up. */
+    private fun lastOutput(): String = synchronized(recentOutput) {
+        recentOutput.joinToString(" / ").ifEmpty { "it printed nothing" }
+    }
+
     /** True once the engine accepts connections; false when it exits or the time runs out. */
-    private fun waitForPort(seconds: Int): Boolean {
-        val deadline = System.nanoTime() + seconds * 1_000_000_000L
+    private fun waitForPort(route: Route): Boolean {
+        val deadline = System.nanoTime() + route.waitSeconds * 1_000_000_000L
+        var portSeen = false
+        var probes = 0
         while (System.nanoTime() < deadline) {
             if (stopped()) return false
             val running = process ?: return false
             if (!running.isRunning()) {
-                LogUtil.w(AppConfig.TAG, "Aether: engine exited with code ${runCatching { running.exitValue() }.getOrNull()}")
+                // Give the reader thread a moment to deliver the engine's last words.
+                Thread.sleep(200)
+                val code = runCatching { running.exitValue() }.getOrNull()
+                AppLog.error(Section.Aether, "${route.label}: engine quit by itself (code $code): ${lastOutput()}")
                 return false
             }
-            if (isPortOpen()) return true
-            Thread.sleep(500)
+            // The engine opens its port the moment it starts, long before any tunnel is up, so
+            // an open port proves nothing: only a real answer fetched through it does.
+            if (isPortOpen()) {
+                if (!portSeen) {
+                    portSeen = true
+                    AppLog.debug(Section.Aether, "${route.label}: engine is up, waiting for its tunnel")
+                }
+                val host = PROBE_HOSTS[probes++ % PROBE_HOSTS.size]
+                if (carriesTraffic(host)) {
+                    AppLog.info(Section.Aether, "${route.label}: a real request to $host went through")
+                    return true
+                }
+            }
+            Thread.sleep(700)
         }
+        AppLog.error(Section.Aether, "${route.label}: no connection within ${route.waitSeconds}s (${lastOutput()})")
         return false
+    }
+
+    private val PROBE_HOSTS = listOf("cp.cloudflare.com", "www.gstatic.com")
+
+    /**
+     * True when a plain web request to [host] gets an HTTP answer through the engine's SOCKS5
+     * port. The engine resolves the name itself, so this also proves its DNS works.
+     */
+    private fun carriesTraffic(host: String): Boolean = try {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(HOST, PORT), 500)
+            socket.soTimeout = PROBE_TIMEOUT_MILLIS
+            val out = socket.getOutputStream()
+            val input = socket.getInputStream()
+            out.write(byteArrayOf(5, 1, 0))
+            out.flush()
+            if (input.read() != 5 || input.read() != 0) return false
+            out.write(socksConnectRequest(host, 80))
+            out.flush()
+            val head = ByteArray(4)
+            if (!readFully(input, head) || head[1].toInt() != 0) return false
+            val rest = when (head[3].toInt()) {
+                1 -> 4 + 2
+                4 -> 16 + 2
+                3 -> input.read() + 2
+                else -> return false
+            }
+            if (!readFully(input, ByteArray(rest))) return false
+            out.write("GET /generate_204 HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
+            out.flush()
+            val answer = ByteArray(5)
+            readFully(input, answer) && String(answer, Charsets.US_ASCII) == "HTTP/"
+        }
+    } catch (e: Exception) {
+        false
+    }
+
+    /** SOCKS5 "connect to this name and port" request. */
+    internal fun socksConnectRequest(host: String, port: Int): ByteArray {
+        val name = host.toByteArray(Charsets.US_ASCII)
+        return byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name + byteArrayOf((port shr 8).toByte(), port.toByte())
+    }
+
+    private fun readFully(input: java.io.InputStream, target: ByteArray): Boolean {
+        var done = 0
+        while (done < target.size) {
+            val count = input.read(target, done, target.size - done)
+            if (count < 0) return false
+            done += count
+        }
+        return true
     }
 
     /** True when something accepts connections on the engine's local port. */
