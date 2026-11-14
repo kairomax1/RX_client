@@ -13,22 +13,26 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /**
- * Finds DNS servers that work for an Xbox, which accepts nothing but a DNS address.
+ * Finds DNS servers that get an Xbox, or the Xbox app, past the sanction block. The console
+ * accepts nothing but a DNS address, so only a server that sends the Xbox Live names to a
+ * relay of its own is of any use; an ordinary resolver, however quick, changes nothing.
  *
- * The app carries every public DNS address the open lists know (about a hundred thousand, most
- * of them nameless) plus the Iranian anti-sanction services. A scan has two steps:
+ * The site xbox.com opens from Iran without help, so it proves nothing and is not asked. The
+ * names asked are the ones the Xbox app and the console talk to ([APP_NAMES]).
  *
- * 1. Sweep: two Xbox names are asked of every address, all through one socket, a few hundred
- *    a second. An ordinary resolver answers with Microsoft's own, different addresses. A
- *    service that gets around sanctions answers both with the address of its own relay; that
- *    is how such servers are told apart without knowing them beforehand.
- * 2. Proof: for those, the named services and the quickest ordinary ones, four Xbox names
- *    (site, sign-in, Xbox Live, store) are resolved and a real TLS connection is made to each
- *    answer and checked against the site's certificate. A server that points to a dead or
- *    forged address fails here.
+ * 1. Sweep: two Xbox Live sign-in names are asked of every bundled address through one
+ *    socket. Thousands of ordinary resolvers give the same Microsoft addresses; a server
+ *    that gives an address hardly anyone else gives, outside Microsoft's own ranges, is a
+ *    suspect.
+ * 2. Examination of each suspect and each named anti-sanction service: all of [APP_NAMES]
+ *    are asked. The server is a relay when it sends an Xbox Live name and at least one more
+ *    name to one such address, and that address presents the real certificate of each name
+ *    (so it passes the traffic on to Microsoft rather than faking it).
+ * 3. For a relay, the country Microsoft sees is asked through the relay, where it lets
+ *    that through.
  *
- * What cannot be proven from a phone: that the console itself signs in. The in-app sign-in
- * page, which resolves every name through the chosen server, is the closest check.
+ * What cannot be proven from here: that the Xbox app signs in. Only the app itself, with the
+ * server set as the DNS, shows that.
  */
 object XboxDns {
 
@@ -37,31 +41,72 @@ object XboxDns {
     /** A service with a name, from the bundled list. */
     data class Named(val name: String, val primary: String, val secondary: String, val kind: Kind)
 
-    /** What one server said during the sweep. */
-    data class Heard(val address: Int, val millis: Long, val first: List<Int>, val second: List<Int>)
+    /** What one server said during the sweep: one list of addresses per name asked. */
+    data class Heard(val address: Int, val millis: Long, val answers: List<List<Int>>)
 
     data class Proven(
         val address: String,
         /** Empty for a nameless server. */
         val name: String,
-        /** The other address of a named service, when it passed too; else empty. */
+        /** The other address of a named service, when it is a result of the same sort; else empty. */
         val partner: String,
+        /** True for a relay; false for an ordinary resolver. */
         val redirects: Boolean,
+        /** How many of [APP_NAMES] the relay carries; 0 for an ordinary resolver. */
         val passed: Int,
         val millis: Long,
+        /** Two-letter country Microsoft sees through the relay; empty when unknown. */
+        val country: String = "",
     )
 
-    /** Asked in the sweep: two names that an honest resolver never answers with one address. */
-    internal val SWEEP_NAMES = listOf("login.live.com", "www.xbox.com")
+    /** What the examination of one server found. */
+    data class Examined(val relay: Int?, val carried: Int, val country: String, val answered: Boolean)
 
-    /** Checked in the proof: the site, sign-in, Xbox Live and the store. */
-    val PROOF_NAMES = listOf("www.xbox.com", "login.live.com", "user.auth.xboxlive.com", "displaycatalog.mp.microsoft.com")
+    /**
+     * Names the Xbox app and the console use: sign-in of the app, user and service tokens,
+     * title management, profile, the store catalogue, the Microsoft account, the app's own
+     * content service. The first two are the ones asked in the sweep. At most eight.
+     */
+    val APP_NAMES = listOf(
+        "sisu.xboxlive.com",
+        "user.auth.xboxlive.com",
+        "xsts.auth.xboxlive.com",
+        "title.mgt.xboxlive.com",
+        "profile.xboxlive.com",
+        "displaycatalog.mp.microsoft.com",
+        "login.live.com",
+        "emerald.xboxservices.com",
+    )
+
+    internal const val SWEEP_NAMES = 2
+
+    /** A Microsoft service that answers with the country it sees the caller in. */
+    private const val GEO_HOST = "geo.prod.do.dsp.mp.microsoft.com"
 
     private const val SWEEP_BURST = 60
     private const val SWEEP_PAUSE_MILLIS = 70L
     private const val SWEEP_TAIL_MILLIS = 2500L
     private const val QUERY_TIMEOUT_MILLIS = 2000
     private const val CONNECT_TIMEOUT_MILLIS = 4000
+
+    /**
+     * Microsoft's own address space, coarsely: first address and prefix length. Only used to
+     * avoid taking a far-away Microsoft data centre for a relay.
+     */
+    private val MICROSOFT = listOf(
+        "4.144.0.0" to 12, "4.160.0.0" to 11, "4.192.0.0" to 10, "13.64.0.0" to 11, "13.96.0.0" to 13,
+        "13.104.0.0" to 14, "20.0.0.0" to 8, "23.96.0.0" to 13, "40.64.0.0" to 10, "51.4.0.0" to 15,
+        "51.8.0.0" to 16, "51.10.0.0" to 15, "51.103.0.0" to 16, "51.104.0.0" to 15, "51.116.0.0" to 16,
+        "51.120.0.0" to 16, "51.124.0.0" to 16, "51.132.0.0" to 16, "51.136.0.0" to 13, "51.144.0.0" to 15,
+        "52.96.0.0" to 12, "52.112.0.0" to 14, "52.120.0.0" to 14, "52.136.0.0" to 13, "52.144.0.0" to 12,
+        "52.160.0.0" to 11, "52.224.0.0" to 11, "65.52.0.0" to 14, "70.37.0.0" to 17, "104.40.0.0" to 13,
+        "104.208.0.0" to 13, "131.253.0.0" to 16, "134.170.0.0" to 16, "137.116.0.0" to 15,
+        "137.135.0.0" to 16, "138.91.0.0" to 16, "150.171.0.0" to 16, "157.54.0.0" to 15, "157.56.0.0" to 14,
+        "168.61.0.0" to 16, "168.62.0.0" to 15, "172.160.0.0" to 11, "191.232.0.0" to 13, "204.79.195.0" to 24,
+        "204.79.196.0" to 23,
+    ).map { (first, bits) -> toInt(first)!! to (-1 shl (32 - bits)) }
+
+    internal fun isMicrosoft(address: Int): Boolean = MICROSOFT.any { (first, mask) -> address and mask == first }
 
     fun toText(address: Int): String =
         "${address ushr 24 and 0xFF}.${address ushr 16 and 0xFF}.${address ushr 8 and 0xFF}.${address and 0xFF}"
@@ -166,31 +211,56 @@ object XboxDns {
             (a == 169 && b == 254) || (a == 100 && b in 64..127)
     }
 
+    /** True when the server gave a usable answer for at least one sweep name. */
+    internal fun answered(heard: Heard): Boolean = heard.answers.any { list -> list.any { !isUnroutable(it) } }
+
     /**
-     * True when the two sweep answers share an address that could be a relay: the mark of a
-     * server that sends Xbox traffic through its own machine.
+     * Addresses so many servers give that they can only be Microsoft's own: given by more
+     * than [limit] of the servers in [heard].
      */
-    internal fun redirects(first: List<Int>, second: List<Int>): Boolean =
-        first.any { it in second && !isUnroutable(it) }
+    internal fun commonAddresses(heard: List<Heard>, limit: Int): Set<Int> {
+        val givenBy = HashMap<Int, Int>()
+        for (reply in heard) for (address in reply.answers.flatten().toSet()) givenBy[address] = (givenBy[address] ?: 0) + 1
+        return givenBy.filterValues { it > limit }.keys
+    }
 
-    /** True when the server gave a usable answer for both names. */
-    internal fun answersBoth(heard: Heard): Boolean =
-        heard.first.any { !isUnroutable(it) } && heard.second.any { !isUnroutable(it) }
+    /** True for an address that could be a relay: reachable, not Microsoft's, not what everyone gives. */
+    internal fun isUnusual(address: Int, common: Set<Int>): Boolean =
+        !isUnroutable(address) && address !in common && !isMicrosoft(address)
 
-    /** Question id for a server and one of the two sweep names; the low bit says which name. */
-    internal fun sweepId(address: Int, name: Int): Int = (((address * 31 + (address ushr 13)) and 0x7FFF) shl 1) or name
+    /** True when a sweep reply holds an address worth examining. */
+    internal fun isSuspect(heard: Heard, common: Set<Int>): Boolean =
+        heard.answers.any { list -> list.any { isUnusual(it, common) } }
 
     /**
-     * Asks every address the two sweep names. [onHeard] is called (from another thread) as
-     * soon as a server has answered both; [onSent] with how many were asked so far. Returns
-     * when all were asked and the last answers had time to arrive, or [cancelled] was set.
+     * The relay a server points to, from its answers to [APP_NAMES] in that order: an unusual
+     * address given for an Xbox Live name and for at least one more name. Null when there is
+     * none, which is what an ordinary resolver looks like.
+     */
+    internal fun relayAddress(answers: List<List<Int>>, common: Set<Int>): Int? {
+        val names = HashMap<Int, MutableList<Int>>()
+        answers.forEachIndexed { name, list ->
+            for (address in list.toSet()) if (isUnusual(address, common)) names.getOrPut(address) { ArrayList() }.add(name)
+        }
+        return names.filterValues { held -> held.size >= 2 && held.any { APP_NAMES[it].endsWith(".xboxlive.com") } }
+            .maxByOrNull { it.value.size }?.key
+    }
+
+    /** Question id for a server and the index of a name (0 to 7), carried in the low three bits. */
+    internal fun sweepId(address: Int, name: Int): Int = (((address * 31 + (address ushr 13)) and 0x1FFF) shl 3) or name
+
+    /**
+     * Asks every address the first [SWEEP_NAMES] names. [onHeard] is called (from another
+     * thread) as soon as a server has answered them all; [onSent] with how many were asked so
+     * far. Returns when all were asked and the last answers had time to arrive, or
+     * [cancelled] was set.
      */
     fun sweep(addresses: IntArray, cancelled: AtomicBoolean, onSent: (Int) -> Unit, onHeard: (Heard) -> Unit) {
         val index = HashMap<Int, Int>(addresses.size * 2)
         addresses.forEachIndexed { position, address -> index[address] = position }
         val sentAt = LongArray(addresses.size)
-        val answers = arrayOfNulls<List<Int>>(addresses.size * 2)
-        val queries = SWEEP_NAMES.map { ConsoleDns.buildQuery(it, 0) }
+        val answers = arrayOfNulls<List<Int>>(addresses.size * SWEEP_NAMES)
+        val queries = APP_NAMES.take(SWEEP_NAMES).map { ConsoleDns.buildQuery(it, 0) }
         DatagramSocket().use { socket ->
             socket.soTimeout = 300
             runCatching { socket.receiveBufferSize = 4 * 1024 * 1024 }
@@ -219,15 +289,14 @@ object XboxDns {
                         ((raw[2].toInt() and 0xFF) shl 8) or (raw[3].toInt() and 0xFF)
                     val position = index[from] ?: continue
                     val id = ((buffer[0].toInt() and 0xFF) shl 8) or (buffer[1].toInt() and 0xFF)
-                    val name = id and 1
-                    if (id != sweepId(from, name)) continue
-                    val slot = position * 2 + name
+                    val name = id and 7
+                    if (name >= SWEEP_NAMES || id != sweepId(from, name)) continue
+                    val slot = position * SWEEP_NAMES + name
                     if (answers[slot] != null) continue
                     answers[slot] = parseAnswer(buffer, packet.length, id) ?: emptyList()
-                    val first = answers[position * 2]
-                    val second = answers[position * 2 + 1]
-                    if (first != null && second != null) {
-                        onHeard(Heard(from, (System.nanoTime() - sentAt[position]) / 1_000_000, first, second))
+                    val all = (0 until SWEEP_NAMES).map { answers[position * SWEEP_NAMES + it] }
+                    if (all.none { it == null }) {
+                        onHeard(Heard(from, (System.nanoTime() - sentAt[position]) / 1_000_000, all.map { it.orEmpty() }))
                     }
                 }
             }, "xbox-dns-listen").apply { isDaemon = true }
@@ -281,36 +350,81 @@ object XboxDns {
     }
 
     /**
-     * How many of [PROOF_NAMES] the server resolves to an address that really is that site: a
-     * TLS connection is made to the answer and the certificate must belong to the name.
+     * Asks [server] every name the Xbox app uses and decides whether it is a relay: see the
+     * description of the class. [common] is what [commonAddresses] found in the sweep.
      */
-    fun prove(server: String, cancelled: AtomicBoolean): Int = PROOF_NAMES.count { host ->
-        if (cancelled.get()) return@count false
-        val answer = resolve(server, host)?.firstOrNull { !isUnroutable(it) } ?: return@count false
-        isGenuine(toText(answer), host)
+    fun examine(server: String, common: Set<Int>, cancelled: AtomicBoolean): Examined {
+        val answers = APP_NAMES.map { host -> if (cancelled.get()) emptyList() else resolve(server, host).orEmpty() }
+        val answered = answers.any { it.isNotEmpty() }
+        val relay = relayAddress(answers, common) ?: return Examined(null, 0, "", answered)
+        val relayText = toText(relay)
+        var carried = 0
+        var live = false
+        answers.forEachIndexed { name, list ->
+            if (relay in list && !cancelled.get() && isGenuine(relayText, APP_NAMES[name])) {
+                carried++
+                if (APP_NAMES[name].endsWith(".xboxlive.com")) live = true
+            }
+        }
+        // A relay that carries no Xbox Live name, or only one name, does nothing for the app.
+        if (!live || carried < 2) return Examined(null, 0, "", answered)
+        return Examined(relay, carried, if (cancelled.get()) "" else seenCountry(relayText), answered)
     }
 
     /** True when [address] presents a valid certificate for [host]. */
     internal fun isGenuine(address: String, host: String): Boolean = try {
-        Socket().use { plain ->
-            plain.connect(InetSocketAddress(address, 443), CONNECT_TIMEOUT_MILLIS)
-            plain.soTimeout = CONNECT_TIMEOUT_MILLIS
-            val secure = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(plain, host, 443, true) as SSLSocket
-            secure.use {
-                it.startHandshake()
-                HttpsURLConnection.getDefaultHostnameVerifier().verify(host, it.session)
-            }
-        }
+        secure(address, host) { true }
     } catch (e: Exception) {
         false
     }
 
+    private fun <T> secure(address: String, host: String, block: (SSLSocket) -> T): T = Socket().use { plain ->
+        plain.connect(InetSocketAddress(address, 443), CONNECT_TIMEOUT_MILLIS)
+        plain.soTimeout = CONNECT_TIMEOUT_MILLIS
+        val secure = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(plain, host, 443, true) as SSLSocket
+        secure.use {
+            it.startHandshake()
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, it.session)) throw SecurityException("wrong certificate")
+            block(it)
+        }
+    }
+
     /**
-     * Best first: servers that relay Xbox traffic before ordinary ones, then more names
-     * proven, then named services, then the quicker answer.
+     * The country Microsoft sees for a caller that comes through the relay at [relay]; empty
+     * when the relay does not pass this service on or the answer cannot be read.
+     */
+    internal fun seenCountry(relay: String): String = try {
+        secure(relay, GEO_HOST) { socket ->
+            socket.outputStream.write(
+                "GET /geo?doClientVersion=10.0.19041.1266 HTTP/1.1\r\nHost: $GEO_HOST\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+                    .toByteArray(Charsets.US_ASCII)
+            )
+            socket.outputStream.flush()
+            val buffer = ByteArray(8192)
+            var size = 0
+            while (size < buffer.size) {
+                val read = socket.inputStream.read(buffer, size, buffer.size - size)
+                if (read <= 0) break
+                size += read
+                if (parseCountry(String(buffer, 0, size, Charsets.ISO_8859_1)).isNotEmpty()) break
+            }
+            parseCountry(String(buffer, 0, size, Charsets.ISO_8859_1))
+        }
+    } catch (e: Exception) {
+        ""
+    }
+
+    /** The two-letter country in the answer of the geo service; empty when there is none. */
+    internal fun parseCountry(text: String): String =
+        Regex("\"CountryCode\"\\s*:\\s*\"([A-Za-z]{2})\"").find(text)?.groupValues?.get(1)?.uppercase().orEmpty()
+
+    /**
+     * Best first. Relays before ordinary resolvers; among relays those Microsoft does not see
+     * in Iran, then more names carried, then named services, then the quicker answer.
      */
     internal fun rank(results: List<Proven>): List<Proven> = results.sortedWith(
         compareByDescending<Proven> { it.redirects }
+            .thenBy { it.country == "IR" }
             .thenByDescending { it.passed }
             .thenByDescending { it.name.isNotEmpty() }
             .thenBy { it.millis }

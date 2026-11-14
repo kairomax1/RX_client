@@ -29,11 +29,16 @@ data class XboxDnsUiState(
     val total: Int = 0,
     val asked: Int = 0,
     val answered: Int = 0,
-    /** Servers going through the proof, and how many are through it. */
+    /** Servers being examined, and how many are through. */
     val toProve: Int = 0,
     val proven: Int = 0,
-    /** Passed the proof, best first. */
-    val results: List<XboxDns.Proven> = emptyList(),
+    /**
+     * Servers that relay the Xbox app's names. While the scan runs a new one is added at the
+     * end, so nothing on screen moves; they are put in order once, when the scan ends.
+     */
+    val relays: List<XboxDns.Proven> = emptyList(),
+    /** Ordinary resolvers, quickest first; filled when the scan ends. */
+    val ordinary: List<XboxDns.Proven> = emptyList(),
     val stopped: Boolean = false,
 )
 
@@ -69,7 +74,7 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
         val named = XboxDns.loadNamed(context)
         val addresses = XboxDns.loadAll(context, named)
         _state.update { it.copy(total = addresses.size) }
-        AppLog.info(AppLog.Section.Other, "Xbox DNS scan: asking ${addresses.size} servers")
+        AppLog.info(AppLog.Section.Other, "Xbox DNS scan: asking ${addresses.size} servers the Xbox app's names")
 
         val heard = ConcurrentLinkedQueue<XboxDns.Heard>()
         val answered = AtomicInteger(0)
@@ -78,77 +83,103 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
             cancelled = flag,
             onSent = { asked -> _state.update { it.copy(asked = asked, answered = answered.get()) } },
             onHeard = { reply ->
-                if (XboxDns.answersBoth(reply)) {
+                if (XboxDns.answered(reply)) {
                     heard.add(reply)
                     answered.incrementAndGet()
                 }
             },
         )
         val all = heard.toList()
+        val asked = _state.value.asked
         val byAddress = all.associateBy { XboxDns.toText(it.address) }
-        val relays = all.filter { XboxDns.redirects(it.first, it.second) }
-        // Ordinary resolvers all give the same Microsoft addresses; the quickest few are enough.
-        val ordinary = all.filter { !XboxDns.redirects(it.first, it.second) }.sortedBy { it.millis }.take(ORDINARY_KEPT)
-        val namedAddresses = named.flatMap { listOf(it.primary, it.secondary) }.filter { it in byAddress }
-        val candidates = (namedAddresses + (relays + ordinary).map { XboxDns.toText(it.address) }).distinct()
+        val common = XboxDns.commonAddresses(all, maxOf(COMMON_FLOOR, all.size / COMMON_SHARE))
+        val suspects = all.filter { XboxDns.isSuspect(it, common) }.map { XboxDns.toText(it.address) }
+        // Known anti-sanction services are examined even when the sweep missed their answer.
+        val known = named.filter { it.kind == XboxDns.Kind.Sanction }.flatMap { listOf(it.primary, it.secondary) }.filter { it.isNotEmpty() }
+        val candidates = (known + suspects).distinct()
         AppLog.info(
             AppLog.Section.Other,
-            "Xbox DNS scan: ${all.size} answered, ${relays.size} look like relays, proving ${candidates.size}",
+            "Xbox DNS scan: ${all.size} of $asked answered, ${common.size} addresses are what everyone gives, " +
+                "${suspects.size} servers give something else, examining ${candidates.size}",
         )
-        _state.update { it.copy(phase = ScanPhase.Proving, asked = it.total, answered = all.size, toProve = candidates.size) }
-        if (flag.get()) return
-
-        val passed = ConcurrentLinkedQueue<XboxDns.Proven>()
-        val gate = Semaphore(PROVING_AT_ONCE)
-        coroutineScope {
-            candidates.map { address ->
-                async(Dispatchers.IO) {
-                    gate.withPermit {
-                        val reply = byAddress.getValue(address)
-                        val count = if (flag.get()) 0 else XboxDns.prove(address, flag)
-                        if (count >= PASS_MARK) {
-                            val service = named.firstOrNull { it.primary == address || it.secondary == address }
-                            passed.add(
-                                XboxDns.Proven(
-                                    address = address,
-                                    name = service?.name.orEmpty(),
-                                    partner = "",
-                                    redirects = XboxDns.redirects(reply.first, reply.second),
-                                    passed = count,
-                                    millis = reply.millis,
-                                )
-                            )
-                        }
-                        _state.update { it.copy(proven = it.proven + 1, results = merge(passed.toList(), named)) }
-                    }
-                }
-            }.awaitAll()
+        if (asked > 2000 && all.size > asked * 9 / 10) {
+            AppLog.info(AppLog.Section.Other, "Xbox DNS scan: nearly every address answered; this network seems to answer DNS itself, so relays cannot be told apart")
         }
-        val results = merge(passed.toList(), named)
-        AppLog.info(
-            AppLog.Section.Other,
-            "Xbox DNS scan finished: ${results.size} passed, ${results.count { it.redirects }} of them relays",
-        )
-        _state.update { it.copy(results = results) }
+        _state.update { it.copy(phase = ScanPhase.Proving, answered = all.size, toProve = candidates.size) }
+
+        val relayAddresses = ConcurrentLinkedQueue<String>()
+        if (!flag.get()) {
+            val gate = Semaphore(EXAMINING_AT_ONCE)
+            coroutineScope {
+                candidates.map { address ->
+                    async(Dispatchers.IO) {
+                        gate.withPermit {
+                            val found = if (flag.get()) null else XboxDns.examine(address, common, flag)
+                            val relay = found?.relay
+                            if (found != null && relay != null) {
+                                relayAddresses.add(address)
+                                val result = XboxDns.Proven(
+                                    address = address,
+                                    name = named.firstOrNull { it.primary == address || it.secondary == address }?.name.orEmpty(),
+                                    partner = "",
+                                    redirects = true,
+                                    passed = found.carried,
+                                    millis = byAddress[address]?.millis ?: 0L,
+                                    country = found.country,
+                                )
+                                AppLog.info(
+                                    AppLog.Section.Other,
+                                    "Xbox DNS scan: $address relays ${found.carried} of ${XboxDns.APP_NAMES.size} names through " +
+                                        "${XboxDns.toText(relay)}, country seen: ${found.country.ifEmpty { "unknown" }}",
+                                )
+                                _state.update { it.copy(proven = it.proven + 1, relays = it.relays + result) }
+                            } else {
+                                _state.update { it.copy(proven = it.proven + 1) }
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+        }
+
+        val isRelay = relayAddresses.toSet()
+        val plain = all.filter { XboxDns.toText(it.address) !in isRelay }
+        val namedAddresses = named.flatMap { listOf(it.primary, it.secondary) }.toSet()
+        val shown = plain.filter { XboxDns.toText(it.address) in namedAddresses } +
+            plain.filter { XboxDns.toText(it.address) !in namedAddresses }.sortedBy { it.millis }.take(ORDINARY_KEPT)
+        val ordinary = shown.map { reply ->
+            val address = XboxDns.toText(reply.address)
+            XboxDns.Proven(
+                address = address,
+                name = named.firstOrNull { it.primary == address || it.secondary == address }?.name.orEmpty(),
+                partner = "",
+                redirects = false,
+                passed = 0,
+                millis = reply.millis,
+            )
+        }
+        val relays = merge(_state.value.relays, named)
+        AppLog.info(AppLog.Section.Other, "Xbox DNS scan finished: ${relays.size} relays for the Xbox app, ${plain.size} ordinary resolvers")
+        _state.update { it.copy(relays = relays, ordinary = merge(ordinary, named)) }
     }
 
     /**
-     * One line per service: the two addresses of a named service that both passed are shown
-     * together, primary first.
+     * One line per service: the two addresses of a named service that are both in the list
+     * are shown together, primary first. Best first.
      */
-    private fun merge(passed: List<XboxDns.Proven>, named: List<XboxDns.Named>): List<XboxDns.Proven> {
-        val byAddress = passed.associateBy { it.address }
+    private fun merge(found: List<XboxDns.Proven>, named: List<XboxDns.Named>): List<XboxDns.Proven> {
+        val byAddress = found.associateBy { it.address }
         val hidden = HashSet<String>()
-        val merged = passed.mapNotNull { result ->
+        val merged = found.map { result ->
             val service = named.firstOrNull { it.primary == result.address && it.secondary in byAddress }
-            if (service != null) {
+            if (service != null && service.secondary !in hidden) {
                 hidden.add(service.secondary)
                 result.copy(partner = service.secondary)
             } else {
                 result
             }
         }
-        return XboxDns.rank(merged.filter { it.address !in hidden || it.partner.isNotEmpty() })
+        return XboxDns.rank(merged.filter { it.address !in hidden })
     }
 
     override fun onCleared() {
@@ -156,9 +187,11 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private companion object {
-        const val ORDINARY_KEPT = 20
-        const val PROVING_AT_ONCE = 24
-        /** Of the four names; three allows one hiccup. */
-        const val PASS_MARK = 3
+        const val ORDINARY_KEPT = 15
+        const val EXAMINING_AT_ONCE = 24
+        /** An address is "what everyone gives" when more servers than this give it... */
+        const val COMMON_FLOOR = 10
+        /** ...or more than one in this many of those that answered. */
+        const val COMMON_SHARE = 250
     }
 }

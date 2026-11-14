@@ -368,3 +368,39 @@ Nine items, delivered together.
 - Not verified on a device: the sweep rate on mobile networks (operators may drop bursts of
   DNS packets), Microsoft sign-in inside a WebView, how many relays exist in practice.
 - Log: web links are masked in `AppLog.sanitize` (a subscription link was found in a log).
+
+### Xbox DNS scanner, round 2: the app's names, not the site
+
+- Device test of round 1: a server that "passed" still gave "not available in your country" in
+  the Xbox app, and no relay was found at all. Cause: the sweep asked `login.live.com` and
+  `www.xbox.com`, which anti-sanction services do not relay, and the site opens from Iran
+  directly, so passing proved nothing.
+- `XboxDns.APP_NAMES` (8 names the Xbox app/console use; the site is gone). Sweep asks the
+  first two (`sisu.xboxlive.com`, `user.auth.xboxlive.com`) of every address. Addresses given
+  by many servers are taken as Microsoft's own (`commonAddresses`); a server giving a routable
+  address that is neither common nor in the coarse Microsoft ranges (`MICROSOFT`, written from
+  memory, not checked against the published Azure list) is a suspect. Suspects and all named
+  anti-sanction services are examined: all 8 names asked; relay = one unusual address for an
+  Xbox Live name plus at least one more name, and that address presents the real certificate
+  for each (`examine`). Ordinary resolvers are no longer proved, only listed folded away.
+- Country: `seenCountry` asks `geo.prod.do.dsp.mp.microsoft.com/geo` through the relay address
+  (SNI). Works only if the relay passes that name on; otherwise empty. Not verified against the
+  live service from the build machine (no access); the answer format is from public write-ups.
+- Data: 39 more named services (Iranian: Server.ir, DynX, Zeus, DNS Pro, more Shelter/Vanilla/
+  Radar/Begzar addresses...; Russian relays built for the same Microsoft block: xbox-dns.ru,
+  Fly Xbox, GeoHide, Comss.one, Malw.link, Mafioznik, DNS-AI, AstraCat). Whether the Russian
+  ones serve Iranian callers is unknown; the scan decides. Found through GitHub code search for
+  files naming known anti-sanction addresses (about 280 list-like files from about 200
+  repositories); addresses in at least two repositories went into `rx_dns_all.bin` (now
+  123,211), in at least eight into `rx_dns_priority.txt` (7,240). Private, docker and
+  filter-page addresses were removed from both; the `HostIran (Server 2)` typo was fixed.
+  Licences of the source repositories were not checked.
+- Screen: progress card fixed above the list; relays in their own section, appended in order
+  of arrival during the scan and sorted once at the end; ordinary resolvers behind a toggle;
+  one compact card per service.
+- Removed: `DnsProxy`, `XboxWebActivity`, the androidx.webkit dependency (the site test).
+- Not built: a phone-wide DNS switch inside the app. It needs a second `VpnService`, which the
+  service guide routes through `LauncherManager`; the user tests with a DNS changer app.
+- Not verified on a device: everything above. In particular whether real Microsoft addresses
+  outside `MICROSOFT` show up as false relays, and whether a network that answers all DNS
+  itself (transparent DNS proxy) hides every relay (the log says so when over 90% answer).

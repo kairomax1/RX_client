@@ -3,10 +3,8 @@ package com.v2ray.ang.ui.xboxdns
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -27,26 +25,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -66,45 +62,34 @@ import com.v2ray.ang.ui.compose.RxPromptButton
 import com.v2ray.ang.ui.compose.RxPromptFont
 import com.v2ray.ang.ui.compose.RxPromptTone
 import com.v2ray.ang.ui.compose.RxRisingNote
-import com.v2ray.ang.ui.compose.rememberAnimationsEnabled
 import com.v2ray.ang.ui.compose.rxGlassBrush
 import com.v2ray.ang.ui.compose.rxScreenBrush
 
-/** Tests every DNS server the app knows for use with an Xbox. */
+/**
+ * Tests every DNS server the app carries against the names the Xbox app uses and lists the
+ * ones that relay them. Ordinary resolvers stay folded away below.
+ */
 class XboxDnsActivity : BaseComponentActivity() {
 
     private val viewModel: XboxDnsViewModel by viewModels()
 
     @Composable
     override fun ScreenContent() {
-        XboxDnsScreen(
-            viewModel = viewModel,
-            onBack = { finish() },
-            onTestWithAccount = { result ->
-                startActivity(
-                    Intent(this, XboxWebActivity::class.java)
-                        .putExtra(XboxWebActivity.EXTRA_PRIMARY, result.address)
-                        .putExtra(XboxWebActivity.EXTRA_SECONDARY, result.partner)
-                        .putExtra(XboxWebActivity.EXTRA_NAME, result.name)
-                )
-            },
-        )
+        XboxDnsScreen(viewModel = viewModel, onBack = { finish() })
     }
 }
 
 private val RelayGreen = Color(0xFF58C99A)
+private val WarnAmber = Color(0xFFE0A84A)
 
 @Composable
-private fun XboxDnsScreen(
-    viewModel: XboxDnsViewModel,
-    onBack: () -> Unit,
-    onTestWithAccount: (XboxDns.Proven) -> Unit,
-) {
+private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     var noteTick by remember { mutableIntStateOf(0) }
     var noteText by remember { mutableStateOf("") }
+    var showOrdinary by rememberSaveable { mutableStateOf(false) }
     val copiedNote = stringResource(R.string.xbox_dns_copied)
     val copy: (String) -> Unit = { text ->
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -136,42 +121,75 @@ private fun XboxDnsScreen(
                 )
             }
 
+            // Stays in place above the list, so results never push it around.
+            AnimatedVisibility(visible = state.phase != ScanPhase.Idle, enter = fadeIn() + expandVertically()) {
+                Box(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) { ProgressCard(state) }
+            }
+
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item(key = "intro") {
-                    Text(
-                        text = stringResource(R.string.xbox_dns_intro),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                    )
-                }
-                item(key = "progress") {
-                    AnimatedVisibility(visible = state.phase != ScanPhase.Idle, enter = fadeIn() + expandVertically()) {
-                        ProgressCard(state)
-                    }
-                }
-                val best = state.results.firstOrNull()
-                if (best != null) {
-                    item(key = "best") {
-                        val second = if (best.partner.isNotEmpty()) best.partner else state.results.getOrNull(1)?.address.orEmpty()
-                        BestCard(primary = best.address, secondary = second, onCopy = copy)
-                    }
-                }
-                itemsIndexed(state.results, key = { _, result -> result.address }) { index, result ->
-                    ResultCard(result = result, order = index, onCopy = copy, onTest = { onTestWithAccount(result) })
-                }
-                if (state.phase == ScanPhase.Done && state.results.isEmpty()) {
-                    item(key = "none") {
+                if (state.phase == ScanPhase.Idle) {
+                    item(key = "intro") {
                         Text(
-                            text = stringResource(R.string.xbox_dns_none),
-                            style = TextStyle(fontFamily = RxPromptFont, fontSize = 20.sp),
-                            color = colors.onSurface,
-                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            text = stringResource(R.string.xbox_dns_intro),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp),
                         )
+                    }
+                } else {
+                    item(key = "relaysTitle") {
+                        SectionTitle(stringResource(R.string.xbox_dns_relays_title, state.relays.size.toString()), RelayGreen)
+                    }
+                    items(state.relays, key = { "relay-" + it.address }) { result ->
+                        ResultRow(result = result, onCopy = copy)
+                    }
+                    if (state.phase == ScanPhase.Done && state.relays.isEmpty()) {
+                        item(key = "none") {
+                            Text(
+                                text = stringResource(R.string.xbox_dns_none),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.onSurface,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
+                            )
+                        }
+                    }
+                    if (state.relays.isNotEmpty()) {
+                        item(key = "how") {
+                            Text(
+                                text = stringResource(R.string.xbox_dns_how),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
+                        }
+                    }
+                    if (state.ordinary.isNotEmpty()) {
+                        item(key = "ordinaryToggle") {
+                            Text(
+                                text = if (showOrdinary) {
+                                    stringResource(R.string.xbox_dns_hide_plain)
+                                } else {
+                                    stringResource(R.string.xbox_dns_show_plain, state.ordinary.size.toString())
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colors.onSurface,
+                                modifier = Modifier
+                                    .padding(top = 8.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(1.dp, colors.onSurface.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+                                    .clickable { showOrdinary = !showOrdinary }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
+                        if (showOrdinary) {
+                            items(state.ordinary, key = { "plain-" + it.address }) { result ->
+                                ResultRow(result = result, onCopy = copy)
+                            }
+                        }
                     }
                 }
             }
@@ -199,15 +217,25 @@ private fun XboxDnsScreen(
 }
 
 @Composable
+private fun SectionTitle(text: String, color: Color) {
+    Text(
+        text = text,
+        style = TextStyle(fontFamily = RxPromptFont, fontSize = 19.sp),
+        color = color,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    )
+}
+
+@Composable
 private fun Glass(modifier: Modifier = Modifier, edge: Color? = null, content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(16.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(rxGlassBrush())
             .border(1.dp, edge ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f), shape)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) { content() }
 }
 
@@ -228,13 +256,13 @@ private fun ProgressCard(state: XboxDnsUiState) {
                 ScanPhase.Proving -> stringResource(R.string.xbox_dns_proving, state.proven.toString(), state.toProve.toString())
                 else -> stringResource(
                     if (state.stopped) R.string.xbox_dns_stopped else R.string.xbox_dns_done,
-                    state.results.size.toString(),
+                    state.relays.size.toString(),
                 )
             },
             style = MaterialTheme.typography.titleSmall,
             color = colors.onSurface,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Box(
             Modifier
                 .fillMaxWidth()
@@ -250,9 +278,9 @@ private fun ProgressCard(state: XboxDnsUiState) {
                     .background(colors.onSurface.copy(alpha = 0.85f))
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
-            text = stringResource(R.string.xbox_dns_answered, state.answered.toString(), state.results.size.toString()),
+            text = stringResource(R.string.xbox_dns_answered, state.answered.toString(), state.relays.size.toString()),
             style = MaterialTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
@@ -260,10 +288,9 @@ private fun ProgressCard(state: XboxDnsUiState) {
 }
 
 @Composable
-private fun AddressRow(label: String, address: String, onCopy: (String) -> Unit) {
+private fun AddressLine(address: String, onCopy: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.width(84.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         // Addresses read left to right in every language.
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Text(
@@ -278,43 +305,20 @@ private fun AddressRow(label: String, address: String, onCopy: (String) -> Unit)
             style = MaterialTheme.typography.labelLarge,
             color = colors.onSurface,
             modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(colors.onSurface.copy(alpha = 0.09f))
                 .clickable { onCopy(address) }
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
         )
     }
 }
 
+/** One server, or the two addresses of one service, in a few lines. */
 @Composable
-private fun BestCard(primary: String, secondary: String, onCopy: (String) -> Unit) {
-    Glass(edge = RelayGreen.copy(alpha = 0.6f)) {
-        Text(
-            text = stringResource(R.string.xbox_dns_best),
-            style = TextStyle(fontFamily = RxPromptFont, fontSize = 19.sp),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.height(6.dp))
-        AddressRow("Primary", primary, onCopy)
-        if (secondary.isNotEmpty()) AddressRow("Secondary", secondary, onCopy)
-    }
-}
-
-@Composable
-private fun ResultCard(result: XboxDns.Proven, order: Int, onCopy: (String) -> Unit, onTest: () -> Unit) {
+private fun ResultRow(result: XboxDns.Proven, onCopy: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val animate = rememberAnimationsEnabled()
-    val staggered = animate && order < 12
-    val appear = remember { Animatable(if (staggered) 0f else 1f) }
-    LaunchedEffect(Unit) {
-        if (staggered) appear.animateTo(1f, tween(durationMillis = 280, delayMillis = order * 30))
-    }
-    Glass(
-        modifier = Modifier.graphicsLayer {
-            alpha = appear.value
-            translationY = (1f - appear.value) * 18.dp.toPx()
-        },
-    ) {
+    val inIran = result.country == "IR"
+    Glass(edge = if (result.redirects) (if (inIran) WarnAmber else RelayGreen).copy(alpha = 0.45f) else null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = result.name.ifEmpty { stringResource(R.string.xbox_dns_nameless) },
@@ -323,39 +327,28 @@ private fun ResultCard(result: XboxDns.Proven, order: Int, onCopy: (String) -> U
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = stringResource(if (result.redirects) R.string.xbox_dns_kind_relay else R.string.xbox_dns_kind_plain),
+                text = if (result.redirects) {
+                    stringResource(
+                        R.string.xbox_dns_result_line,
+                        result.passed.toString(),
+                        XboxDns.APP_NAMES.size.toString(),
+                        result.millis.toString(),
+                    )
+                } else {
+                    stringResource(R.string.xbox_dns_plain_line, result.millis.toString())
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = if (result.redirects) RelayGreen else colors.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background((if (result.redirects) RelayGreen else colors.onSurface).copy(alpha = 0.12f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                color = colors.onSurfaceVariant,
             )
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource(
-                R.string.xbox_dns_result_line,
-                result.passed.toString(),
-                XboxDns.PROOF_NAMES.size.toString(),
-                result.millis.toString(),
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        AddressRow("Primary", result.address, onCopy)
-        if (result.partner.isNotEmpty()) AddressRow("Secondary", result.partner, onCopy)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.xbox_dns_test_account),
-            style = MaterialTheme.typography.labelLarge,
-            color = colors.onSurface,
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .border(1.dp, colors.onSurface.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
-                .clickable(onClick = onTest)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-        )
+        if (result.redirects && result.country.isNotEmpty()) {
+            Text(
+                text = if (inIran) stringResource(R.string.xbox_dns_country_bad) else stringResource(R.string.xbox_dns_country, result.country),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (inIran) WarnAmber else RelayGreen,
+            )
+        }
+        AddressLine(result.address, onCopy)
+        if (result.partner.isNotEmpty()) AddressLine(result.partner, onCopy)
     }
 }

@@ -57,58 +57,80 @@ class XboxDnsTest {
         assertNull(XboxDns.parseAnswer(byteArrayOf(1, 2, 3), 3, null))
     }
 
+    private fun heard(server: String, vararg answers: List<String>) =
+        XboxDns.Heard(ip(server), 10, answers.map { list -> list.map(::ip) })
+
+    /** Answers to all the app's names: the given ones first, Microsoft's own for the rest. */
+    private fun answers(vararg first: List<String>): List<List<Int>> =
+        List(XboxDns.APP_NAMES.size) { index -> (first.getOrNull(index) ?: listOf("20.190.1.${index + 1}")).map(::ip) }
+
     @Test
-    fun aRelayAnswersBothNamesWithItsOwnAddress() {
-        val relay = listOf(ip("178.22.122.110"))
-        assertTrue(XboxDns.redirects(relay, relay))
-        assertFalse(XboxDns.redirects(listOf(ip("20.190.1.1")), listOf(ip("23.50.1.1"))), "an ordinary resolver")
-        assertFalse(XboxDns.redirects(listOf(ip("10.10.34.34")), listOf(ip("10.10.34.34"))), "the filtering page is no relay")
-        assertFalse(XboxDns.redirects(listOf(ip("0.0.0.0")), listOf(ip("0.0.0.0"))))
+    fun theNamesAskedAreTheAppsAndNotTheSite() {
+        assertTrue(XboxDns.APP_NAMES.size <= 8, "the question id has three bits for the name")
+        assertFalse("www.xbox.com" in XboxDns.APP_NAMES)
+        assertTrue(XboxDns.APP_NAMES.take(XboxDns.SWEEP_NAMES).all { it.endsWith(".xboxlive.com") })
     }
 
     @Test
-    fun aServerMustAnswerBothNamesWithRealAddresses() {
-        fun heard(first: List<String>, second: List<String>) = XboxDns.Heard(ip("1.1.1.1"), 10, first.map(::ip), second.map(::ip))
-        assertTrue(XboxDns.answersBoth(heard(listOf("20.190.1.1"), listOf("23.50.1.1"))))
-        assertFalse(XboxDns.answersBoth(heard(listOf("20.190.1.1"), emptyList())))
-        assertFalse(XboxDns.answersBoth(heard(listOf("127.0.0.1"), listOf("23.50.1.1"))))
+    fun whatManyServersGiveIsMicrosoftsOwn() {
+        val crowd = (1..30).map { heard("9.9.9.$it", listOf("93.184.1.1"), listOf("93.184.1.2")) }
+        val odd = heard("178.22.122.100", listOf("178.22.122.110"), listOf("178.22.122.110"))
+        val common = XboxDns.commonAddresses(crowd + odd, 10)
+        assertEquals(setOf(ip("93.184.1.1"), ip("93.184.1.2")), common)
+        assertTrue(XboxDns.isSuspect(odd, common))
+        assertFalse(XboxDns.isSuspect(crowd[0], common))
+        assertFalse(XboxDns.isSuspect(heard("1.2.3.4", listOf("20.190.5.5"), listOf("13.107.4.4")), common), "Microsoft's ranges")
+        assertFalse(XboxDns.isSuspect(heard("1.2.3.4", listOf("10.10.34.34"), listOf("0.0.0.0")), common), "the filtering page")
+        assertTrue(XboxDns.answered(odd))
+        assertFalse(XboxDns.answered(heard("1.2.3.4", emptyList(), listOf("127.0.0.1"))))
     }
 
     @Test
-    fun sweepIdsFitTheFieldAndTellTheTwoNamesApart() {
+    fun aRelaySendsAnXboxLiveNameAndOneMoreToItsOwnAddress() {
+        val relay = listOf("178.22.122.110")
+        assertEquals(ip("178.22.122.110"), XboxDns.relayAddress(answers(relay, relay), emptySet()))
+        assertNull(XboxDns.relayAddress(answers(), emptySet()), "an ordinary resolver")
+        assertNull(XboxDns.relayAddress(answers(relay), emptySet()), "one name alone may be a far-away data centre")
+        assertNull(XboxDns.relayAddress(answers(relay, relay), setOf(ip("178.22.122.110"))), "what everyone gives")
+        assertNull(XboxDns.relayAddress(answers(listOf("10.10.34.34"), listOf("10.10.34.34")), emptySet()), "the filtering page")
+        // The store and the account alone, without an Xbox Live name, do nothing for the app.
+        val storeOnly = List(XboxDns.APP_NAMES.size) { index ->
+            listOf(ip(if (XboxDns.APP_NAMES[index].endsWith(".xboxlive.com")) "20.190.1.1" else "178.22.122.110"))
+        }
+        assertNull(XboxDns.relayAddress(storeOnly, emptySet()))
+    }
+
+    @Test
+    fun sweepIdsFitTheFieldAndTellTheNamesApart() {
         for (address in listOf(ip("1.1.1.1"), ip("255.255.255.255"), ip("10.202.10.202"), 0)) {
-            val first = XboxDns.sweepId(address, 0)
-            val second = XboxDns.sweepId(address, 1)
-            assertTrue(first in 0..0xFFFF && second in 0..0xFFFF)
-            assertEquals(0, first and 1)
-            assertEquals(1, second and 1)
-            assertEquals(first shr 1, second shr 1)
+            val ids = (0..7).map { XboxDns.sweepId(address, it) }
+            assertTrue(ids.all { it in 0..0xFFFF })
+            assertEquals((0..7).toList(), ids.map { it and 7 })
+            assertEquals(1, ids.map { it shr 3 }.toSet().size)
         }
     }
 
     @Test
-    fun relaysComeFirstThenMoreProofThenNamesThenSpeed() {
-        fun result(address: String, name: String = "", relay: Boolean, passed: Int, millis: Long) =
-            XboxDns.Proven(address, name, "", relay, passed, millis)
-        val ranked = XboxDns.rank(
-            listOf(
-                result("1.0.0.1", relay = false, passed = 4, millis = 5),
-                result("2.0.0.1", relay = true, passed = 3, millis = 5),
-                result("3.0.0.1", relay = true, passed = 4, millis = 90),
-                result("4.0.0.1", name = "Known", relay = true, passed = 4, millis = 200),
-                result("5.0.0.1", relay = true, passed = 4, millis = 40),
-            )
-        ).map { it.address }
-        assertEquals(listOf("4.0.0.1", "5.0.0.1", "3.0.0.1", "2.0.0.1", "1.0.0.1"), ranked)
+    fun theCountryIsReadFromTheGeoAnswer() {
+        val body = "HTTP/1.1 200 OK\r\n\r\n{\"ExternalIpAddress\":\"1.2.3.4\",\"CountryCode\":\"de\",\"Version\":\"x\"}"
+        assertEquals("DE", XboxDns.parseCountry(body))
+        assertEquals("", XboxDns.parseCountry("HTTP/1.1 403 Forbidden\r\n\r\n"))
     }
 
     @Test
-    fun proxyRequestsNameWhereTheyWantToGo() {
-        assertEquals(DnsProxy.Target("login.live.com", 443, true), DnsProxy.parseTarget("CONNECT login.live.com:443 HTTP/1.1\r\nHost: x\r\n\r\n"))
-        assertEquals(DnsProxy.Target("example.com", 80, false), DnsProxy.parseTarget("GET http://example.com/a/b HTTP/1.1\r\n\r\n"))
-        assertEquals(DnsProxy.Target("example.com", 8080, false), DnsProxy.parseTarget("GET http://example.com:8080/ HTTP/1.1\r\n\r\n"))
-        assertNull(DnsProxy.parseTarget("GET /relative HTTP/1.1\r\n\r\n"))
-        assertNull(DnsProxy.parseTarget("CONNECT nohost HTTP/1.1\r\n\r\n"))
-        assertNull(DnsProxy.parseTarget(""))
+    fun relaysComeFirstThenOutsideIranThenMoreNamesThenKnownThenSpeed() {
+        fun result(address: String, name: String = "", relay: Boolean, passed: Int, millis: Long, country: String = "") =
+            XboxDns.Proven(address, name, "", relay, passed, millis, country)
+        val ranked = XboxDns.rank(
+            listOf(
+                result("1.0.0.1", relay = false, passed = 0, millis = 5),
+                result("2.0.0.1", relay = true, passed = 3, millis = 5),
+                result("3.0.0.1", relay = true, passed = 8, millis = 90),
+                result("4.0.0.1", name = "Known", relay = true, passed = 8, millis = 200),
+                result("5.0.0.1", relay = true, passed = 8, millis = 40),
+                result("6.0.0.1", relay = true, passed = 8, millis = 1, country = "IR"),
+            )
+        ).map { it.address }
+        assertEquals(listOf("4.0.0.1", "5.0.0.1", "3.0.0.1", "2.0.0.1", "6.0.0.1", "1.0.0.1"), ranked)
     }
 }
