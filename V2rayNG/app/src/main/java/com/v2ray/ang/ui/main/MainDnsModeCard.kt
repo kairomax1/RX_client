@@ -68,6 +68,15 @@ fun MainDnsModeCard(
                 RxPromptSubject(
                     stringResource(if (state.enabled) R.string.dns_mode_state_on else R.string.dns_mode_state_off)
                 )
+                // The best public anti-sanction DNS right now, for a console or any other device.
+                state.consoleDns?.firstOrNull()?.let { best ->
+                    Spacer(Modifier.height(12.dp))
+                    CardNote(stringResource(R.string.dns_mode_console_dns, best.service.name))
+                    Spacer(Modifier.height(8.dp))
+                    RxPromptSubject(stringResource(R.string.dns_mode_xbox_primary, best.service.primary))
+                    Spacer(Modifier.height(8.dp))
+                    RxPromptSubject(stringResource(R.string.dns_mode_xbox_secondary, best.service.secondary))
+                }
                 RxPromptButtons {
                     RxPromptButton(
                         text = stringResource(if (state.enabled) R.string.dns_mode_turn_off else R.string.dns_mode_turn_on),

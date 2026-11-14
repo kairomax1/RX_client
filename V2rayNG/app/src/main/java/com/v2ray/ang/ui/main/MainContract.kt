@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.GroupMapItem
 import com.v2ray.ang.dto.LocateTarget
@@ -46,6 +47,8 @@ data class MainUiState(
     val exitCountry: String? = null,
     /** A pasted subscription link waiting for the user to name it (or decline). */
     val subNameRequest: String? = null,
+    /** Set while the Aether engine is still looking for a route during a connection attempt. */
+    val aetherSearch: AetherEngine.Status? = null,
 )
 
 /**

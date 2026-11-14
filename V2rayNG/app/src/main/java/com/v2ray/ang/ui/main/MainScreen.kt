@@ -61,7 +61,11 @@ fun MainScreen(
     val updatePending by mainViewModel.updatePending.collectAsStateWithLifecycle()
     val displayText = mainViewModel.formatStatus(uiState.status)
     // The status line names the connection state; bulk test progress takes it over while it runs.
+    val aetherSearch = uiState.aetherSearch
     val statusText = when {
+        aetherSearch != null && aetherSearch.total > 0 && aetherSearch.attempt > 0 ->
+            stringResource(R.string.aether_searching, aetherSearch.attempt.toString(), aetherSearch.total.toString(), aetherSearch.label)
+        aetherSearch != null -> stringResource(R.string.aether_starting)
         uiState.connectPhase == ConnectPhase.Connecting -> stringResource(R.string.rx_connecting)
         uiState.status is MainStatus.TestProgress -> displayText
         uiState.status is MainStatus.Testing && uiState.connectPhase != ConnectPhase.Connected -> displayText
@@ -358,6 +362,7 @@ fun MainScreen(
                     showQuickSheet = false
                     if (destination == MainDestination.DnsMode) {
                         dnsModeViewModel.refresh()
+                        dnsModeViewModel.probeConsoleDns()
                         showDnsMode = true
                     } else {
                         onNavigate(destination)

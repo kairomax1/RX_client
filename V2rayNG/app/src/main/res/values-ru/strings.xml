@@ -710,4 +710,8 @@
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
     <string name="dns_mode_use_aether">I have no config; connect with Aether</string>
     <string name="dns_mode_aether_note">Aether is finding a route; this can take up to a minute</string>
+    <string name="drawer_app_log">App log</string>
+    <string name="aether_searching">Aether: route %1$s of %2$s (%3$s)</string>
+    <string name="aether_starting">Aether is starting…</string>
+    <string name="dns_mode_console_dns">Anti-sanction DNS for a console or other devices (%s)</string>
 </resources>

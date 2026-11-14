@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
 import android.app.Application
 import androidx.lifecycle.ViewModel
@@ -325,7 +326,10 @@ class MainViewModel(
         _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null, exitIp = null, exitCountry = null) }
         connectWatchdog?.cancel()
         connectWatchdog = viewModelScope.launch {
-            delay(CONNECT_TIMEOUT_MS)
+            // Aether first has to find a route that works on this network; that takes far
+            // longer than a ready-made config needs.
+            val aether = withContext(ioDispatcher) { dataSource.isAetherSelected() }
+            delay(if (aether) AetherEngine.MAX_SEARCH_MILLIS + CONNECT_TIMEOUT_MS else CONNECT_TIMEOUT_MS)
             if (uiState.value.connectPhase == ConnectPhase.Connecting) {
                 val wasRunning = uiState.value.isRunning
                 onConnectFailed()
@@ -341,9 +345,38 @@ class MainViewModel(
             _uiState.update { it.copy(connectPhase = ConnectPhase.Connected) }
         }
         viewModelScope.launch {
+            if (withContext(ioDispatcher) { dataSource.isAetherSelected() } && !awaitAetherRoute()) return@launch
             // The tunnel needs a moment after the core reports success.
             delay(VERIFY_SETTLE_MS)
             if (uiState.value.isRunning) testCurrentServerRealPing()
+        }
+    }
+
+    /**
+     * Waits while the Aether engine walks through its routes, showing which one it is on.
+     * True once a route works; false when none did (the attempt is then failed and stopped)
+     * or the user gave up meanwhile.
+     */
+    private suspend fun awaitAetherRoute(): Boolean {
+        try {
+            val deadline = System.currentTimeMillis() + AetherEngine.MAX_SEARCH_MILLIS
+            while (System.currentTimeMillis() < deadline) {
+                if (!uiState.value.isRunning) return false
+                val status = withContext(ioDispatcher) { dataSource.aetherStatus() }
+                when (status?.phase) {
+                    AetherEngine.Phase.Ready -> return true
+                    AetherEngine.Phase.Failed -> break
+                    else -> _uiState.update { it.copy(aetherSearch = status) }
+                }
+                delay(AETHER_POLL_MS)
+            }
+            if (uiState.value.connectPhase == ConnectPhase.Connecting) {
+                onConnectFailed()
+                dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            }
+            return false
+        } finally {
+            _uiState.update { it.copy(aetherSearch = null) }
         }
     }
 
@@ -1330,6 +1363,7 @@ class MainViewModel(
     private companion object {
         const val TEST_RESULT_FLUSH_INTERVAL_MS = 500L
         const val CONNECT_TIMEOUT_MS = 25_000L
+        const val AETHER_POLL_MS = 700L
         const val VERIFY_SETTLE_MS = 400L
         const val VERIFY_RETRY_MS = 900L
         const val VERIFY_MAX_ATTEMPTS = 2

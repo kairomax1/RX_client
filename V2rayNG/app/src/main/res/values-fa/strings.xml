@@ -786,4 +786,8 @@
     <string name="acc_ping_sort">پینگ همهٔ کانفیگ‌ها و مرتب‌سازی از کم به زیاد</string>
     <string name="dns_mode_use_aether">کانفیگ ندارم؛ با Aether وصل شو</string>
     <string name="dns_mode_aether_note">Aether داره راه پیدا می‌کنه؛ ممکنه تا یک دقیقه طول بکشه</string>
+    <string name="drawer_app_log">لاگ برنامه</string>
+    <string name="aether_searching">Aether: راه %1$s از %2$s (%3$s)</string>
+    <string name="aether_starting">Aether داره راه می‌افته…</string>
+    <string name="dns_mode_console_dns">DNS ضدتحریم برای کنسول و دستگاه‌های دیگه (%s)</string>
 </resources>

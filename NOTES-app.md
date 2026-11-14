@@ -281,3 +281,20 @@ Nine items, delivered together.
   127.0.0.1:1819 from `CoreServiceManager.launchCore` when the selected profile is the built-in
   SOCKS profile "Aether", and stops it in `stopCoreLoop`. DNS mode falls back to that profile
   when no config answers; the card has a "connect with Aether" button. Never run on a device.
+
+### Aether, round 2
+
+- First device test: "connection failed". The engine opens its SOCKS port only after a route
+  is proven, which can take longer than the 25 s connect watchdog; and nothing was visible,
+  because `LogUtil.i` is dropped at the default log level and no log screen was reachable.
+- `AetherEngine` now runs a supervisor thread in the service process: it walks `ROUTES`
+  (MASQUE, +ECH, HTTP/2+fragment, WireGuard, WireGuard gfw, IPv6 variants, Gool), waits for
+  the port, remembers the winning route per network (`files/aether/rx-winner-<network>`) and
+  writes its progress to `files/aether/rx-status` for the UI process.
+- `MainViewModel.awaitAetherRoute` holds the connection check until the engine is ready and
+  shows "route N of M"; the connect watchdog is extended for the Aether profile.
+- Engine output is logged at warning level with the prefix `Aether>`; the existing log screen
+  (`ui/logcat`) is now in the drawer ("App log").
+- DNS card: shows primary/secondary of the best anti-sanction DNS on its first page.
+- Still open from the user's list: Xbox DNS scanner with a large resolver list, in-app Xbox
+  web section, half-price (Iranian server) badge, ad blocking.
