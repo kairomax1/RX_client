@@ -848,4 +848,5 @@
     <string name="public_origin_bundled">به منبع‌ها راه نبود؛ از فهرست داخل خود برنامه استفاده شد (ممکن است قدیمی باشد).</string>
     <string name="notification_action_disconnect">کانفیگم رو قطع کن</string>
     <string name="notification_action_reconnect">کانفیگم رو دوباره بروزرسانی کن</string>
+    <string name="public_game">حالت بازی</string>
 </resources>

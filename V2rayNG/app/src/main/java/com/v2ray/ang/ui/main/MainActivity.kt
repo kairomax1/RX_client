@@ -114,7 +114,7 @@ class MainActivity : HelperBaseComponentActivity() {
     private val publicConfigsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val keep = result.data?.getIntExtra(com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity.EXTRA_KEEP, 0) ?: 0
-            if (result.resultCode == RESULT_OK && keep > 0) mainViewModel.testPublicConfigsAndConnect(keep)
+            if (result.resultCode == RESULT_OK && keep > 0) mainViewModel.testPublicConfigs(keep, connect = true)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {

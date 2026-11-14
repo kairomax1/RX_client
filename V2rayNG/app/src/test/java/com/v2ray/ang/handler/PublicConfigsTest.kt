@@ -57,7 +57,7 @@ class PublicConfigsTest {
     fun vmessNeedsTheModernHandshake() {
         fun vmess(aid: String, extra: String = "") =
             "vmess://" + b64("""{"v":"2","ps":"n","add":"9.8.7.6","port":"443","id":"u","aid":"$aid","net":"ws","tls":"tls"$extra}""")
-        assertEquals(PublicConfigs.Link(vmess("0"), Kind.Vmess, "9.8.7.6", 443), PublicConfigs.parse(vmess("0")))
+        assertEquals(PublicConfigs.Link(vmess("0"), Kind.Vmess, "9.8.7.6", 443, direct = false), PublicConfigs.parse(vmess("0")))
         assertNull(PublicConfigs.parse(vmess("64")))
         assertNull(PublicConfigs.parse(vmess("0", ""","allowInsecure":"1"""")))
         assertNull(PublicConfigs.parse("vmess://" + b64("""{"add":"9.8.7.6","port":80,"aid":0,"scy":"none"}""")))
@@ -96,5 +96,48 @@ class PublicConfigsTest {
         assertEquals(2, PublicConfigs.toLines(plain).size)
         assertEquals(2, PublicConfigs.toLines(b64(plain).chunked(40).joinToString("\n")).size)
         assertEquals(0, PublicConfigs.toLines("<html>blocked</html>").size)
+    }
+
+    @Test
+    fun gameModeLeavesOutWebTransports() {
+        val lines = sequenceOf(
+            "vless://a@1.1.1.1:443?security=tls&type=ws&host=a.com",
+            "vless://b@2.2.2.2:443?security=reality&type=tcp",
+            "trojan://p@3.3.3.3:443?type=grpc",
+            "hysteria2://p@5.5.5.5:443",
+            "ss://" + b64("aes-256-gcm:pw") + "@6.6.6.6:8388",
+        )
+        assertEquals(listOf("2.2.2.2", "5.5.5.5", "6.6.6.6"), PublicConfigs.select(lines, Kind.entries.toSet(), game = true).map { it.host })
+        assertEquals(5, PublicConfigs.select(lines, Kind.entries.toSet()).size)
+    }
+
+    @Test
+    fun aServerSeenBeforeIsNotTakenAgain() {
+        val seen = HashSet<String>()
+        assertEquals(1, PublicConfigs.select(sequenceOf("trojan://p@3.3.3.3:443"), Kind.entries.toSet(), seen = seen).size)
+        assertEquals(0, PublicConfigs.select(sequenceOf("trojan://q@3.3.3.3:443#again"), Kind.entries.toSet(), seen = seen).size)
+    }
+
+    @Test
+    fun cloudflareAddressesAreRecognised() {
+        fun v4(text: String) = text.split('.').map { it.toInt().toByte() }.toByteArray()
+        for (address in listOf("104.16.0.1", "104.27.255.255", "172.67.1.1", "188.114.97.3", "162.159.192.1", "198.41.200.9")) {
+            assertEquals(true, PublicConfigs.isCloudflare(v4(address)), address)
+        }
+        for (address in listOf("104.32.0.1", "172.80.0.1", "8.8.8.8", "188.114.112.1", "5.6.7.8", "198.41.127.255")) {
+            assertEquals(false, PublicConfigs.isCloudflare(v4(address)), address)
+        }
+        val six = ByteArray(16).also { it[0] = 0x26; it[1] = 0x06; it[2] = 0x47; it[3] = 0x00 }
+        assertEquals(true, PublicConfigs.isCloudflare(six))
+        assertEquals(false, PublicConfigs.isCloudflare(ByteArray(16).also { it[0] = 0x20; it[1] = 0x01 }))
+    }
+
+    @Test
+    fun flagsAndSources() {
+        assertEquals("\uD83C\uDDE9\uD83C\uDDEA", PublicConfigs.flag("DE"))
+        assertEquals("\uD83C\uDF10", PublicConfigs.flag(""))
+        assertEquals("\uD83C\uDF10", PublicConfigs.flag("d1"))
+        assertEquals(PublicConfigs.SOURCES.size, PublicConfigs.SOURCES.map { it.address }.toSet().size, "no source twice")
+        assertEquals("https://cdn.jsdelivr.net/gh/a/b@main/c.txt", PublicConfigs.Source("a/b", "main", "c.txt").mirror)
     }
 }

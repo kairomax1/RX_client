@@ -157,20 +157,24 @@ class MainViewModel(
     /** How many public configs stay after the running test; 0 when the test is not theirs. */
     private var publicKeep = 0
 
+    /** True when the public test in progress ends with a connection to its winner. */
+    private var publicConnect = false
+
     /**
      * Runs the real test (a request through each config) on the freshly collected public
-     * configs, keeps the [keep] quickest that answered and connects to the best.
+     * configs and keeps the [keep] quickest that answered. The winner (ping, then a short real
+     * download on the best few) is selected, and connected to when [connect] is set.
      */
-    fun testPublicConfigsAndConnect(keep: Int) {
+    fun testPublicConfigs(keep: Int, connect: Boolean) {
         viewModelScope.launch {
             setupGroupTab(forceRefresh = true).join()
-            subscriptionIdChanged(PublicConfigs.GROUP_ID)
+            if (connect) subscriptionIdChanged(PublicConfigs.GROUP_ID)
+            publicConnect = connect
             val others = withContext(ioDispatcher) {
                 dataSource.getSubscriptions().filter { it.guid != PublicConfigs.GROUP_ID }
                     .flatMap { dataSource.getServerGuidList(it.guid) }.toSet()
             }
             publicKeep = keep
-            connectBestAfterTest = true
             startAutoTest(others)
         }
     }
@@ -586,7 +590,8 @@ class MainViewModel(
                 delay(32)
                 dataSource.initAssets()
                 dataSource.syncSubscriptions()
-                dataSource.refreshPublicConfigs()
+                val keep = dataSource.renewPublicConfigs(_uiState.value.isRunning)
+                if (keep > 0) testPublicConfigs(keep, connect = false)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -921,6 +926,13 @@ class MainViewModel(
                 }
                 dataSource.finishAutoTest(tested)
                 applyAutoTestOrder(groups.keys)
+                if (keep > 0 && tested.isNotEmpty()) {
+                    // Public configs: the winner is the head of the list after the download
+                    // measurements, not the lowest ping alone.
+                    val winner = dataSource.getServerGuidList(PublicConfigs.GROUP_ID).firstOrNull { it in tested } ?: tested.first()
+                    updateSelectedGuid(winner)
+                    if (publicConnect) _connectBestTick.update { it + 1 }
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Throwable) {

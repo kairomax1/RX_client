@@ -236,6 +236,7 @@ private fun PublicConfigsScreen(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Chip("Mux", options.mux) { onChange(options.copy(mux = !options.mux)) }
                         Chip("Fragment", options.fragment) { onChange(options.copy(fragment = !options.fragment)) }
+                        Chip(stringResource(R.string.public_game), options.game) { onChange(options.copy(game = !options.game)) }
                     }
                     Text(stringResource(R.string.public_count, options.count.toString()), style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
                     Slider(

@@ -875,4 +875,5 @@
     <string name="public_origin_bundled">No way to the sources; using the list shipped inside the app (may be old).</string>
     <string name="notification_action_disconnect">Disconnect my config</string>
     <string name="notification_action_reconnect">Refresh my config</string>
+    <string name="public_game">Game mode</string>
 </resources>

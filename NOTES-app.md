@@ -410,18 +410,31 @@ Nine items, delivered together.
 `handler/PublicConfigs.kt` is the whole feature; `ui/publicconfigs/PublicConfigsActivity.kt` is its screen
 (cloud button beside the app name, and the first drawer entry).
 
-- List, best first: the sources (GitHub raw, then the jsDelivr mirror of the same file), the copy
-  kept from the last download (`files/rx-public-configs.txt`), the pack in
-  `assets/rx_public_configs.txt` (900 links; regenerate before a release, it ages in weeks).
+- Sources: `PublicConfigs.SOURCES`, 48 lists in 27 GitHub repositories. The 30 "small" ones (short,
+  or tested by their makers) are always read; the 18 large ones only when the small ones did not
+  give enough servers. Each list is kept in `files/rx-public/` with its ETag, so an unchanged
+  list costs one short request. Order of fallback per list: GitHub raw, jsDelivr mirror, kept copy;
+  with nothing at all, the pack in `assets/rx_public_configs.txt` (1,500 links; regenerate before
+  a release, it ages in weeks). Shared accounts of commercial VPNs (the Windscribe WireGuard
+  lists going around) are left out on purpose.
 - Refused: certificate checking off, VLESS/Trojan without TLS, Shadowsocks without AEAD, VMess with
-  alterId, SOCKS/HTTP, sorts the core cannot run (TUIC, SSR), Cloudflare Workers/Pages hosts.
-  A server behind Cloudflare's ordinary proxy is NOT recognised yet.
-- Two tests: a TCP connect from the phone (UDP sorts skip it), then the app's usual real test
-  through the core on three times the wanted number; `prune` keeps the quickest that answered and
-  the main screen connects to the best (`MainViewModel.testPublicConfigsAndConnect`).
-- Mux and Fragment are the app-wide settings, set from the screen; they are not tried per config.
-- Lists are re-downloaded at most every three hours, when the app opens and in the daily
-  maintenance run. New lists only light the dot on the button; the group changes when the user
-  runs the collection again.
+  alterId, SOCKS/HTTP, sorts the core cannot run (TUIC, SSR, OpenVPN), and servers whose address
+  resolves into Cloudflare's ranges (`isCloudflare`).
+- Two tests: a TCP connect from the phone (UDP sorts: address check only), then the app's usual
+  real test through the core on three times the wanted number. `prune` keeps the quickest that
+  answered and renames them "flag CC · TYPE · n" (country from ip-api.com's batch endpoint).
+  After the download measurement on the best few, the head of the list is selected and, when
+  the user started the run, connected to (`MainViewModel.testPublicConfigs`).
+- Game mode: only configs reached straight over TCP/UDP (no ws/grpc/xhttp transports).
+- Mux and Fragment are the app-wide settings, set from the screen; they are NOT tried per config
+  (a profile has no field for them).
+- Renewal: lists are looked at every three hours (`PublicConfigsWorker`, and when the app opens).
+  A change lights the dot; the next time the app is open with no tunnel up, the group is
+  collected and tested again with the saved options, without connecting.
+- Failover: `CoreServiceManager.watchPublicConfig` asks through the tunnel every minute while a
+  public config runs; three failures in a row move to the next config of the group.
 - The notification's small icon is the vector `drawable/ic_stat_name.xml`; the old PNG sets and the
   proxy/direct icon swap are gone. The old logcat screen is deleted.
+- Not built: relays for the domestic-only network. What the reports from the 2026 shutdowns
+  name as working is DNS tunnelling (dnstt and relatives) through resolvers inside the country,
+  which needs a new client core and tunnel servers; a domestic VPS relay needs a paid server.

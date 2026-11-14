@@ -23,6 +23,7 @@ import com.v2ray.ang.enums.BrowserDialerMode
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
@@ -39,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
@@ -56,6 +58,7 @@ object CoreServiceManager {
     private var browserDialer: IDialerService? = null
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val failoverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
     private var isReloading = false
@@ -197,6 +200,43 @@ object CoreServiceManager {
         ServiceRuntimeState.markRunning(true)
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
+        watchPublicConfig(service, guid)
+    }
+
+    /**
+     * Free public servers die often. While one of them is the running config, a request goes
+     * through the tunnel every minute; after three failures in a row the next config of the
+     * public group is selected and the service starts again with it.
+     */
+    private fun watchPublicConfig(service: Service, guid: String) {
+        failoverScope.coroutineContext.cancelChildren()
+        if (currentConfig?.subscriptionId != PublicConfigs.GROUP_ID) return
+        failoverScope.launch {
+            var failures = 0
+            while (isActive) {
+                kotlinx.coroutines.delay(60_000L)
+                if (!isRunning() || isReloading) continue
+                val answered = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl()) >= 0 }.getOrDefault(false) ||
+                    runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl(true)) >= 0 }.getOrDefault(false)
+                failures = if (answered) 0 else failures + 1
+                if (failures < 3) continue
+                val next = PublicConfigs.nextAfter(guid)
+                if (next == null) {
+                    AppLog.error(AppLog.Section.Connection, "Public config stopped answering and there is no other one left in the group")
+                    return@launch
+                }
+                AppLog.info(AppLog.Section.Connection, "Public config stopped answering; moving to the next one in the group")
+                MmkvManager.setSelectServer(next)
+                val control = serviceControl?.get() ?: return@launch
+                // Stopping cancels this watcher, so the restart runs on its own.
+                CoroutineScope(Dispatchers.Default).launch {
+                    control.stopService()
+                    kotlinx.coroutines.delay(500L)
+                    LauncherManager.startService(service)
+                }
+                return@launch
+            }
+        }
     }
 
     /**
@@ -206,6 +246,7 @@ object CoreServiceManager {
      */
     fun stopCoreLoop(): Boolean {
         connectionTestScope.coroutineContext.cancelChildren()
+        failoverScope.coroutineContext.cancelChildren()
         val service = getService() ?: return false
 
         networkMonitor?.unregister()

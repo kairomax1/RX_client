@@ -94,6 +94,10 @@ interface MainDataSource : Closeable {
     fun syncSubscriptions()
     fun initAssets()
 
-    /** Downloads the public config lists when the kept copy is old. */
-    fun refreshPublicConfigs() {}
+    /**
+     * Looks for newer public config lists and, when there are some and no tunnel is up,
+     * collects the group again. Returns how many configs are to stay after the real test, or 0
+     * when nothing was collected.
+     */
+    fun renewPublicConfigs(connected: Boolean): Int = 0
 }
