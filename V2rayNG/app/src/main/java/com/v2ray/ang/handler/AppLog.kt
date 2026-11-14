@@ -102,8 +102,21 @@ object AppLog {
         if (oneLine.isEmpty()) return null
         if (oneLine.startsWith("{") || oneLine.startsWith("[{")) return null
         if (SHARE_LINK.containsMatchIn(oneLine)) return null
-        return if (oneLine.length > MAX_MESSAGE_CHARS) oneLine.take(MAX_MESSAGE_CHARS) + "…" else oneLine
+        val masked = maskLinks(oneLine)
+        return if (masked.length > MAX_MESSAGE_CHARS) masked.take(MAX_MESSAGE_CHARS) + "…" else masked
     }
+
+    /**
+     * Web links are replaced by a placeholder: a subscription link is as good as a password.
+     * Links to a few well-known test hosts stay, they explain what a test tried to reach.
+     */
+    internal fun maskLinks(text: String): String = WEB_LINK.replace(text) { match ->
+        val host = match.groupValues[1].lowercase()
+        if (HARMLESS_HOSTS.any { host == it || host.endsWith(".$it") }) match.value else "<link>"
+    }
+
+    private val WEB_LINK = Regex("https?://([^/\\s:\"']+)[^\\s\"']*", RegexOption.IGNORE_CASE)
+    private val HARMLESS_HOSTS = listOf("gstatic.com", "google.com", "cloudflare.com", "github.com", "githubusercontent.com")
 
     private val SHARE_LINK = Regex("(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|socks)://", RegexOption.IGNORE_CASE)
 

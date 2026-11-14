@@ -341,3 +341,30 @@ Nine items, delivered together.
   directory (`lastconn` files), CPU/battery cost of four concurrent scans.
 - Log: the exported file follows the chosen tab and mode; server names/addresses are no longer
   logged by `HttpUtil`; the update-check line no longer says "new version" before comparing.
+
+### Xbox DNS scanner
+
+- Drawer entry "Xbox DNS scanner" -> `ui/xboxdns/XboxDnsActivity` (own RX-style screen).
+- Bundled data (regenerate by re-collecting the lists; all are plain address lists from GitHub):
+  - `assets/rx_dns_all.bin`: 107,697 IPv4 addresses, 4 bytes each. Sources: trickest/resolvers,
+    janmasarik/resolvers, proabiral/Fresh-Resolvers, BonJarber/fresh-resolvers,
+    blechschmidt/massdns (lists/resolvers.txt), six2dez/resolvers_reconftw, rix4uni/resolvers,
+    bp0lr/dmut-resolvers, blacklanternsecurity/public-dns-servers,
+    shelld3v/fresh-public-dns-servers, kamalalhagh/kevinnet-dns.
+  - `assets/rx_dns_named.txt`: 47 named services (anti-sanction, ISP, global), from
+    Hadooshi/Iran-DNS-Toolbox. `assets/rx_dns_priority.txt`: 100 more addresses named by
+    Iranian DNS tools (IranDNSFinder, smart-dns-ir, dns-switcher, DnsManager, free-dns-setter,
+    akaDns, Iran-DNS-Switcher, DNS-on-Tray). None of these addresses were verified by us.
+- `handler/XboxDns.kt`: sweep (one UDP socket, two names per server, ~850 servers/s, about
+  two minutes for the whole list), relay detection (both names answered with one routable
+  address), proof (four Xbox names resolved, TLS handshake with certificate check against each
+  answer; pass = 3 of 4). Proved: named services that answered, all relays, the 20 quickest
+  ordinary resolvers.
+- `handler/DnsProxy.kt` + `ui/xboxdns/XboxWebActivity`: xbox.com in a WebView whose proxy
+  (androidx.webkit ProxyController) is a local proxy resolving every name at the DNS under
+  test. The app is excluded from its own VPN, so this traffic goes out directly, like a
+  console's. No credentials are handled by the app; cookies stay in the WebView until
+  "sign out".
+- Not verified on a device: the sweep rate on mobile networks (operators may drop bursts of
+  DNS packets), Microsoft sign-in inside a WebView, how many relays exist in practice.
+- Log: web links are masked in `AppLog.sanitize` (a subscription link was found in a log).

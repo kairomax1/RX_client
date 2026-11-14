@@ -58,4 +58,14 @@ class AppLogTest {
         assertTrue(text.contains("[Aether] ERROR no route"))
         assertTrue(text.contains("[Core] core up"))
     }
+
+    @Test
+    fun linksAreMaskedExceptWellKnownTestHosts() {
+        assertEquals("sub <link> failed", AppLog.sanitize("sub https://panel.example.ir/sub/SECRET-token_1 failed"))
+        assertEquals(
+            "Get \"https://www.gstatic.com/generate_204\": timeout",
+            AppLog.sanitize("Get \"https://www.gstatic.com/generate_204\": timeout"),
+        )
+        assertEquals("<link>", AppLog.sanitize("http://evilgstatic.com/x"))
+    }
 }
