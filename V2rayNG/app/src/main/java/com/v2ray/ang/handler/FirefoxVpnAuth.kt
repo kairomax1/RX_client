@@ -529,7 +529,10 @@ object FirefoxVpnAuth {
         dkLen: Int
     ): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(password, "HmacSHA256"))
+        // SecretKeySpec refuses an empty key. HMAC zero-pads its key to the 64-byte block,
+        // so an empty key and a single zero byte give exactly the same result.
+        val keyBytes = if (password.isEmpty()) ByteArray(1) else password
+        mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
         val hLen = 32
         val numBlocks = (dkLen + hLen - 1) / hLen
         val result = ByteArray(dkLen)
