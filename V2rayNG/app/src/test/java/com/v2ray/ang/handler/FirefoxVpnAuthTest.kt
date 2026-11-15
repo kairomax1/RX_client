@@ -143,4 +143,23 @@ class FirefoxVpnAuthTest {
         val payload = FirefoxVpnAuth.challengePayload(challenge)
         assertTrue(payload.get("image_b64").asString.startsWith("data:image/png"))
     }
+
+    /** The mailed code is six digits, but people paste spaces, dashes or the whole link. */
+    @Test
+    fun aPastedCodeIsStrippedToWhatMozillaWaitsFor() {
+        assertEquals("482913", FirefoxVpnAuth.normalizeVerificationCode(" 482 913 "))
+        assertEquals("482913", FirefoxVpnAuth.normalizeVerificationCode("482-913"))
+        // letters survive too: an authenticator code is not always numeric
+        assertEquals("G5XK7QP2", FirefoxVpnAuth.normalizeVerificationCode(" g5xk 7qp-2 "))
+    }
+
+    @Test
+    fun aPastedLinkGivesUpItsCode() {
+        val link = "https://accounts.firefox.com/verify_email?code=abc123&uid=7f1"
+        assertEquals("abc123", FirefoxVpnAuth.normalizeVerificationCode(link))
+        assertEquals(
+            "9f8e7d",
+            FirefoxVpnAuth.normalizeVerificationCode("https://x/y#code=9f8e7d#tail")
+        )
+    }
 }
