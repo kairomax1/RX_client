@@ -162,4 +162,38 @@ class FirefoxVpnAuthTest {
             FirefoxVpnAuth.normalizeVerificationCode("https://x/y#code=9f8e7d#tail")
         )
     }
+
+    /** Mozilla's page only finishes for the client whose answer is a real page. */
+    @Test
+    fun theSignInAddressAsksForTheClientABrowserCanAnswer() {
+        val signIn = FirefoxVpnAuth.startBrowserSignIn()
+        assertTrue(signIn.url.startsWith("https://accounts.firefox.com/authorization?"))
+        assertTrue(signIn.url.contains("client_id=" + FirefoxVpnAuth.BROWSER_CLIENT_ID))
+        assertTrue(
+            signIn.url.contains(
+                "redirect_uri=https%3A%2F%2Faccounts.firefox.com%2Foauth%2Fsuccess%2F" +
+                    FirefoxVpnAuth.BROWSER_CLIENT_ID
+            )
+        )
+        assertTrue(signIn.url.contains("code_challenge_method=S256"))
+        assertTrue(signIn.url.contains("state=" + signIn.state))
+        assertTrue(signIn.verifier.length >= 43)
+    }
+
+    /** An address chosen on the phone rides in the page's own address bar. */
+    @Test
+    fun aChosenAddressTravelsInTheAddress() {
+        val signIn = FirefoxVpnAuth.startBrowserSignIn("someone@example.com")
+        assertTrue(signIn.url.contains("email=someone%40example.com"))
+    }
+
+    /** The proxy answers 400 to any other shape, so the shape is pinned here. */
+    @Test
+    fun theConnectNamesTheTargetAndCarriesTheBearer() {
+        val request = FirefoxVpnRelay.connectRequest("example.com:443", "tok")
+        assertTrue(request.startsWith("CONNECT example.com:443 HTTP/1.1\r\n"))
+        assertTrue(request.contains("\r\nHost: example.com:443\r\n"))
+        assertTrue(request.contains("\r\nProxy-Authorization: Bearer tok\r\n"))
+        assertTrue(request.endsWith("\r\n\r\n"))
+    }
 }
