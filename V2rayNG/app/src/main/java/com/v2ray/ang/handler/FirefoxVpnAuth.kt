@@ -171,7 +171,9 @@ object FirefoxVpnAuth {
             try {
                 val typed = email.trim()
                 AppLog.info(AppLog.Section.Connection, "FxA: signing in as $typed")
-                var response = loginAttempt(typed, password, VERIFICATION_EMAIL_2FA)
+                // No method is asked for: an account with an authenticator app is
+                // then confirmed by its code, without an email at all.
+                var response = loginAttempt(typed, password, null)
 
                 // A deployment that does not know the verification method asks
                 // for a plain sign-in instead; errno 107 is "invalid parameter".
@@ -185,10 +187,7 @@ object FirefoxVpnAuth {
                     val realEmail = emailInError(response.body)
                     if (realEmail.isNotEmpty() && realEmail != typed) {
                         logStep("login with the account's own spelling $realEmail", response)
-                        response = loginAttempt(realEmail, password, VERIFICATION_EMAIL_2FA)
-                        if (errnoOf(response.body) == 107) {
-                            response = loginAttempt(realEmail, password, null)
-                        }
+                        response = loginAttempt(realEmail, password, null)
                         if (response.code == 200) {
                             return@withContext finishLogin(response, realEmail)
                         }
@@ -278,18 +277,36 @@ object FirefoxVpnAuth {
         }
     }
 
-    /** Confirms an unverified session with the code FxA mailed at sign-in. */
+    /**
+     * Confirms an unverified session with the code FxA mailed at sign-in. The
+     * whole link from the mail is accepted too, so the code can be copied out of
+     * it on a phone that cannot open the mail.
+     */
     suspend fun verifyEmailCode(sessionToken: String, code: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
                 val url = "$FXA_BASE/session/verify_code"
-                val body = JsonObject().apply { addProperty("code", code.trim()) }.toString()
+                val body = JsonObject().apply { addProperty("code", normalizeVerificationCode(code)) }.toString()
                 val response = postJson(url, body, hawkAuthorization("POST", url, sessionToken, body))
                 response.code == 200
             } catch (_: Exception) {
                 false
             }
         }
+
+    /** A pasted confirmation link carries the code after "code="; a typed code is used as is. */
+    internal fun normalizeVerificationCode(input: String): String {
+        val text = input.trim()
+        if (text.contains("code=")) {
+            val raw = text.substringAfter("code=").substringBefore("&").substringBefore("#")
+            return try {
+                java.net.URLDecoder.decode(raw, "UTF-8").trim()
+            } catch (_: Exception) {
+                raw.trim()
+            }
+        }
+        return text.filter { it.isLetterOrDigit() }
+    }
 
     /** Confirms an unverified session with a code from the account's authenticator app. */
     suspend fun verifyTotp(sessionToken: String, code: String): Boolean =

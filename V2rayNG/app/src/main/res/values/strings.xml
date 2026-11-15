@@ -908,4 +908,11 @@
     <string name="firefox_vpn_recommended">Recommended</string>
     <string name="firefox_vpn_account_count">%1$d accounts</string>
     <string name="firefox_vpn_remove_account">Remove account</string>
+    <string name="firefox_vpn_code_sent">A code was sent to %1$s. If this phone cannot open that mail, turn on another VPN first, or paste the whole link from the mail instead.</string>
+    <string name="firefox_vpn_open_mail">Open the mail</string>
+    <string name="firefox_vpn_check_again">Check again</string>
+    <string name="firefox_vpn_code_field">Code, or the link from the mail</string>
+    <string name="firefox_vpn_not_verified">The sign-in is not confirmed yet.</string>
+    <string name="firefox_vpn_resend">Send the code again</string>
+    <string name="firefox_vpn_where_mail">The mail goes to the address the Firefox account itself has, which may differ from what you typed.</string>
 </resources>

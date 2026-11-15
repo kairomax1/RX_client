@@ -31,6 +31,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -224,6 +225,37 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             }
             if (!verified) {
                 _state.update { it.copy(isLoading = false, error = "The code was not accepted") }
+                return@launch
+            }
+            when (val tokenResult = FirefoxVpnAuth.exchangeForOAuth(sessionToken)) {
+                is FirefoxVpnAuth.TokenResult.Success -> {
+                    val email = _state.value.pendingEmail.orEmpty()
+                    saveTokens(email, tokenResult.tokens)
+                }
+                is FirefoxVpnAuth.TokenResult.Error ->
+                    _state.update { it.copy(isLoading = false, error = tokenResult.message) }
+            }
+        }
+    }
+
+    /** Asks Mozilla to mail the confirmation again, with the address already typed. */
+    fun resendCode() {
+        val email = _state.value.pendingEmail
+        val password = pendingPassword
+        if (email.isNullOrEmpty() || password.isNullOrEmpty()) {
+            _state.update { it.copy(error = "Type the password again") }
+            return
+        }
+        addAccount(email, password)
+    }
+
+    /** Looks again at a session the user may have confirmed by opening the mail's link. */
+    fun checkSession() {
+        val sessionToken = _state.value.pendingSessionToken ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            if (!FirefoxVpnAuth.sessionVerified(sessionToken)) {
+                _state.update { it.copy(isLoading = false, error = "The sign-in is not confirmed yet") }
                 return@launch
             }
             when (val tokenResult = FirefoxVpnAuth.exchangeForOAuth(sessionToken)) {
@@ -513,7 +545,9 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
             pendingEmail = state.pendingEmail,
             onDismiss = { viewModel.hideAddAccount() },
             onSubmit = { email, password -> viewModel.addAccount(email, password) },
-            onSubmitCode = { code -> viewModel.submitCode(code) }
+            onSubmitCode = { code -> viewModel.submitCode(code) },
+            onResend = { viewModel.resendCode() },
+            onCheckAgain = { viewModel.checkSession() }
         )
     }
 
@@ -738,9 +772,12 @@ private fun AddAccountSheet(
     pendingEmail: String?,
     onDismiss: () -> Unit,
     onSubmit: (String, String) -> Unit,
-    onSubmitCode: (String) -> Unit
+    onSubmitCode: (String) -> Unit,
+    onResend: () -> Unit,
+    onCheckAgain: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val context = androidx.compose.ui.platform.LocalContext.current
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
@@ -802,26 +839,60 @@ private fun AddAccountSheet(
                     )
                 }
             } else {
-                Text(
-                    text = if (needCodeType == "totp") {
-                        stringResource(R.string.firefox_vpn_enter_totp)
-                    } else {
-                        stringResource(R.string.firefox_vpn_enter_email_code, pendingEmail.orEmpty())
-                    },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
-                    color = colors.onSurfaceVariant
-                )
+                if (needCodeType == "totp") {
+                    Text(
+                        text = stringResource(R.string.firefox_vpn_enter_totp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+                        color = colors.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.firefox_vpn_code_sent, pendingEmail.orEmpty()),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+                        color = colors.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.firefox_vpn_where_mail),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = RxPromptFont, lineHeight = 17.sp),
+                        color = colors.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { openMail(context) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.firefox_vpn_open_mail),
+                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = onResend,
+                            enabled = !isLoading,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.firefox_vpn_resend),
+                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = code,
                     onValueChange = { code = it },
-                    label = { Text(stringResource(R.string.firefox_vpn_code)) },
+                    label = { Text(stringResource(R.string.firefox_vpn_code_field)) },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
                 Button(
                     onClick = { onSubmitCode(code.trim()) },
                     enabled = !isLoading && code.isNotBlank(),
@@ -831,6 +902,14 @@ private fun AddAccountSheet(
                     Text(
                         stringResource(R.string.firefox_vpn_verify),
                         style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont)
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                TextButton(onClick = onCheckAgain, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        stringResource(R.string.firefox_vpn_check_again),
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont),
+                        color = colors.primary
                     )
                 }
             }
@@ -961,4 +1040,26 @@ internal fun flagOf(code: String): String {
     val base = 0x1F1E6 - 'A'.code
     return String(Character.toChars(base + upper[0].code)) +
         String(Character.toChars(base + upper[1].code))
+}
+
+/** Opens whatever the phone has for mail, so the code can be read. */
+private fun openMail(context: android.content.Context) {
+    val candidates = listOf(
+        android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+            addCategory(android.content.Intent.CATEGORY_APP_EMAIL)
+        },
+        android.content.Intent(
+            android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse("https://mail.google.com")
+        )
+    )
+    for (intent in candidates) {
+        try {
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {
+            // Try the next one.
+        }
+    }
 }
