@@ -13,5 +13,6 @@ jobs:
           while read -r entry; do
             [ -z "$entry" ] && continue
             code=$(curl -s -o /dev/null -m 10 --http1.1 -A 'Mozilla/5.0' -H 'Accept: */*' -w '%{http_code}' "https://$entry" || true)
-            echo "RESULT $entry $code"
+            out="$out $entry=$code"
           done < .github/probe/hosts.txt
+          echo "::notice::$out"
