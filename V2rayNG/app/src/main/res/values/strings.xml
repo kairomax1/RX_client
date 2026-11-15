@@ -951,4 +951,16 @@
     <string name="firefox_vpn_relay_ready">The relay is deployed and holds this phone\'s key.</string>
     <string name="firefox_vpn_relay_wrong_key">This Worker holds another phone\'s key: copy the code from here again and press Deploy.</string>
     <string name="firefox_vpn_relay_missing">No Worker answers at this address. Check the address, or create the Worker first.</string>
+    <string name="firefox_vpn_trying">Trying %1$s (%2$d of %3$d)</string>
+    <string name="firefox_vpn_measuring_progress">Measuring… %1$d of %2$d</string>
+    <string name="firefox_vpn_ping_note">Real answer time through each location, measured on your own connection.</string>
+    <string name="firefox_vpn_err_refused">Mozilla\'s proxy refused the tunnel (%1$s). Try another location, or turn the Cloudflare relay on.</string>
+    <string name="firefox_vpn_err_unreachable">This phone cannot reach Mozilla\'s proxy at all. Turn the Cloudflare relay on.</string>
+    <string name="firefox_vpn_err_no_traffic">Mozilla answered, but no page came back through it. Try again in a moment, or turn the relay on.</string>
+    <string name="firefox_vpn_err_no_pass">Mozilla did not issue a pass for this account. Open Mozilla\'s own page and sign in again.</string>
+    <string name="firefox_vpn_relay_refused">The relay is deployed, but Mozilla refused the tunnel through it: %1$s</string>
+    <string name="firefox_vpn_err_407">the account was not accepted (407)</string>
+    <string name="firefox_vpn_err_421">this address was refused (421)</string>
+    <string name="firefox_vpn_err_403">the account is not allowed (403)</string>
+    <string name="firefox_vpn_err_429">the account has used its share for now (429)</string>
 </resources>

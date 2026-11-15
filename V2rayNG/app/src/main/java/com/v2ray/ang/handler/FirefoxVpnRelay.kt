@@ -7,7 +7,12 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
@@ -20,38 +25,29 @@ import kotlin.concurrent.thread
  * The core's own HTTP outbound can only present a username and password, while
  * the built-in VPN's proxy wants `Proxy-Authorization: Bearer <ProxyPass>`
  * over TLS. So the core is pointed at this relay on 127.0.0.1: the relay opens
- * one TLS connection to the Fastly host per tunnel, sends the CONNECT with the
+ * one TLS connection to the proxy per tunnel, sends the CONNECT with the
  * Bearer header, and then copies bytes both ways. The target's name is passed
  * on untouched, so the name is resolved by the proxy, not by this phone.
+ *
+ * Which address to dial is not written anywhere: the server list names one
+ * endpoint per location and the pass names another. Both are tried once at
+ * connect time and the one that answers is kept.
  */
 object FirefoxVpnRelay {
 
     private const val CONNECT_TIMEOUT_MILLIS = 15_000
+    private const val PROBE_TIMEOUT_MILLIS = 6_000
+    private const val PROBE_BUDGET_MILLIS = 9_000
+    private const val PROBE_TARGET = "www.gstatic.com:443"
     private const val FIREFOX_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
-
-    /** Only the Worker's pipe needs it, to read this install's key. */
-    @Volatile
-    private var appContext: android.content.Context? = null
-
-    fun attachContext(context: android.content.Context) {
-        appContext = context.applicationContext
-    }
     private const val MAX_HEADER_BYTES = 16 * 1024
 
-    private var serverSocket: ServerSocket? = null
-    private var acceptThread: Thread? = null
-    private val openSockets = CopyOnWriteArrayList<Socket>()
-
-    @Volatile
-    private var running = false
-
-    private var proxyHost: String = ""
-    private var proxyPort: Int = 443
-    private var bearerToken: String = ""
-
-    /** When set, the pipe to the proxy goes through this Cloudflare Worker. */
-    private var cloudflareAddress: String? = null
+    /** One address the proxy may be reached on, and what it belongs to. */
+    data class Endpoint(val host: String, val port: Int, val label: String = "") {
+        override fun toString(): String =
+            if (label.isEmpty()) "$host:$port" else "$label ($host:$port)"
+    }
 
     /**
      * The shape of the CONNECT the proxy accepts. Which one it is can only be
@@ -71,8 +67,46 @@ object FirefoxVpnRelay {
         Shape("host-proxy", false, false)
     )
 
+    /** Only the Worker's pipe needs it, to read this install's key. */
+    @Volatile
+    private var appContext: android.content.Context? = null
+
+    fun attachContext(context: android.content.Context) {
+        appContext = context.applicationContext
+    }
+
+    private var serverSocket: ServerSocket? = null
+    private var acceptThread: Thread? = null
+    private val openSockets = CopyOnWriteArrayList<Socket>()
+
+    @Volatile
+    private var running = false
+
+    /** Every address worth trying, the best first. */
+    @Volatile
+    private var endpoints: List<Endpoint> = emptyList()
+
+    @Volatile
+    private var activeEndpoint: Endpoint? = null
+
     @Volatile
     private var shape: Shape = SHAPES[0]
+
+    @Volatile
+    private var bearerToken: String = ""
+
+    /** When set, the pipe to the proxy goes through this Cloudflare Worker. */
+    @Volatile
+    private var cloudflareAddress: String? = null
+
+    /** Why the last tunnel was refused; null while tunnels are being accepted. */
+    @Volatile
+    var problem: String? = null
+        private set
+
+    private val failures = AtomicInteger(0)
+    @Volatile
+    private var lastFailureLogAt = 0L
 
     /**
      * Starts the relay and returns the loopback port the core should use.
@@ -81,18 +115,18 @@ object FirefoxVpnRelay {
      */
     @Synchronized
     fun start(
-        host: String,
-        port: Int,
+        endpoints: List<Endpoint>,
         token: String,
-        cloudflareAddress: String? = null,
-        shapeName: String? = null
+        cloudflareAddress: String? = null
     ): Int {
         stop()
-        proxyHost = host
-        proxyPort = port
-        bearerToken = token
+        this.endpoints = endpoints
+        this.bearerToken = token
         this.cloudflareAddress = cloudflareAddress
-        shape = SHAPES.firstOrNull { it.name == shapeName } ?: SHAPES[0]
+        this.activeEndpoint = endpoints.firstOrNull()
+        this.shape = SHAPES[0]
+        this.problem = null
+        failures.set(0)
 
         val server = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         serverSocket = server
@@ -108,7 +142,17 @@ object FirefoxVpnRelay {
                 thread(name = "firefox-vpn-tunnel", isDaemon = true) { handle(client) }
             }
         }
-        AppLog.info(AppLog.Section.Connection, "Firefox VPN relay listening on 127.0.0.1:${server.localPort}")
+
+        // Behind the Worker the phone cannot ask the proxy itself, so the
+        // address is the one the server list named for the location.
+        if (cloudflareAddress == null && endpoints.isNotEmpty()) {
+            resolve()
+        }
+        AppLog.info(
+            AppLog.Section.Connection,
+            "Firefox VPN relay listening on 127.0.0.1:${server.localPort} through " +
+                (activeEndpoint?.toString() ?: "no address")
+        )
         return server.localPort
     }
 
@@ -122,6 +166,8 @@ object FirefoxVpnRelay {
         serverSocket = null
         acceptThread = null
         cloudflareAddress = null
+        endpoints = emptyList()
+        activeEndpoint = null
         for (socket in openSockets) {
             try {
                 socket.close()
@@ -130,6 +176,177 @@ object FirefoxVpnRelay {
         }
         openSockets.clear()
     }
+
+    /** The address the tunnels are being opened through. */
+    fun endpoint(): Endpoint? = activeEndpoint
+
+    // ── Asking the proxy which address takes a tunnel ─────────────
+
+    private data class Probe(val endpoint: Endpoint, val shape: Shape, val status: String?)
+
+    /**
+     * Tries every address with every shape at the same time and keeps the first
+     * that answers 200. Asking one after another would spend a full timeout per
+     * attempt, which on a network that drops the packets is minutes.
+     */
+    private fun resolve(): Boolean {
+        val list = endpoints
+        if (list.isEmpty()) return false
+        val attempts = mutableListOf<Pair<Endpoint, Shape>>()
+        for ((index, endpoint) in list.withIndex()) {
+            // The first address gets every shape; the spares only the two
+            // Firefox itself sends.
+            val shapes = if (index == 0) SHAPES else SHAPES.take(2)
+            for (candidate in shapes) attempts += endpoint to candidate
+        }
+
+        val pool: ExecutorService = Executors.newCachedThreadPool { runnable ->
+            Thread(runnable, "firefox-vpn-probe").apply { isDaemon = true }
+        }
+        val jobs = mutableListOf<Future<Probe>>()
+        try {
+            val token = bearerToken
+            for ((endpoint, candidate) in attempts) {
+                jobs += pool.submit(
+                    Callable {
+                        Probe(
+                            endpoint,
+                            candidate,
+                            tryShape(endpoint.host, endpoint.port, token, candidate, PROBE_TARGET)
+                        )
+                    }
+                )
+            }
+
+            val deadline = System.currentTimeMillis() + PROBE_BUDGET_MILLIS
+            val pending = jobs.toMutableList()
+            val report = StringBuilder()
+            var firstStatus: String? = null
+            var winner: Probe? = null
+            while (pending.isNotEmpty() && winner == null && System.currentTimeMillis() < deadline) {
+                val iterator = pending.listIterator()
+                while (iterator.hasNext()) {
+                    val job = iterator.next()
+                    if (!job.isDone) continue
+                    iterator.remove()
+                    val result = try {
+                        job.get()
+                    } catch (_: Exception) {
+                        null
+                    } ?: continue
+                    if (report.isNotEmpty()) report.append(", ")
+                    report.append(result.endpoint.host).append('/').append(result.shape.name)
+                        .append('=').append(result.status?.trim() ?: "no answer")
+                    if (firstStatus == null) firstStatus = result.status?.trim()
+                    if (result.status != null && result.status.contains(" 200")) winner = result
+                }
+                if (winner == null && pending.isNotEmpty()) {
+                    try {
+                        Thread.sleep(60)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                }
+            }
+            for (job in pending) job.cancel(true)
+
+            val chosen = winner
+            if (chosen != null) {
+                activeEndpoint = chosen.endpoint
+                shape = chosen.shape
+                problem = null
+                failures.set(0)
+                AppLog.info(
+                    AppLog.Section.Connection,
+                    "Firefox VPN proxy: ${chosen.endpoint} takes ${chosen.shape.name}"
+                )
+                return true
+            }
+            problem = if (firstStatus != null) {
+                "no address took a tunnel: $firstStatus"
+            } else {
+                "no address answered"
+            }
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Firefox VPN proxy: no address took a tunnel ($report)"
+            )
+            return false
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    private fun tryShape(
+        host: String,
+        port: Int,
+        token: String,
+        candidate: Shape,
+        target: String
+    ): String? = try {
+        val tls = dialTls(host, port, PROBE_TIMEOUT_MILLIS) ?: return null
+        tls.use {
+            it.getOutputStream().apply {
+                write(connectRequest(target, token, host, candidate).toByteArray(Charsets.ISO_8859_1))
+                flush()
+            }
+            readHead(BufferedInputStream(it.getInputStream()))?.substringBefore("\r\n")
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * How long a real page takes through [endpoint], in milliseconds: the
+     * handshake to the proxy, the CONNECT, the handshake to the page and its
+     * answer. A location that drops anywhere on the way has no number, because
+     * a number that was not measured would be a lie.
+     */
+    fun measure(endpoint: Endpoint, token: String, timeoutMillis: Int = PROBE_TIMEOUT_MILLIS): Int? {
+        val started = System.nanoTime()
+        val pageHost = PROBE_TARGET.substringBefore(':')
+        val pagePort = PROBE_TARGET.substringAfter(':').toInt()
+        return try {
+            val tls = dialTls(endpoint.host, endpoint.port, timeoutMillis) ?: return null
+            tls.use { outer ->
+                outer.soTimeout = timeoutMillis
+                outer.getOutputStream().apply {
+                    write(
+                        connectRequest(PROBE_TARGET, token, endpoint.host, SHAPES[0])
+                            .toByteArray(Charsets.ISO_8859_1)
+                    )
+                    flush()
+                }
+                val answer = readHead(BufferedInputStream(outer.getInputStream()))?.substringBefore("\r\n")
+                if (answer == null || !answer.contains(" 200")) return null
+
+                val inner = SSLContext.getDefault().socketFactory
+                    .createSocket(outer, pageHost, pagePort, false) as SSLSocket
+                val parameters = inner.sslParameters
+                parameters.serverNames = listOf(SNIHostName(pageHost))
+                parameters.applicationProtocols = arrayOf("http/1.1")
+                inner.sslParameters = parameters
+                inner.soTimeout = timeoutMillis
+                inner.startHandshake()
+                inner.getOutputStream().apply {
+                    write(
+                        (
+                            "GET /generate_204 HTTP/1.1\r\nHost: $pageHost\r\n" +
+                                "User-Agent: $FIREFOX_UA\r\nConnection: close\r\n\r\n"
+                            ).toByteArray(Charsets.ISO_8859_1)
+                    )
+                    flush()
+                }
+                val status = readHead(BufferedInputStream(inner.getInputStream()))?.substringBefore("\r\n")
+                if (status == null || !(status.contains(" 204") || status.contains(" 200"))) return null
+                ((System.nanoTime() - started) / 1_000_000L).toInt()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // ── Serving the core ──────────────────────────────────────────
 
     private fun handle(client: Socket) {
         var upstream: Tunnel? = null
@@ -183,7 +400,12 @@ object FirefoxVpnRelay {
             } catch (_: Exception) {
             }
         } catch (e: Exception) {
-            AppLog.error(AppLog.Section.Connection, "Firefox VPN relay: ${e.message ?: "tunnel closed"}")
+            // A tunnel that ends is ordinary; only a tunnel that was refused
+            // is worth counting.
+            AppLog.debug(
+                AppLog.Section.Connection,
+                "Firefox VPN relay: ${e.message ?: "the tunnel closed"}"
+            )
         } finally {
             try {
                 upstream?.close()
@@ -205,9 +427,6 @@ object FirefoxVpnRelay {
     }
 
     /** The CONNECT Firefox itself sends; the shape is the one the proxy took. */
-    internal fun connectRequest(target: String, token: String): String =
-        connectRequest(target, token, proxyHost, shape)
-
     internal fun connectRequest(target: String, token: String, host: String, shape: Shape): String =
         buildString {
             append("CONNECT $target HTTP/1.1\r\n")
@@ -217,65 +436,31 @@ object FirefoxVpnRelay {
             append("\r\n")
         }
 
-    /**
-     * Asks the proxy with each shape once and returns the name of the one it
-     * answers 200 to, together with a short report for the log. Null when
-     * every shape was refused.
-     */
-    internal fun probeShapes(
-        host: String,
-        port: Int,
-        token: String,
-        testTarget: String = "www.gstatic.com:443"
-    ): Pair<String?, String> {
-        val report = StringBuilder()
-        for (candidate in SHAPES) {
-            val status = tryShape(host, port, token, candidate, testTarget)
-            if (report.isNotEmpty()) report.append(", ")
-            report.append(candidate.name).append('=').append(status ?: "no answer")
-            if (status != null && status.contains(" 200")) {
-                return Pair(candidate.name, report.toString())
-            }
-        }
-        return Pair(null, report.toString())
-    }
+    internal fun connectRequest(target: String, token: String): String =
+        connectRequest(target, token, activeEndpoint?.host.orEmpty(), shape)
 
-    private fun tryShape(
-        host: String,
-        port: Int,
-        token: String,
-        candidate: Shape,
-        target: String
-    ): String? = try {
-        val tls = dialTls(host, port) ?: return null
-        tls.use {
-            it.getOutputStream().apply {
-                write(connectRequest(target, token, host, candidate).toByteArray(Charsets.ISO_8859_1))
-                flush()
-            }
-            val statusLine = readHead(BufferedInputStream(it.getInputStream()))?.substringBefore("\r\n")
-            statusLine
-        }
-    } catch (_: Exception) {
-        null
-    }
-
-    /** Opens the connection to Fastly and asks it for the tunnel. */
+    /** Opens the connection to the proxy and asks it for the tunnel. */
     private fun openTunnel(target: String): Tunnel? {
         val viaCloudflare = cloudflareAddress
         if (viaCloudflare != null) {
             // The Worker makes the TLS connection and the CONNECT itself, so
             // what comes back is already a tunnel to the target.
+            val endpoint = activeEndpoint ?: return null
             val pipe = FirefoxVpnCloudflare.openTunnel(
                 address = viaCloudflare,
                 context = appContext ?: return null,
-                proxyHost = proxyHost,
-                proxyPort = proxyPort,
+                proxyHost = endpoint.host,
+                proxyPort = endpoint.port,
                 target = target,
                 token = bearerToken,
-                hostHeader = if (shape.hostIsTarget) target else proxyHost,
+                hostHeader = if (shape.hostIsTarget) target else endpoint.host,
                 withAgent = shape.withAgent
-            ) ?: return null
+            ) ?: run {
+                noteFailure(FirefoxVpnCloudflare.problem ?: "the relay carried nothing")
+                return null
+            }
+            failures.set(0)
+            problem = null
             return object : Tunnel {
                 override val input: InputStream get() = pipe.input
                 override val output: OutputStream get() = pipe.output
@@ -283,7 +468,15 @@ object FirefoxVpnRelay {
             }
         }
 
-        val tls = dialTls(proxyHost, proxyPort) ?: return null
+        val endpoint = activeEndpoint
+        if (endpoint == null) {
+            noteFailure("no address to dial")
+            return null
+        }
+        val tls = dialTls(endpoint.host, endpoint.port) ?: run {
+            noteFailure("${endpoint.host} cannot be reached")
+            return null
+        }
         val buffered = BufferedInputStream(tls.getInputStream())
         val statusLine = try {
             tls.getOutputStream().apply {
@@ -292,20 +485,19 @@ object FirefoxVpnRelay {
             }
             readHead(buffered)?.substringBefore("\r\n")
         } catch (e: Exception) {
-            AppLog.error(AppLog.Section.Connection, "Firefox VPN tunnel: ${e.message ?: "closed"}")
+            noteFailure(e.message ?: "the proxy closed the connection")
             null
         }
         if (statusLine == null || !statusLine.contains(" 200")) {
-            AppLog.error(
-                AppLog.Section.Connection,
-                "Firefox VPN proxy refused $target: ${statusLine ?: "no answer"}"
-            )
+            noteFailure(statusLine?.trim() ?: "the proxy did not answer")
             try {
                 tls.close()
             } catch (_: Exception) {
             }
             return null
         }
+        failures.set(0)
+        problem = null
         // The bytes already read past the head belong to the tunnel, so the
         // same buffered stream travels on instead of a fresh one.
         return object : Tunnel {
@@ -320,27 +512,62 @@ object FirefoxVpnRelay {
         }
     }
 
-    /** The TLS connection to Fastly, dialled straight from the phone. */
-    private fun dialTls(host: String, port: Int): SSLSocket? = try {
-        val address = InetSocketAddress(host, port)
-        val raw = Socket()
-        raw.connect(address, CONNECT_TIMEOUT_MILLIS)
-        raw.soTimeout = CONNECT_TIMEOUT_MILLIS
-
-        val factory: SSLSocketFactory = SSLContext.getDefault().socketFactory
-        val tls = factory.createSocket(raw, host, port, true) as SSLSocket
-        val parameters = tls.sslParameters
-        parameters.serverNames = listOf(SNIHostName(host))
-        // Firefox offers both; offering one alone is what makes the proxy take
-        // HTTP/1.1 for a plain CONNECT.
-        parameters.applicationProtocols = arrayOf("http/1.1")
-        tls.sslParameters = parameters
-        tls.startHandshake()
-        tls
-    } catch (e: Exception) {
-        AppLog.error(AppLog.Section.Connection, "Firefox VPN proxy unreachable: ${e.message ?: "no route"}")
-        null
+    /**
+     * Counts a refused tunnel. The screen and the log say it once, not once per
+     * request: a thousand copies of the same line is what buried the real
+     * reason before.
+     */
+    private fun noteFailure(reason: String) {
+        problem = reason
+        val count = failures.incrementAndGet()
+        val now = System.currentTimeMillis()
+        if (now - lastFailureLogAt > 15_000) {
+            lastFailureLogAt = now
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Firefox VPN: the proxy refused $count tunnels ($reason)"
+            )
+        }
+        // Three refusals in a row mean this address is not the one, not that
+        // the page asked for something odd.
+        if (count >= 3) {
+            failures.set(0)
+            rotate()
+        }
     }
+
+    /** Moves to the next address the server list named. */
+    private fun rotate() {
+        val list = endpoints
+        if (list.size < 2) return
+        val current = activeEndpoint
+        val index = list.indexOfFirst { it.host == current?.host && it.port == current.port }
+        val next = list[((index + 1) % list.size)]
+        activeEndpoint = next
+        AppLog.info(AppLog.Section.Connection, "Firefox VPN: trying $next instead")
+    }
+
+    /** The TLS connection to the proxy, dialled straight from the phone. */
+    private fun dialTls(host: String, port: Int, timeoutMillis: Int = CONNECT_TIMEOUT_MILLIS): SSLSocket? =
+        try {
+            val address = InetSocketAddress(host, port)
+            val raw = Socket()
+            raw.connect(address, timeoutMillis)
+            raw.soTimeout = timeoutMillis
+
+            val factory: SSLSocketFactory = SSLContext.getDefault().socketFactory
+            val tls = factory.createSocket(raw, host, port, true) as SSLSocket
+            val parameters = tls.sslParameters
+            parameters.serverNames = listOf(SNIHostName(host))
+            // Firefox offers both; offering one alone is what makes the proxy take
+            // HTTP/1.1 for a plain CONNECT.
+            parameters.applicationProtocols = arrayOf("http/1.1")
+            tls.sslParameters = parameters
+            tls.startHandshake()
+            tls
+        } catch (_: Exception) {
+            null
+        }
 
     internal fun readHead(input: InputStream): String? {
         val buffer = StringBuilder()
@@ -356,17 +583,6 @@ object FirefoxVpnRelay {
                 else -> 0
             }
             if (matched == 4) return buffer.toString()
-        }
-        return null
-    }
-
-    private fun readLine(input: InputStream): String? {
-        val line = StringBuilder()
-        while (line.length < 8192) {
-            val next = input.read()
-            if (next < 0) return if (line.isEmpty()) null else line.toString()
-            if (next == '\n'.code) return line.toString().trimEnd('\r')
-            line.append(next.toChar())
         }
         return null
     }

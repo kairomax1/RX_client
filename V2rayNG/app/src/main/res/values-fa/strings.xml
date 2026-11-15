@@ -924,4 +924,16 @@
     <string name="firefox_vpn_relay_ready">رله ساخته شده و کلید همین گوشی را دارد.</string>
     <string name="firefox_vpn_relay_wrong_key">این Worker کلید گوشی دیگری را دارد: کد را دوباره از اینجا کپی کن و Deploy بزن.</string>
     <string name="firefox_vpn_relay_missing">در این آدرس هیچ Worker جواب نمی‌دهد. آدرس را چک کن یا اول Worker را بساز.</string>
+    <string name="firefox_vpn_trying">تلاش برای %1$s (%2$d از %3$d)</string>
+    <string name="firefox_vpn_measuring_progress">در حال اندازه‌گیری… %1$d از %2$d</string>
+    <string name="firefox_vpn_ping_note">زمان واقعی پاسخ از هر کشور، با اینترنت خودتان اندازه گرفته می‌شود.</string>
+    <string name="firefox_vpn_err_refused">پروکسی موزیلا این تونل را قبول نکرد (%1$s). کشور دیگری را امتحان کن یا رلهٔ کلادفلر را روشن کن.</string>
+    <string name="firefox_vpn_err_unreachable">این گوشی اصلاً به پروکسی موزیلا نمی‌رسد. رلهٔ کلادفلر را روشن کن.</string>
+    <string name="firefox_vpn_err_no_traffic">موزیلا جواب داد ولی هیچ صفحه‌ای از تونل رد نشد. کمی دیگر دوباره امتحان کن یا رله را روشن کن.</string>
+    <string name="firefox_vpn_err_no_pass">موزیلا برای این حساب اجازهٔ عبور صادر نکرد. صفحهٔ خود موزیلا را باز کن و دوباره وارد شو.</string>
+    <string name="firefox_vpn_relay_refused">رله ساخته شده ولی موزیلا تونل را از آن رد نکرد: %1$s</string>
+    <string name="firefox_vpn_err_407">حساب را قبول نکرد (۴۰۷)</string>
+    <string name="firefox_vpn_err_421">این نشانی را قبول نکرد (۴۲۱)</string>
+    <string name="firefox_vpn_err_403">این حساب اجازه ندارد (۴۰۳)</string>
+    <string name="firefox_vpn_err_429">سهم این حساب فعلاً تمام شده (۴۲۹)</string>
 </resources>

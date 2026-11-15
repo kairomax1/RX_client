@@ -143,30 +143,31 @@ object FirefoxVpnServers {
     }
 
     /**
-     * How long a TCP connection to the country's own endpoint takes, in
-     * milliseconds, or null when this phone cannot reach it at all. Nothing is
-     * made up: a country that does not answer shows as unreachable.
+     * How long a real page takes through this country, in milliseconds: the
+     * handshake to Mozilla's proxy, the CONNECT, the handshake to the page and
+     * its own answer. It is measured through the proxy and not to it, so the
+     * number moves when this phone's own connection moves.
+     *
+     * Null when any part of that chain stays silent. Nothing is made up: a
+     * country that does not carry a page has no number at all.
      */
-    suspend fun ping(country: Country, timeoutMillis: Int = 3_000): Int? =
+    suspend fun ping(country: Country, token: String, timeoutMillis: Int = 9_000): Int? =
         withContext(Dispatchers.IO) {
             val endpoint = connectEndpoint(country) ?: return@withContext null
-            try {
-                val started = System.nanoTime()
-                java.net.Socket().use { socket ->
-                    socket.connect(
-                        java.net.InetSocketAddress(endpoint.connectHost, endpoint.tunnelPort),
-                        timeoutMillis
-                    )
-                }
-                ((System.nanoTime() - started) / 1_000_000L).toInt()
-            } catch (_: Exception) {
-                null
-            }
+            FirefoxVpnRelay.measure(
+                FirefoxVpnRelay.Endpoint(endpoint.connectHost, endpoint.tunnelPort, country.name),
+                token,
+                timeoutMillis
+            )
         }
 
     /** The first usable CONNECT endpoint of a country. */
     fun connectEndpoint(country: Country?): Server? =
-        country?.let { serversFor(it).firstOrNull { server -> server.connectHost.isNotEmpty() } }
+        country?.let {
+            serversFor(it).firstOrNull { server ->
+                server.connectHost.isNotEmpty() && server.scheme == "https"
+            }
+        }
 
     private fun com.google.gson.JsonObject.string(name: String): String? =
         get(name)?.takeIf { !it.isJsonNull }?.asString

@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -52,7 +54,7 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     BackupRestore(R.drawable.ic_restore_24dp, R.string.title_configuration_backup_restore),
     XboxDns(R.drawable.ic_search_24dp, R.string.xbox_dns_title),
     PublicConfigs(R.drawable.ic_cloud_download_24dp, R.string.public_title),
-    FirefoxVpn(R.drawable.ic_firefox_24dp, R.string.firefox_vpn_title),
+    FirefoxVpn(R.drawable.rx_fox_badge, R.string.firefox_vpn_title),
     Log(R.drawable.ic_logcat_24dp, R.string.drawer_app_log),
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
@@ -152,7 +154,18 @@ fun MainDrawerContent(
                     ),
                     selected = false,
                     onClick = { onNavigate(item) },
-                    icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
+                    // The fox keeps its own colours; the other marks take the ink.
+                    icon = {
+                        Icon(
+                            painterResource(item.iconRes),
+                            contentDescription = null,
+                            tint = if (item == MainDestination.FirefoxVpn) {
+                                Color.Unspecified
+                            } else {
+                                LocalContentColor.current
+                            }
+                        )
+                    },
                     badge = badge,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier

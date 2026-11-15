@@ -29,9 +29,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -66,6 +66,7 @@ import com.v2ray.ang.handler.FirefoxVpnAuth
 import com.v2ray.ang.handler.FirefoxVpnCaptcha
 import com.v2ray.ang.handler.FirefoxVpnCheck
 import com.v2ray.ang.handler.FirefoxVpnCloudflare
+import com.v2ray.ang.handler.FirefoxVpnGuardian
 import com.v2ray.ang.handler.FirefoxVpnManager
 import com.v2ray.ang.handler.FirefoxVpnRelay
 import com.v2ray.ang.handler.FirefoxVpnServers
@@ -78,12 +79,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -134,7 +138,12 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val tested: Boolean? = null,
         val tryingCountry: String? = null,
         val pings: Map<String, Int?> = emptyMap(),
-        val pinging: Boolean = false
+        val pinging: Boolean = false,
+        /** How far the attempt and the measurement have come; both are bounded. */
+        val connectStep: Int = 0,
+        val connectTotal: Int = 0,
+        val pingDone: Int = 0,
+        val pingTotal: Int = 0
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -398,41 +407,58 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
      * the ones it can reach are tried from the fastest.
      */
     fun connect() {
-        val account = _state.value.accounts.firstOrNull { it.id == _state.value.activeAccountId }
+        val account = activeAccount()
         if (account == null) {
-            _state.update { it.copy(error = "Add a Firefox Account first") }
+            _state.update { it.copy(error = contextString(R.string.firefox_vpn_need_account)) }
             return
         }
         connectJob?.cancel()
         connectJob = viewModelScope.launch {
             _state.update {
-                it.copy(isConnecting = true, error = null, success = null, tested = null)
+                it.copy(
+                    isConnecting = true,
+                    error = null,
+                    success = null,
+                    tested = null,
+                    connectStep = 0,
+                    connectTotal = 0
+                )
             }
             stopTunnel()
-            if (_state.value.pings.isEmpty()) measureAll()
-            var lastProblem = "no country answered"
+
+            val pass = passFor(account)
+            if (pass == null) {
+                _state.update {
+                    it.copy(
+                        isConnecting = false,
+                        error = it.error ?: contextString(R.string.firefox_vpn_err_no_pass)
+                    )
+                }
+                return@launch
+            }
+
+            val codes = candidates(pass)
+            _state.update { it.copy(connectTotal = codes.size) }
             var connected: FirefoxVpnManager.ConnectionInfo? = null
-            for (code in candidates()) {
+            for ((index, code) in codes.withIndex()) {
+                if (!isActive) return@launch
                 val name = _state.value.countries.firstOrNull { it.code == code }?.name ?: code
-                _state.update { it.copy(tryingCountry = code) }
+                _state.update { it.copy(tryingCountry = code, connectStep = index) }
                 AppLog.info(AppLog.Section.Connection, "Firefox VPN: trying $name")
-                val info = runTunnel(account, code)
+                val info = runTunnel(account, pass, code)
                 if (info != null) {
                     connected = info
                     break
                 }
-                lastProblem = "$name did not carry any traffic"
             }
             _state.update {
                 it.copy(
                     isConnecting = false,
                     tryingCountry = null,
+                    connectStep = it.connectTotal,
                     connectionInfo = connected,
                     tested = if (connected != null) true else null,
-                    selectedCountryCode = connected?.let { info ->
-                        _state.value.selectedCountryCode
-                    } ?: it.selectedCountryCode,
-                    error = if (connected == null) lastProblem else null
+                    error = if (connected == null) explain() else null
                 )
             }
             if (connected != null) {
@@ -442,35 +468,90 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** Everything that is worth trying, fastest reachable first. */
-    private fun candidates(): List<String> {
+    /** The account the tunnels are opened with. */
+    private fun activeAccount(): FirefoxVpnStore.StoredAccount? =
+        _state.value.accounts.firstOrNull { it.id == _state.value.activeAccountId }
+
+    /** Reads a string with the app's own resources. */
+    private fun contextString(resId: Int): String = getApplication<Application>().getString(resId)
+
+    /**
+     * Asks Mozilla for the pass this account tunnels with. One pass serves
+     * every location, so it is fetched once per attempt.
+     */
+    private suspend fun passFor(account: FirefoxVpnStore.StoredAccount): FirefoxVpnGuardian.ProxyPass? {
+        val pass = FirefoxVpnManager.fetchPass(getApplication(), account)
+        if (pass == null) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: Mozilla issued no pass for this account")
+        }
+        return pass
+    }
+
+    /**
+     * The locations worth trying, measured first so the order is a real one:
+     * the chosen country, the recommended one, and the nearest others.
+     */
+    private suspend fun candidates(pass: FirefoxVpnGuardian.ProxyPass): List<String> {
         val countries = _state.value.countries
-        val pings = _state.value.pings
         if (countries.isEmpty()) return listOf(_state.value.selectedCountryCode.orEmpty())
-        val ordered = countries.sortedWith(
-            compareBy(
-                { pings[it.code] == null },
-                { pings[it.code] ?: Int.MAX_VALUE },
-                { it.code != FirefoxVpnServers.RECOMMENDED_CODE },
-                { it.name }
-            )
-        ).map { it.code }
         val chosen = _state.value.selectedCountryCode
-        val first = if (chosen != null) listOf(chosen) + ordered.filter { it != chosen } else ordered
-        return first.take(6)
+        val pool = (
+            listOfNotNull(chosen) +
+                listOf(FirefoxVpnServers.RECOMMENDED_CODE) +
+                countries.map { it.code }
+            ).distinct().take(3)
+
+        val gate = Semaphore(3)
+        val measured = coroutineScope {
+            pool.map { code ->
+                val country = countries.firstOrNull { it.code == code }
+                async(Dispatchers.IO) {
+                    gate.withPermit {
+                        val value = country?.let { FirefoxVpnServers.ping(it, pass.token) }
+                        if (country != null) {
+                            _state.update { state ->
+                                state.copy(pings = state.pings + (country.code to value))
+                            }
+                        }
+                        code to value
+                    }
+                }
+            }.awaitAll()
+        }
+        return measured.sortedWith(
+            compareBy<Pair<String, Int?>> { it.second == null }
+                .thenBy { it.second ?: Int.MAX_VALUE }
+        ).map { it.first }
     }
 
     /** Builds one tunnel and asks it for a real page; null when it stays silent. */
     private suspend fun runTunnel(
         account: FirefoxVpnStore.StoredAccount,
+        pass: FirefoxVpnGuardian.ProxyPass,
         countryCode: String
     ): FirefoxVpnManager.ConnectionInfo? {
-        val result = FirefoxVpnManager.connect(getApplication(), account, countryCode)
+        val result = withContext(Dispatchers.IO) {
+            FirefoxVpnManager.connectWithPass(getApplication(), account, pass, countryCode)
+        }
         if (result is FirefoxVpnManager.ConnectResult.Error) {
             AppLog.error(AppLog.Section.Connection, "Firefox VPN: ${result.message}")
             return null
         }
         val info = (result as FirefoxVpnManager.ConnectResult.Success).info
+
+        // When no address took a tunnel there is nothing to wait for: waiting
+        // a quarter of a minute per location was the whole of the old wait.
+        if (FirefoxVpnRelay.problem != null &&
+            FirefoxVpnCloudflare.relayAddressOrNull(getApplication()) == null
+        ) {
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Firefox VPN: ${info.countryName} has no address that takes a tunnel; moving on"
+            )
+            stopTunnel()
+            return null
+        }
+
         val profile = com.v2ray.ang.dto.entities.ProfileItem(
             configType = com.v2ray.ang.enums.EConfigType.HTTP,
             remarks = "Mozilla (${info.countryName})",
@@ -481,7 +562,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         com.v2ray.ang.handler.MmkvManager.setSelectServer(TUNNEL_GUID)
         com.v2ray.ang.core.LauncherManager.startService(getApplication(), guid = TUNNEL_GUID)
 
-        if (!FirefoxVpnCheck.waitUntilCarries(info.localPort)) {
+        if (!FirefoxVpnCheck.waitUntilCarries(info.localPort, 15_000)) {
             AppLog.error(
                 AppLog.Section.Connection,
                 "Firefox VPN: ${info.countryName} was announced but carried nothing; moving on"
@@ -535,21 +616,48 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         FirefoxVpnRelay.stop()
     }
 
-    /** Measures every country's endpoint, so the choice is made on real numbers. */
+    /**
+     * Times every location: how long a real page takes through it on this
+     * phone's own connection. The numbers are measured, one at a time in the
+     * order they come, and a location that carries nothing is left blank.
+     */
     fun measureAll() {
+        val account = activeAccount() ?: return
         if (_state.value.countries.isEmpty() || _state.value.pinging) return
         viewModelScope.launch {
-            _state.update { it.copy(pinging = true) }
+            _state.update {
+                it.copy(pinging = true, pingDone = 0, pingTotal = it.countries.size, error = null)
+            }
+            val pass = passFor(account)
+            if (pass == null) {
+                _state.update {
+                    it.copy(pinging = false, error = contextString(R.string.firefox_vpn_err_no_pass))
+                }
+                return@launch
+            }
             val countries = _state.value.countries
-            val measured = countries.map { country ->
-                async(Dispatchers.IO) { country.code to FirefoxVpnServers.ping(country) }
-            }.awaitAll().toMap()
-            val reachable = measured.count { it.value != null }
+            val gate = Semaphore(16)
+            coroutineScope {
+                countries.map { country ->
+                    async(Dispatchers.IO) {
+                        gate.withPermit {
+                            val value = FirefoxVpnServers.ping(country, pass.token)
+                            _state.update { state ->
+                                state.copy(
+                                    pings = state.pings + (country.code to value),
+                                    pingDone = state.pingDone + 1
+                                )
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+            val reachable = _state.value.pings.count { it.value != null }
             AppLog.info(
                 AppLog.Section.Connection,
-                "Firefox VPN: $reachable of ${countries.size} countries answer from this phone"
+                "Firefox VPN: $reachable of ${countries.size} locations carried a real page"
             )
-            _state.update { it.copy(pings = measured, pinging = false) }
+            _state.update { it.copy(pinging = false) }
         }
     }
 
@@ -583,19 +691,64 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** Asks the deployed Worker whether it knows this phone's key. */
+    /**
+     * Asks the deployed Worker whether it knows this phone's key, and — when
+     * Mozilla has issued a pass — whether a real tunnel goes through it. Only
+     * that second question is worth answering with "ready".
+     */
     fun checkRelay() {
         val address = _state.value.relayAddress
         if (address.isBlank()) {
             _state.update { it.copy(relayVerdict = "missing") }
             return
         }
+        val account = activeAccount()
         viewModelScope.launch {
             val verdict = withContext(Dispatchers.IO) {
-                FirefoxVpnCloudflare.check(address, getApplication())
+                val pass = account?.let { FirefoxVpnManager.fetchPass(getApplication(), it) }
+                val country = _state.value.countries.firstOrNull { it.code == _state.value.selectedCountryCode }
+                    ?: FirefoxVpnServers.pickRecommended(_state.value.countries)
+                val endpoint = FirefoxVpnServers.connectEndpoint(country)
+                if (pass != null && endpoint != null) {
+                    FirefoxVpnCloudflare.check(
+                        address,
+                        getApplication(),
+                        endpoint.connectHost,
+                        endpoint.tunnelPort,
+                        pass.token
+                    )
+                } else {
+                    FirefoxVpnCloudflare.check(address, getApplication())
+                }
             }
             AppLog.info(AppLog.Section.Connection, "Cloudflare relay check: $verdict")
             _state.update { it.copy(relayVerdict = verdict) }
+        }
+    }
+
+    /**
+     * One honest sentence about why nothing connected. The relay knows the
+     * last thing the proxy said; the number is all the screen needs, so the
+     * sentence can be read without knowing what a proxy is.
+     */
+    private fun explain(): String {
+        val problem = FirefoxVpnRelay.problem.orEmpty()
+        val code = Regex("HTTP/1\\.[01] (\\d{3})").find(problem)?.groupValues?.getOrNull(1)
+        val rejection = when (code) {
+            "407" -> contextString(R.string.firefox_vpn_err_407)
+            "421" -> contextString(R.string.firefox_vpn_err_421)
+            "403" -> contextString(R.string.firefox_vpn_err_403)
+            "429" -> contextString(R.string.firefox_vpn_err_429)
+            null -> ""
+            else -> code
+        }
+        return when {
+            rejection.isNotEmpty() -> contextString(R.string.firefox_vpn_err_refused, rejection)
+            problem.contains("cannot be reached") ||
+                problem.contains("no answer") ||
+                problem.contains("closed") ->
+                contextString(R.string.firefox_vpn_err_unreachable)
+            else -> contextString(R.string.firefox_vpn_err_no_traffic)
         }
     }
 
@@ -675,10 +828,6 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                     style = androidx.compose.ui.text.TextStyle(fontFamily = RxPromptFont, fontSize = 22.sp),
                     color = colors.onSurface
                 )
-                Spacer(Modifier.width(10.dp))
-                if (state.isLoading || state.isConnecting) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.primary)
-                }
             }
 
             LazyColumn(
@@ -701,6 +850,23 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
 
                 state.connectionInfo?.let { info ->
                     item { TunnelState(tested = state.tested, country = info.countryName) }
+                }
+
+                if (state.isConnecting) {
+                    item {
+                        val name = state.countries.firstOrNull { it.code == state.tryingCountry }?.name
+                            ?: stringResource(R.string.firefox_vpn_recommended)
+                        val total = state.connectTotal.coerceAtLeast(1)
+                        ProgressCard(
+                            text = stringResource(
+                                R.string.firefox_vpn_trying,
+                                name,
+                                (state.connectStep + 1).coerceAtMost(total),
+                                total
+                            ),
+                            progress = (state.connectStep.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        )
+                    }
                 }
 
                 state.error?.let { message ->
@@ -797,10 +963,15 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                                 enabled = !state.pinging
                             ) {
                                 Text(
-                                    text = stringResource(
-                                        if (state.pinging) R.string.firefox_vpn_measuring
-                                        else R.string.firefox_vpn_measure_all
-                                    ),
+                                    text = if (state.pinging) {
+                                        stringResource(
+                                            R.string.firefox_vpn_measuring_progress,
+                                            state.pingDone,
+                                            state.pingTotal
+                                        )
+                                    } else {
+                                        stringResource(R.string.firefox_vpn_measure_all)
+                                    },
                                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont),
                                     color = colors.primary
                                 )
@@ -830,6 +1001,14 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         }
                     }
                 } else {
+                    item {
+                        Text(
+                            text = stringResource(R.string.firefox_vpn_ping_note),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = RxPromptFont),
+                            color = colors.onSurfaceVariant.copy(alpha = 0.75f),
+                            modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                        )
+                    }
                     // The recommended location first, then the rest by name.
                     val ordered = state.countries.sortedWith(
                         compareBy({ it.code != FirefoxVpnServers.RECOMMENDED_CODE }, { it.name })
@@ -948,6 +1127,35 @@ private fun Card(content: @Composable () -> Unit) {
             .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
             .padding(14.dp)
     ) { content() }
+}
+
+@Composable
+private fun ProgressCard(text: String, progress: Float) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.surface.copy(alpha = 0.55f))
+            .border(1.dp, colors.outline.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+            color = colors.onSurface
+        )
+        Spacer(Modifier.height(8.dp))
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(5.dp)
+                .clip(RoundedCornerShape(3.dp)),
+            color = colors.primary,
+            trackColor = colors.outline.copy(alpha = 0.25f)
+        )
+    }
 }
 
 @Composable
@@ -1254,6 +1462,10 @@ private fun RelayCard(
                 value == "ready" -> stringResource(R.string.firefox_vpn_relay_ready)
                 value == "wrong-key" -> stringResource(R.string.firefox_vpn_relay_wrong_key)
                 value == "missing" -> stringResource(R.string.firefox_vpn_relay_missing)
+                value.startsWith("refused") -> stringResource(
+                    R.string.firefox_vpn_relay_refused,
+                    value.removePrefix("refused: ").trim()
+                )
                 else -> value
             }
             val good = value == "ready"

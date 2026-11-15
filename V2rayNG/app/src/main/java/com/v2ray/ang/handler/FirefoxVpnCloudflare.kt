@@ -88,25 +88,60 @@ object FirefoxVpnCloudflare {
 
     /**
      * Asks the deployed Worker whether it knows this phone's key. Returns a
-     * short verdict for the screen: "ready", "wrong-key", "missing", "error: …".
+     * short verdict for the screen: "ready", "wrong-key", "missing",
+     * "refused: …" when the Worker answered but Mozilla's proxy did not take
+     * the tunnel, "error: …" when the address itself is wrong.
+     *
+     * With [proxyHost] and [token] the Worker is asked for a real tunnel too,
+     * so "ready" means traffic went through and not only that the code is
+     * deployed.
      */
-    fun check(address: String, context: Context): String {
+    fun check(
+        address: String,
+        context: Context,
+        proxyHost: String = "",
+        proxyPort: Int = 443,
+        token: String = ""
+    ): String {
         val trimmed = address.trim().trimEnd('/')
         if (trimmed.isEmpty()) return "missing"
-        val url = when {
+        val base = when {
             trimmed.startsWith("https://") -> trimmed
             trimmed.startsWith("http://") -> trimmed
             trimmed.startsWith("wss://") -> "https://" + trimmed.removePrefix("wss://")
             trimmed.startsWith("ws://") -> "http://" + trimmed.removePrefix("ws://")
             else -> "https://$trimmed"
-        } + (if (trimmed.contains('?')) "&" else "?") + "k=" + secret(context)
+        }
+        val separator = if (base.contains('?')) '&' else '?'
+        val url = buildString {
+            append(base).append(separator).append("k=").append(secret(context))
+            if (proxyHost.isNotEmpty() && token.isNotEmpty()) {
+                append("&probe=1")
+                append("&h=").append(android.net.Uri.encode(proxyHost))
+                append("&p=").append(proxyPort)
+                append("&t=").append(android.net.Uri.encode(PROBE_TARGET))
+                append("&a=").append(android.net.Uri.encode(token))
+                append("&hh=").append(android.net.Uri.encode(PROBE_TARGET))
+                append("&u=1")
+            }
+        }
         return try {
             val request = Request.Builder().url(url).header("User-Agent", UA).get().build()
             client.newCall(request).execute().use { response ->
-                when {
-                    response.code == 200 -> "ready"
-                    response.code == 401 -> "wrong-key"
-                    response.code == 404 -> "missing"
+                val body = try {
+                    response.body?.string().orEmpty().trim()
+                } catch (_: Exception) {
+                    ""
+                }
+                when (response.code) {
+                    200 -> when {
+                        body.startsWith("OK") -> "ready"
+                        body.startsWith("ERR") -> "refused: " + body.removePrefix("ERR").trim()
+                        body.isEmpty() -> "ready"
+                        else -> "refused: $body"
+                    }
+                    401 -> "wrong-key"
+                    404 -> "missing"
                     else -> "error: HTTP ${response.code}"
                 }
             }
@@ -114,6 +149,14 @@ object FirefoxVpnCloudflare {
             "error: ${e.message ?: "no answer"}"
         }
     }
+
+    /** The target the Worker is asked to open when the relay is checked. */
+    private const val PROBE_TARGET = "www.gstatic.com:443"
+
+    /** Why the last pipe through the Worker was refused; null when one opened. */
+    @Volatile
+    var problem: String? = null
+        private set
 
     // ── The pipe ─────────────────────────────────────────────────
 
@@ -205,11 +248,17 @@ object FirefoxVpnCloudflare {
         }
         if (!opened.await(25, TimeUnit.SECONDS)) {
             socket.cancel()
+            problem = "the Worker did not answer"
             AppLog.error(AppLog.Section.Connection, "Cloudflare relay did not answer")
             return null
         }
         if (failure != null) {
             val message = failure.orEmpty()
+            problem = if (message.contains("401")) {
+                "the Worker holds another phone's key"
+            } else {
+                message
+            }
             AppLog.error(
                 AppLog.Section.Connection,
                 if (message.contains("401")) {
@@ -223,18 +272,18 @@ object FirefoxVpnCloudflare {
         }
         if (!answered.await(45, TimeUnit.SECONDS)) {
             socket.cancel()
+            problem = "the relay did not answer in time"
             AppLog.error(AppLog.Section.Connection, "Cloudflare relay: the proxy did not answer in time")
             return null
         }
         val verdict = answer.orEmpty()
         if (!verdict.startsWith("OK")) {
-            AppLog.error(
-                AppLog.Section.Connection,
-                "Cloudflare relay: the proxy refused " + verdict.removePrefix("ERR ").ifEmpty { "without a word" }
-            )
+            problem = verdict.removePrefix("ERR ").ifEmpty { "the relay refused without a word" }
+            AppLog.error(AppLog.Section.Connection, "Cloudflare relay: the proxy refused $problem")
             socket.cancel()
             return null
         }
+        problem = null
         AppLog.info(AppLog.Section.Connection, "Cloudflare relay carries the tunnel to $target")
         return Tunnel(socket, Incoming(room), Outgoing(socket))
     }
@@ -343,14 +392,50 @@ object FirefoxVpnCloudflare {
           return -1;
         }
 
+        // Opens the TLS connection to Mozilla's proxy, sends the CONNECT and
+        // reads its answer. Used both by the pipe and by the plain check, so
+        // what the phone is told was really asked of the proxy.
+        async function openProxy(host, port, target, token, hostHeader, withAgent) {
+          const socket = connect({ hostname: host, port: port }, { secureTransport: 'on' });
+          const writer = socket.writable.getWriter();
+          const reader = socket.readable.getReader();
+          let head =
+            'CONNECT ' + target + ' HTTP/1.1\r\n' +
+            'Host: ' + hostHeader + '\r\n' +
+            'Proxy-Authorization: Bearer ' + token + '\r\n';
+          if (withAgent) {
+            head += 'User-Agent: ' + UA + '\r\n';
+          }
+          head += '\r\n';
+          await writer.write(new TextEncoder().encode(head));
+          let buffer = new Uint8Array(0);
+          let end = -1;
+          while (end < 0) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              throw new Error('the proxy closed the connection');
+            }
+            buffer = joinBytes(buffer, new Uint8Array(chunk.value));
+            end = endOfHead(buffer);
+            if (end < 0 && buffer.length > 32768) {
+              throw new Error('the proxy answer is too long');
+            }
+          }
+          return {
+            socket: socket,
+            writer: writer,
+            reader: reader,
+            buffer: buffer,
+            end: end,
+            answer: new TextDecoder().decode(buffer.slice(0, end)),
+          };
+        }
+
         export default {
           async fetch(request) {
             const url = new URL(request.url);
             if (url.searchParams.get('k') !== KEY) {
               return new Response('another phone key', { status: 401 });
-            }
-            if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') {
-              return new Response('relay is up', { status: 200 });
             }
             const host = url.searchParams.get('h');
             const port = parseInt(url.searchParams.get('p') || '0', 10);
@@ -359,7 +444,29 @@ object FirefoxVpnCloudflare {
             const hostHeader = url.searchParams.get('hh') || target;
             const withAgent = url.searchParams.get('u') === '1';
             if (!host || !port || !target || !token) {
-              return new Response('bad request', { status: 400 });
+              return new Response('relay is up', { status: 200 });
+            }
+
+            // A plain visit with an address and a pass asks for a real tunnel:
+            // the answer is what Mozilla's proxy said, word for word, so the
+            // phone is told the truth instead of only 'the relay is there'.
+            if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket' &&
+                url.searchParams.get('probe') === '1') {
+              try {
+                const first = await openProxy(host, port, target, token, hostHeader, withAgent);
+                try { first.socket.close(); } catch (e) {}
+                if (first.answer.indexOf(' 200') < 0) {
+                  return new Response('ERR ' + first.answer.split('\r\n')[0], { status: 200 });
+                }
+                return new Response('OK ' + first.answer.split('\r\n')[0], { status: 200 });
+              } catch (e) {
+                const reason = e && e.message ? e.message : 'cannot connect';
+                return new Response('ERR ' + reason, { status: 200 });
+              }
+            }
+
+            if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') {
+              return new Response('relay is up', { status: 200 });
             }
 
             const pair = new WebSocketPair();

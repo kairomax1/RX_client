@@ -63,83 +63,76 @@ object FirefoxVpnManager {
     }
 
     /**
-     * Connects to the Firefox VPN: gets a ProxyPass and returns connection info
-     * that can be used to build an Xray config.
+     * Fetches the pass Mozilla issues for this account. The pass is what the
+     * proxy is asked with, and every location takes the same one.
      */
+    suspend fun fetchPass(
+        context: Context,
+        account: FirefoxVpnStore.StoredAccount
+    ): FirefoxVpnGuardian.ProxyPass? = withContext(Dispatchers.IO) {
+        val accessToken = ensureAccessToken(context, account) ?: return@withContext null
+        val passResult = FirefoxVpnGuardian.fetchProxyPass(accessToken)
+        when (passResult) {
+            is FirefoxVpnGuardian.PassResult.Success -> passResult.pass
+            is FirefoxVpnGuardian.PassResult.Error -> {
+                if (passResult.statusCode != 403) return@withContext null
+                FirefoxVpnGuardian.activate(accessToken)
+                val retry = FirefoxVpnGuardian.fetchProxyPass(accessToken)
+                when (retry) {
+                    is FirefoxVpnGuardian.PassResult.Success -> retry.pass
+                    is FirefoxVpnGuardian.PassResult.Error -> null
+                }
+            }
+        }
+    }
+
     suspend fun connect(
         context: Context,
         account: FirefoxVpnStore.StoredAccount,
         countryCode: String?
     ): ConnectResult = withContext(Dispatchers.IO) {
-        // 1. Ensure valid access token
-        val accessToken = ensureAccessToken(context, account)
-            ?: return@withContext ConnectResult.Error("Token expired, please sign in again")
+        val pass = fetchPass(context, account)
+            ?: return@withContext ConnectResult.Error("no-pass")
+        connectWithPass(context, account, pass, countryCode)
+    }
 
-        // 2. Get ProxyPass from Guardian
-        val passResult = FirefoxVpnGuardian.fetchProxyPass(accessToken)
-        val pass = when (passResult) {
-            is FirefoxVpnGuardian.PassResult.Success -> passResult.pass
-            is FirefoxVpnGuardian.PassResult.Error -> {
-                // Try activating if not entitled
-                if (passResult.statusCode == 403) {
-                    FirefoxVpnGuardian.activate(accessToken)
-                    val retry = FirefoxVpnGuardian.fetchProxyPass(accessToken)
-                    when (retry) {
-                        is FirefoxVpnGuardian.PassResult.Success -> retry.pass
-                        is FirefoxVpnGuardian.PassResult.Error ->
-                            return@withContext ConnectResult.Error(retry.message)
-                    }
-                } else {
-                    return@withContext ConnectResult.Error(passResult.message)
-                }
-            }
-        }
-
-        // 3. Find the CONNECT endpoint of the chosen location
+    /**
+     * Opens the tunnel with a pass that was already fetched.
+     *
+     * Which address to dial is not written in one place: the server list names
+     * one endpoint per location and the pass names another (Guardian's own
+     * address, which is only a name in the token). Every one of them is tried
+     * once, and the one that takes a tunnel is the one that is used.
+     */
+    suspend fun connectWithPass(
+        context: Context,
+        account: FirefoxVpnStore.StoredAccount,
+        pass: FirefoxVpnGuardian.ProxyPass,
+        countryCode: String?
+    ): ConnectResult = withContext(Dispatchers.IO) {
         val countries = FirefoxVpnServers.fetchServerList()
         val country = countries.firstOrNull { it.code == countryCode }
             ?: FirefoxVpnServers.pickRecommended(countries)
         val countryName = country?.name ?: "Recommended"
 
-        // The ProxyPass names the proxy it is valid for in its audience; a
-        // different host would present a pass that is not meant for it. The
-        // list's own endpoint is only the fallback.
-        val endpoint = FirefoxVpnServers.connectEndpoint(country)
-        val serverHost = pass.proxyHost.ifEmpty { endpoint?.connectHost.orEmpty() }
-        val serverPort = if (pass.proxyHost.isNotEmpty()) pass.proxyPort else endpoint?.tunnelPort ?: 443
-        if (endpoint != null && endpoint.scheme != "https") {
-            return@withContext ConnectResult.Error("This location only offers ${endpoint.scheme}, which the app cannot use yet")
-        }
-        if (serverHost.isEmpty()) {
-            return@withContext ConnectResult.Error("No proxy address was named for ${countryName.ifEmpty { "this location" }}")
+        val endpoints = endpointsOf(countries, country, pass)
+        if (endpoints.isEmpty()) {
+            return@withContext ConnectResult.Error("no-address")
         }
 
-        // 4. The core cannot send a Bearer header itself; the relay in front of
+        // The core cannot send a Bearer header itself; the relay in front of
         // it does, and the core talks plain HTTP to the loopback. When the
         // proxy cannot be reached from this phone, the pipe is carried by the
         // user's own Cloudflare Worker instead.
         FirefoxVpnRelay.attachContext(context)
         val relayAddress = FirefoxVpnCloudflare.relayAddressOrNull(context)
-
-        // Which CONNECT the proxy takes is not written anywhere; ask it once and
-        // keep the answer, so a future build does not have to guess.
-        if (relayAddress == null && shapeName == null) {
-            val (found, report) = FirefoxVpnRelay.probeShapes(serverHost, serverPort, pass.token)
-            AppLog.info(AppLog.Section.Connection, "Firefox VPN proxy shapes: $report")
-            shapeName = found
-        }
-        val localPort = FirefoxVpnRelay.start(
-            serverHost,
-            serverPort,
-            pass.token,
-            relayAddress,
-            shapeName
-        )
+        val localPort = FirefoxVpnRelay.start(endpoints, pass.token, relayAddress)
+        val chosen = FirefoxVpnRelay.endpoint() ?: endpoints.first()
 
         ConnectResult.Success(
             ConnectionInfo(
-                proxyHost = serverHost,
-                proxyPort = serverPort,
+                proxyHost = chosen.host,
+                proxyPort = chosen.port,
                 proxyPassToken = pass.token,
                 countryName = countryName,
                 quotaRemaining = pass.quotaRemaining,
@@ -149,9 +142,34 @@ object FirefoxVpnManager {
         )
     }
 
-    /** The CONNECT shape the proxy took in this run; learned by asking once. */
-    @Volatile
-    private var shapeName: String? = null
+    /**
+     * Every address worth dialling for [country]: its own servers first, then
+     * the recommended location's, and last the address named in the pass.
+     */
+    private fun endpointsOf(
+        countries: List<FirefoxVpnServers.Country>,
+        country: FirefoxVpnServers.Country?,
+        pass: FirefoxVpnGuardian.ProxyPass
+    ): List<FirefoxVpnRelay.Endpoint> {
+        val list = mutableListOf<FirefoxVpnRelay.Endpoint>()
+        fun add(host: String, port: Int, label: String) {
+            if (host.isEmpty() || port <= 0) return
+            if (list.any { it.host == host && it.port == port }) return
+            list.add(FirefoxVpnRelay.Endpoint(host, port, label))
+        }
+        fun addCountry(item: FirefoxVpnServers.Country?, limit: Int) {
+            if (item == null) return
+            FirefoxVpnServers.serversFor(item)
+                .filter { server -> server.connectHost.isNotEmpty() && server.scheme == "https" }
+                .take(limit)
+                .forEach { server -> add(server.connectHost, server.tunnelPort, item.name) }
+        }
+        addCountry(country, 2)
+        val recommended = FirefoxVpnServers.pickRecommended(countries)
+        if (recommended != null && recommended.code != country?.code) addCountry(recommended, 1)
+        add(pass.proxyHost, pass.proxyPort, "the pass")
+        return list.take(4)
+    }
 
     /** Creates a new account ID. */
     fun newAccountId(): String = UUID.randomUUID().toString()
