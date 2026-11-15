@@ -896,4 +896,22 @@
     <string name="firefox_vpn_step_three">۳. «وصل شو» را بزن و از برنامه بیرون بیا؛ VPN روشن است.</string>
     <string name="firefox_vpn_need_account">اول حساب اضافه کن؛ بعد از آن لیست کشورها می‌آید.</string>
     <string name="firefox_vpn_no_mail_note">کد نمی‌آید؟ از صفحهٔ خود موزیلا وارد شو؛ آن‌جا کدی لازم نیست.</string>
+    <string name="firefox_vpn_web_title">ورود به موزیلا</string>
+    <string name="firefox_vpn_web_reload">بازخوانی</string>
+    <string name="firefox_vpn_web_close">بستن</string>
+    <string name="firefox_vpn_local_accounts">حساب‌های گوشی</string>
+    <string name="firefox_vpn_no_local_accounts">هیچ حساب ایمیلی روی این گوشی نیست. آدرس را خودت در صفحهٔ موزیلا بنویس.</string>
+    <string name="firefox_vpn_relay_title">رلهٔ کلادفلر</string>
+    <string name="firefox_vpn_relay_intro">فقط وقتی گوشی اصلاً به پروکسی موزیلا نمی‌رسد. یک Worker کوچک و مجانی در حساب کلادفلر خودت، اتصال را به‌جای گوشی برمی‌دارد.</string>
+    <string name="firefox_vpn_relay_step1">۱. در dash.cloudflare.com یک حساب مجانی بساز، بعد Workers and Pages، بعد Create، بعد Worker و Deploy را بزن.</string>
+    <string name="firefox_vpn_relay_step2">۲. Edit code را بزن، متن قبلی را پاک کن، کد پایین را بچسبان و دوباره Deploy را بزن.</string>
+    <string name="firefox_vpn_relay_step3">۳. آدرس Worker را (چیزی.workers.dev) در کادر همین‌جا بگذار و این گزینه را روشن کن.</string>
+    <string name="firefox_vpn_relay_show_code">کد رلهٔ من را نشان بده</string>
+    <string name="firefox_vpn_relay_code_title">کد رلهٔ مخصوص خودت</string>
+    <string name="firefox_vpn_relay_code_note">این کد یک کلید دارد که فقط روی همین گوشی ساخته شده؛ پس کسی جز خودت نمی‌تواند از رله‌ات استفاده کند. کد را به کسی نده.</string>
+    <string name="firefox_vpn_relay_copy">کپی</string>
+    <string name="firefox_vpn_relay_copied">کپی شد</string>
+    <string name="firefox_vpn_relay_address">آدرس Worker</string>
+    <string name="firefox_vpn_relay_save">ذخیره</string>
+    <string name="firefox_vpn_relay_active">رله روشن است</string>
 </resources>

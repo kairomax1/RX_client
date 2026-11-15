@@ -923,4 +923,22 @@
     <string name="firefox_vpn_step_three">3. Press Connect and leave the app; the VPN is on.</string>
     <string name="firefox_vpn_need_account">Add an account first; the locations appear after that.</string>
     <string name="firefox_vpn_no_mail_note">No code arrives? Sign in on Mozilla\'s own page instead; it sends no code.</string>
+    <string name="firefox_vpn_web_title">Mozilla sign-in</string>
+    <string name="firefox_vpn_web_reload">Reload</string>
+    <string name="firefox_vpn_web_close">Close</string>
+    <string name="firefox_vpn_local_accounts">Phone accounts</string>
+    <string name="firefox_vpn_no_local_accounts">No mail account is stored on this phone. Type the address in Mozilla\'s page yourself.</string>
+    <string name="firefox_vpn_relay_title">Cloudflare relay</string>
+    <string name="firefox_vpn_relay_intro">Only if the phone cannot reach Mozilla\'s proxy at all. A small free Worker on your own Cloudflare account carries the connection instead.</string>
+    <string name="firefox_vpn_relay_step1">1. Make a free account on dash.cloudflare.com, then Workers and Pages, then Create, then Worker, and press Deploy.</string>
+    <string name="firefox_vpn_relay_step2">2. Press Edit code, delete what is there, paste the code below, and press Deploy again.</string>
+    <string name="firefox_vpn_relay_step3">3. Copy the Worker address (something.workers.dev) into the field here and turn this on.</string>
+    <string name="firefox_vpn_relay_show_code">Show my relay code</string>
+    <string name="firefox_vpn_relay_code_title">Your own relay code</string>
+    <string name="firefox_vpn_relay_code_note">This code carries a key made on this phone alone, so nobody else can use your relay. Do not share it.</string>
+    <string name="firefox_vpn_relay_copy">Copy</string>
+    <string name="firefox_vpn_relay_copied">Copied</string>
+    <string name="firefox_vpn_relay_address">Worker address</string>
+    <string name="firefox_vpn_relay_save">Save</string>
+    <string name="firefox_vpn_relay_active">The relay is on</string>
 </resources>

@@ -27,6 +27,16 @@ import kotlin.concurrent.thread
 object FirefoxVpnRelay {
 
     private const val CONNECT_TIMEOUT_MILLIS = 15_000
+    private const val FIREFOX_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
+
+    /** Only the Worker's pipe needs it, to read this install's key. */
+    @Volatile
+    private var appContext: android.content.Context? = null
+
+    fun attachContext(context: android.content.Context) {
+        appContext = context.applicationContext
+    }
     private const val MAX_HEADER_BYTES = 16 * 1024
 
     private var serverSocket: ServerSocket? = null
@@ -40,13 +50,21 @@ object FirefoxVpnRelay {
     private var proxyPort: Int = 443
     private var bearerToken: String = ""
 
-    /** Starts the relay and returns the loopback port the core should use. */
+    /** When set, the pipe to the proxy goes through this Cloudflare Worker. */
+    private var cloudflareAddress: String? = null
+
+    /**
+     * Starts the relay and returns the loopback port the core should use.
+     * [cloudflareAddress] is the user's own Worker; without it the proxy is
+     * dialled directly.
+     */
     @Synchronized
-    fun start(host: String, port: Int, token: String): Int {
+    fun start(host: String, port: Int, token: String, cloudflareAddress: String? = null): Int {
         stop()
         proxyHost = host
         proxyPort = port
         bearerToken = token
+        this.cloudflareAddress = cloudflareAddress
 
         val server = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         serverSocket = server
@@ -75,6 +93,7 @@ object FirefoxVpnRelay {
         }
         serverSocket = null
         acceptThread = null
+        cloudflareAddress = null
         for (socket in openSockets) {
             try {
                 socket.close()
@@ -85,7 +104,7 @@ object FirefoxVpnRelay {
     }
 
     private fun handle(client: Socket) {
-        var upstream: Socket? = null
+        var upstream: Tunnel? = null
         try {
             client.soTimeout = CONNECT_TIMEOUT_MILLIS
             val fromClient = BufferedInputStream(client.getInputStream())
@@ -116,15 +135,15 @@ object FirefoxVpnRelay {
                 toClient.flush()
             } else {
                 // The same request head travels inside the tunnel.
-                upstream.getOutputStream().apply {
+                upstream.output.apply {
                     write(head.toByteArray(Charsets.ISO_8859_1))
                     flush()
                 }
             }
 
             client.soTimeout = 0
-            pump(fromClient, upstream.getOutputStream())
-            pump(upstream.getInputStream(), toClient)
+            pump(fromClient, upstream.output)
+            pump(upstream.input, toClient)
         } catch (e: Exception) {
             AppLog.error(AppLog.Section.Connection, "Firefox VPN relay: ${e.message ?: "tunnel closed"}")
         } finally {
@@ -140,8 +159,68 @@ object FirefoxVpnRelay {
         }
     }
 
-    /** Opens the TLS connection to Fastly and asks it for the tunnel. */
-    private fun openTunnel(target: String): Socket? {
+    /** A pipe that carries bytes to the proxy, however it was opened. */
+    internal interface Tunnel {
+        val input: InputStream
+        val output: OutputStream
+        fun close()
+    }
+
+    private class SocketTunnel(private val socket: Socket) : Tunnel {
+        override val input: InputStream get() = socket.getInputStream()
+        override val output: OutputStream get() = socket.getOutputStream()
+        override fun close() {
+            try {
+                socket.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** The CONNECT Firefox itself sends; the proxy answers 400 to anything else. */
+    internal fun connectRequest(target: String, token: String): String = buildString {
+        append("CONNECT $target HTTP/1.1\r\n")
+        append("Host: $target\r\n")
+        append("Proxy-Authorization: Bearer $token\r\n")
+        append("User-Agent: $FIREFOX_UA\r\n")
+        append("\r\n")
+    }
+
+    /** Opens the connection to Fastly and asks it for the tunnel. */
+    private fun openTunnel(target: String): Tunnel? {
+        val request = connectRequest(target, bearerToken)
+        val tunnel = openPipe() ?: return null
+        val accepted = try {
+            tunnel.output.write(request.toByteArray(Charsets.ISO_8859_1))
+            tunnel.output.flush()
+            val statusLine = readLine(BufferedInputStream(tunnel.input))
+            statusLine != null && statusLine.contains(" 200")
+        } catch (e: Exception) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN tunnel: ${e.message ?: "closed"}")
+            false
+        }
+        if (!accepted) {
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Firefox VPN proxy refused $target" + if (cloudflareAddress != null) " (through the Cloudflare relay)" else ""
+            )
+            tunnel.close()
+            return null
+        }
+        return tunnel
+    }
+
+    /** The proxy is dialled directly, or through the user's Cloudflare Worker. */
+    private fun openPipe(): Tunnel? {
+        val viaCloudflare = cloudflareAddress
+        if (viaCloudflare != null) {
+            return FirefoxVpnCloudflare.openTunnel(
+                address = viaCloudflare,
+                context = appContext ?: return null,
+                host = proxyHost,
+                port = proxyPort
+            )
+        }
         val address = InetSocketAddress(proxyHost, proxyPort)
         val raw = Socket()
         raw.connect(address, CONNECT_TIMEOUT_MILLIS)
@@ -153,33 +232,7 @@ object FirefoxVpnRelay {
         parameters.serverNames = listOf(SNIHostName(proxyHost))
         tls.sslParameters = parameters
         tls.startHandshake()
-
-        // Firefox's own CONNECT: Host names the destination, not the proxy, and
-        // nothing else but the bearer travels with it. The proxy answers 400 to
-        // anything else.
-        val request = buildString {
-            append("CONNECT $target HTTP/1.1\r\n")
-            append("Host: $target\r\n")
-            append("Proxy-Authorization: Bearer $bearerToken\r\n")
-            append("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0\r\n")
-            append("\r\n")
-        }
-        tls.outputStream.apply {
-            write(request.toByteArray(Charsets.ISO_8859_1))
-            flush()
-        }
-
-        val statusLine = readLine(BufferedInputStream(tls.inputStream))
-        val accepted = statusLine != null && statusLine.contains(" 200")
-        if (!accepted) {
-            AppLog.error(AppLog.Section.Connection, "Firefox VPN proxy refused $target: ${statusLine ?: "no answer"}")
-            try {
-                tls.close()
-            } catch (_: Exception) {
-            }
-            return null
-        }
-        return tls
+        return SocketTunnel(tls)
     }
 
     internal fun readHead(input: InputStream): String? {

@@ -115,8 +115,12 @@ object FirefoxVpnManager {
         }
 
         // 4. The core cannot send a Bearer header itself; the relay in front of
-        // it does, and the core talks plain HTTP to the loopback.
-        val localPort = FirefoxVpnRelay.start(serverHost, serverPort, pass.token)
+        // it does, and the core talks plain HTTP to the loopback. When the
+        // proxy cannot be reached from this phone, the pipe is carried by the
+        // user's own Cloudflare Worker instead.
+        FirefoxVpnRelay.attachContext(context)
+        val relayAddress = FirefoxVpnCloudflare.relayAddressOrNull(context)
+        val localPort = FirefoxVpnRelay.start(serverHost, serverPort, pass.token, relayAddress)
 
         ConnectResult.Success(
             ConnectionInfo(
