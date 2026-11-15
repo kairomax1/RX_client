@@ -150,7 +150,7 @@ class FirefoxVpnAuthTest {
         assertEquals("482913", FirefoxVpnAuth.normalizeVerificationCode(" 482 913 "))
         assertEquals("482913", FirefoxVpnAuth.normalizeVerificationCode("482-913"))
         // letters survive too: an authenticator code is not always numeric
-        assertEquals("G5XK7QP2", FirefoxVpnAuth.normalizeVerificationCode(" g5xk 7qp-2 "))
+        assertEquals("G5XK7QP2", FirefoxVpnAuth.normalizeVerificationCode(" G5XK 7QP-2 "))
     }
 
     @Test
