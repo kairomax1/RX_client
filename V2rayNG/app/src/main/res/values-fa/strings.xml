@@ -851,4 +851,22 @@
     <string name="dns_scan_opens">باز می‌کند: %1$s</string>
     <string name="dns_scan_other">تست برای چیز دیگر</string>
     <string name="dns_scan_partial">هیچ DNSی Xbox و بازی انتخابی را با هم باز نکرد. این‌ها فقط همان چیزی را باز می‌کنند که زیرشان نوشته شده.</string>
+    <string name="firefox_vpn_title">فایرفاکس VPN</string>
+    <string name="firefox_vpn_description">از VPN رایگان داخلی فایرفاکس موزیلا (۵۰ گیگ در ماه) با حساب Firefox خود استفاده کن. ترافیک از سرورهای موزیلا عبور می‌کند.</string>
+    <string name="firefox_vpn_accounts">حساب‌ها</string>
+    <string name="firefox_vpn_no_accounts">هنوز حسابی اضافه نشده.</string>
+    <string name="firefox_vpn_add_account">افزودن حساب Firefox</string>
+    <string name="firefox_vpn_country">موقعیت</string>
+    <string name="firefox_vpn_connect">وصل شو</string>
+    <string name="firefox_vpn_disconnect">قطع کن</string>
+    <string name="firefox_vpn_connected">وصل شده</string>
+    <string name="firefox_vpn_active">فعال</string>
+    <string name="firefox_vpn_email">ایمیل</string>
+    <string name="firefox_vpn_password">رمز عبور</string>
+    <string name="firefox_vpn_code">کد تأیید</string>
+    <string name="firefox_vpn_sign_in">ورود</string>
+    <string name="firefox_vpn_verify">تأیید</string>
+    <string name="firefox_vpn_enter_email_code">کدی که به %1$s ارسال شده را وارد کن</string>
+    <string name="firefox_vpn_enter_totp">کد احراز هویت خود را وارد کن</string>
+    <string name="firefox_vpn_quota">مصرف %.1f گیگ از %.1f گیگ</string>
 </resources>

@@ -148,6 +148,9 @@
             android:name=".ui.xboxdns.XboxDnsActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.firefoxvpn.FirefoxVpnActivity"
+            android:exported="false" />
+        <activity
             android:name=".ui.routing.RoutingSettingActivity"
             android:exported="false" />
         <activity
