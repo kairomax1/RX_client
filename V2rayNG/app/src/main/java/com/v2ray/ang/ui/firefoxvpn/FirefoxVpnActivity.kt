@@ -561,6 +561,53 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         AppLog.info(AppLog.Section.Connection, "Firefox VPN disconnected")
     }
 
+    // ── The way out through Cloudflare ───────────────────────────
+
+    fun setRelayEnabled(enabled: Boolean) {
+        FirefoxVpnCloudflare.setEnabled(getApplication(), enabled)
+        _state.update { it.copy(relayEnabled = enabled) }
+        AppLog.info(AppLog.Section.Connection, "Cloudflare relay " + if (enabled) "on" else "off")
+    }
+
+    fun setRelayAddress(address: String) {
+        _state.update { it.copy(relayAddress = address) }
+    }
+
+    fun saveRelayAddress() {
+        FirefoxVpnCloudflare.setAddress(getApplication(), _state.value.relayAddress)
+        _state.update {
+            it.copy(
+                relayAddress = FirefoxVpnCloudflare.address(getApplication()),
+                relayVerdict = null
+            )
+        }
+    }
+
+    /** Asks the deployed Worker whether it knows this phone's key. */
+    fun checkRelay() {
+        val address = _state.value.relayAddress
+        if (address.isBlank()) {
+            _state.update { it.copy(relayVerdict = "missing") }
+            return
+        }
+        viewModelScope.launch {
+            val verdict = withContext(Dispatchers.IO) {
+                FirefoxVpnCloudflare.check(address, getApplication())
+            }
+            AppLog.info(AppLog.Section.Connection, "Cloudflare relay check: $verdict")
+            _state.update { it.copy(relayVerdict = verdict) }
+        }
+    }
+
+    /** The whole Worker text, with this phone's own key already in it. */
+    fun showRelayCode() {
+        _state.update { it.copy(relayCode = FirefoxVpnCloudflare.workerCode(getApplication())) }
+    }
+
+    fun hideRelayCode() {
+        _state.update { it.copy(relayCode = null) }
+    }
+
     fun clearMessages() {
         _state.update { it.copy(error = null, success = null) }
     }
