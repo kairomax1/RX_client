@@ -123,4 +123,24 @@ class FirefoxVpnAuthTest {
         assertTrue(FirefoxVpnAuth.isChallengePage("<html>Client Challenge<script src=\"/_fs-ch-1a/x\">"))
         assertTrue(!FirefoxVpnAuth.isChallengePage("<html>Firefox Accounts</html>"))
     }
+
+    /** A task's parameters live under "data"; reading the wrapper instead is what broke sign-in. */
+    @Test
+    fun challengeParametersAreReadFromData() {
+        val challenge = com.google.gson.JsonParser.parseString(
+            """{"ty":"pow","data":{"base":"Zm9v","hash":"abc","hmac":"h","expires":"e"}}"""
+        ).asJsonObject
+        val payload = FirefoxVpnAuth.challengePayload(challenge)
+        assertEquals("Zm9v", payload.get("base").asString)
+        assertEquals("abc", payload.get("hash").asString)
+    }
+
+    @Test
+    fun aPictureCheckCarriesItsPicture() {
+        val challenge = com.google.gson.JsonParser.parseString(
+            """{"ty":"captcha","data":{"image_b64":"data:image/png;base64,iVBORw0KGgo="}}"""
+        ).asJsonObject
+        val payload = FirefoxVpnAuth.challengePayload(challenge)
+        assertTrue(payload.get("image_b64").asString.startsWith("data:image/png"))
+    }
 }

@@ -633,8 +633,8 @@ object FirefoxVpnAuth {
                         return@use
                     }
                     throw FxaException(
-                        "Mozilla's security check refused this request. Open Firefox once on this " +
-                            "network, then try again; if it keeps failing, use another network."
+                        "Mozilla's security check could not be answered. Try again; if it repeats, " +
+                            "switch the network."
                     )
                 }
                 if (response.code >= 500) {
@@ -699,9 +699,16 @@ object FirefoxVpnAuth {
         for (round in 1..MAX_CHALLENGE_ROUNDS) {
             val answers = mutableListOf<com.google.gson.JsonElement>()
             for (challenge in challenges) {
-                val type = challenge.asJsonObject.string("ty").orEmpty()
-                answers.add(answerChallenge(solver, base, prefix, token, type, challenge.asJsonObject))
+                val object0 = challenge.asJsonObject
+                val type = object0.string("ty").orEmpty()
+                // Each task keeps its own parameters under "data": the base and
+                // hash of the proof of work, or the picture of the check.
+                answers.add(answerChallenge(solver, base, prefix, token, type, challengePayload(object0)))
             }
+            AppLog.info(
+                AppLog.Section.Connection,
+                "FxA: answered " + challenges.joinToString(",") { it.asJsonObject.string("ty").orEmpty() }
+            )
 
             val postBack = JsonObject().apply {
                 addProperty("token", token)
@@ -737,6 +744,10 @@ object FirefoxVpnAuth {
         }
         throw FxaException("The challenge did not finish in $MAX_CHALLENGE_ROUNDS rounds")
     }
+
+    /** A challenge task's own parameters, which sit under "data". */
+    internal fun challengePayload(challenge: com.google.gson.JsonObject): com.google.gson.JsonObject =
+        challenge.getAsJsonObject("data") ?: com.google.gson.JsonObject()
 
     private fun answerChallenge(
         solver: OkHttpClient,
