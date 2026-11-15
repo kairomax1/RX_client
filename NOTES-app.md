@@ -459,3 +459,50 @@ Nine items, delivered together.
 - DNS tunnel: not built. Clients exist (anonvector/SlipNet AGPL, dnstt-xyz/dnstt_xyz_app,
   masterking32/MasterDnsVPN) but every one needs a server address + key; no maintained list
   of public servers was found. Needs its own Go/Rust core (~10 MB per ABI).
+
+## Firefox VPN (Mozilla's built-in VPN, unofficial client)
+
+The user asked for the reference project `ppj30088-hash/firefox-spider-vpn`
+(Flutter + Go) to be brought into the app, and accepted the risks after
+being told: Mozilla's terms forbid this use, Mozilla already cut the
+service for Iran once over exactly this pattern, accounts can be banned,
+and Fastly's anti-bot check can refuse sign-in from anything that is not
+Firefox.
+
+What is in the app:
+
+- `handler/FirefoxVpnAuth` — Firefox Accounts. The password is stretched the
+  way Firefox does it: PBKDF2-SHA256 over
+  `identity.mozilla.com/picl/v1/quickStretch:<email>` (1000 rounds), then
+  HKDF into `authPW`. Session calls are signed with Hawk: the id and key come
+  from HKDF over the session token with info
+  `identity.mozilla.com/picl/v1/sessionToken`, the mac is hex over the Hawk
+  header string, and a body is covered by
+  `sha256("hawk.1.payload\n<content-type>\n<body>\n")`. OAuth is the PKCE code
+  grant Firefox uses, with Firefox desktop's client id `5882386c6d801776`.
+  Scrypt is still in the file, only because a test vector pins it; FxA does
+  not use it.
+- `handler/FirefoxVpnGuardian` — `GET /api/v1/fpn/token` gives the ProxyPass
+  JWT; quota comes from the `X-Quota-*` headers; 403 activates the account.
+- `handler/FirefoxVpnServers` — Remote Settings `vpn-serverlist`. The address
+  to connect to is the record's `protocols[name=connect].host/port` (https),
+  not the record's `hostname`.
+- `handler/FirefoxVpnRelay` — the core's own HTTP outbound can only present a
+  username and password, so it cannot send
+  `Proxy-Authorization: Bearer <ProxyPass>`. The core therefore points at this
+  loopback proxy, which opens one TLS connection to the Fastly endpoint per
+  tunnel, sends the CONNECT with the Bearer header, and copies bytes. The
+  target name travels unopened, so the proxy resolves it rather than this
+  phone (the phone's resolver is the thing being avoided).
+- `handler/FirefoxVpnStore` — OAuth tokens in AES-256-GCM under
+  `filesDir/firefox-vpn`; the account's password is never stored.
+- `ui/firefoxvpn/FirefoxVpnActivity` — accounts, locations, connect, quota.
+- Drawer entry "Firefox VPN"; the core is started with the relay's port as an
+  ordinary HTTP config named `firefox-vpn`.
+
+Known limits, said to the user as well: no Fastly challenge solver, so a 406
+from the edge means sign-in cannot pass from the app (the reference project
+solves it with a JavaScript engine and a CAPTCHA); only https CONNECT
+endpoints are used, so a location that offers only MASQUE is refused with a
+message; QUIC/TCP auto-selection and fragment/TLS tuning are not implemented
+because the transport is Xray's, not the reference project's Go core.
