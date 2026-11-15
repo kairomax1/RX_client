@@ -106,16 +106,39 @@ object FirefoxVpnCloudflare {
         }
     }
 
-    /** Opens a Worker pipe to [host]:[port]; null when it does not answer. */
-    fun openTunnel(address: String, context: Context, host: String, port: Int): Tunnel? {
-        val url = webSocketUrl(address, secret(context), host, port) ?: return null
+    /**
+     * Opens a Worker pipe that is already connected to [target].
+     *
+     * The Worker makes the TLS connection to the proxy, sends the CONNECT with
+     * the bearer itself and answers `OK` before carrying anything, so the
+     * relay here only copies bytes. Null when it does not answer.
+     */
+    fun openTunnel(
+        address: String,
+        context: Context,
+        proxyHost: String,
+        proxyPort: Int,
+        target: String,
+        token: String
+    ): Tunnel? {
+        val url = webSocketUrl(address, secret(context), proxyHost, proxyPort, target, token)
+            ?: return null
         val room = LinkedBlockingQueue<ByteArray>()
         val opened = CountDownLatch(1)
+        val answered = CountDownLatch(1)
         var failure: String? = null
+        var answer: String? = null
 
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
                 opened.countDown()
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (answer == null) {
+                    answer = text
+                    answered.countDown()
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
@@ -125,15 +148,18 @@ object FirefoxVpnCloudflare {
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 room.offer(CLOSED)
+                answered.countDown()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 room.offer(CLOSED)
+                answered.countDown()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
                 failure = t.message ?: "the relay closed the pipe"
                 opened.countDown()
+                answered.countDown()
                 room.offer(CLOSED)
             }
         }
@@ -152,13 +178,35 @@ object FirefoxVpnCloudflare {
         }
         if (failure != null) {
             AppLog.error(AppLog.Section.Connection, "Cloudflare relay: $failure")
+            socket.cancel()
             return null
         }
-        AppLog.info(AppLog.Section.Connection, "Cloudflare relay carries the tunnel to $host:$port")
+        if (!answered.await(45, TimeUnit.SECONDS)) {
+            socket.cancel()
+            AppLog.error(AppLog.Section.Connection, "Cloudflare relay: the proxy did not answer in time")
+            return null
+        }
+        val verdict = answer.orEmpty()
+        if (!verdict.startsWith("OK")) {
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Cloudflare relay: the proxy refused " + verdict.removePrefix("ERR ").ifEmpty { "without a word" }
+            )
+            socket.cancel()
+            return null
+        }
+        AppLog.info(AppLog.Section.Connection, "Cloudflare relay carries the tunnel to $target")
         return Tunnel(socket, Incoming(room), Outgoing(socket))
     }
 
-    private fun webSocketUrl(address: String, secret: String, host: String, port: Int): String? {
+    private fun webSocketUrl(
+        address: String,
+        secret: String,
+        proxyHost: String,
+        proxyPort: Int,
+        target: String,
+        token: String
+    ): String? {
         val trimmed = address.trim().trimEnd('/')
         if (trimmed.isEmpty()) return null
         val base = when {
@@ -168,7 +216,12 @@ object FirefoxVpnCloudflare {
             else -> "wss://$trimmed"
         }
         val separator = if (base.contains('?')) '&' else '?'
-        return "$base$separator" + "k=" + secret + "&h=" + host + "&p=" + port
+        return base + separator +
+            "k=" + secret +
+            "&h=" + android.net.Uri.encode(proxyHost) +
+            "&p=" + proxyPort +
+            "&t=" + android.net.Uri.encode(target) +
+            "&a=" + android.net.Uri.encode(token)
     }
 
     private val CLOSED = ByteArray(0)
@@ -216,15 +269,35 @@ object FirefoxVpnCloudflare {
     }
 
     /**
-     * The Worker, ready to paste into Cloudflare's editor. It opens a plain TCP
-     * connection to the address asked for in `h`/`p` and carries every byte.
-     * JS template literals are avoided so the text survives any editor.
+     * The Worker, ready to paste into Cloudflare's editor.
+     *
+     * It makes the TLS connection to the proxy, sends the CONNECT with the
+     * bearer itself, answers `OK` once the proxy agrees, and then carries every
+     * byte in both directions. Doing the TLS there is the point: this phone
+     * cannot upgrade a WebSocket to TLS by itself.
      */
     private val WORKER = """
         import { connect } from 'cloudflare:sockets';
 
         // RX VPN relay - this key belongs to one phone only.
         const KEY = '__KEY__';
+        const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0';
+
+        function joinBytes(first, second) {
+          const merged = new Uint8Array(first.length + second.length);
+          merged.set(first, 0);
+          merged.set(second, first.length);
+          return merged;
+        }
+
+        function endOfHead(bytes) {
+          for (let i = 3; i < bytes.length; i++) {
+            if (bytes[i] === 10 && bytes[i - 1] === 13 && bytes[i - 2] === 10 && bytes[i - 3] === 13) {
+              return i + 1;
+            }
+          }
+          return -1;
+        }
 
         export default {
           async fetch(request) {
@@ -237,43 +310,90 @@ object FirefoxVpnCloudflare {
             }
             const host = url.searchParams.get('h');
             const port = parseInt(url.searchParams.get('p') || '0', 10);
-            if (!host || !port || port === 25) {
-              return new Response('bad target', { status: 400 });
+            const target = url.searchParams.get('t');
+            const token = url.searchParams.get('a');
+            if (!host || !port || !target || !token) {
+              return new Response('bad request', { status: 400 });
             }
+
             const pair = new WebSocketPair();
             const client = pair[0];
             const server = pair[1];
             server.accept();
 
             let socket;
+            let writer;
+            let reader;
             try {
-              socket = connect({ hostname: host, port: port });
-            } catch (e) {
-              return new Response('cannot connect', { status: 502 });
-            }
+              socket = connect({ hostname: host, port: port }, { secureTransport: 'on' });
+              writer = socket.writable.getWriter();
+              reader = socket.readable.getReader();
 
-            const writer = socket.writable.getWriter();
-            server.addEventListener('message', function (event) {
-              if (typeof event.data === 'string') return;
-              writer.write(new Uint8Array(event.data)).catch(function () {});
-            });
-            server.addEventListener('close', function () {
-              try { writer.close(); } catch (e) {}
-            });
+              const head =
+                'CONNECT ' + target + ' HTTP/1.1\r\n' +
+                'Host: ' + target + '\r\n' +
+                'Proxy-Authorization: Bearer ' + token + '\r\n' +
+                'User-Agent: ' + UA + '\r\n\r\n';
+              await writer.write(new TextEncoder().encode(head));
 
-            const reader = socket.readable.getReader();
-            (async function () {
-              try {
-                for (;;) {
-                  const chunk = await reader.read();
-                  if (chunk.done) break;
-                  server.send(chunk.value);
+              let buffer = new Uint8Array(0);
+              let end = -1;
+              while (end < 0) {
+                const chunk = await reader.read();
+                if (chunk.done) {
+                  throw new Error('the proxy closed the connection');
                 }
-              } catch (e) {}
-              try { server.close(1000, 'closed'); } catch (e) {}
-            })();
+                buffer = joinBytes(buffer, new Uint8Array(chunk.value));
+                end = endOfHead(buffer);
+                if (end < 0 && buffer.length > 32768) {
+                  throw new Error('the proxy answer is too long');
+                }
+              }
 
-            return new Response(null, { status: 101, webSocket: client });
+              const answer = new TextDecoder().decode(buffer.slice(0, end));
+              if (answer.indexOf(' 200') < 0) {
+                server.send('ERR ' + answer.split('\r\n')[0]);
+                server.close(1000, 'refused');
+                try { socket.close(); } catch (e) {}
+                return new Response(null, { status: 101, webSocket: client });
+              }
+
+              server.send('OK');
+              const rest = buffer.slice(end);
+              if (rest.length > 0) {
+                server.send(rest);
+              }
+
+              let chain = Promise.resolve();
+              server.addEventListener('message', function (event) {
+                if (typeof event.data === 'string') return;
+                const bytes = new Uint8Array(event.data);
+                chain = chain.then(function () {
+                  return writer.write(bytes);
+                }).catch(function () {});
+              });
+              server.addEventListener('close', function () {
+                try { socket.close(); } catch (e) {}
+              });
+
+              (async function () {
+                try {
+                  for (;;) {
+                    const chunk = await reader.read();
+                    if (chunk.done) break;
+                    server.send(chunk.value);
+                  }
+                } catch (e) {}
+                try { server.close(1000, 'done'); } catch (e) {}
+              })();
+
+              return new Response(null, { status: 101, webSocket: client });
+            } catch (e) {
+              const reason = e && e.message ? e.message : 'cannot connect';
+              try { server.send('ERR ' + reason); } catch (err) {}
+              try { server.close(1000, 'failed'); } catch (err) {}
+              return new Response(null, { status: 101, webSocket: client });
+            }
           }
         };
     """.trimIndent()
