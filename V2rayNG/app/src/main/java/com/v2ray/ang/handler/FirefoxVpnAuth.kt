@@ -35,8 +35,25 @@ object FirefoxVpnAuth {
 
     private const val FXA_BASE = "https://api.accounts.firefox.com/v1"
     private const val FXA_HOST = "api.accounts.firefox.com"
-    private const val OAUTH_TOKEN_URL = "https://oauth.accounts.firefox.com/v1/token"
-    private const val FIREFOX_CLIENT_ID = "5882386c6d801776"
+    /**
+     * The token endpoint that answers. The oauth host and the old
+     * /v1/oauth/token route now serve the edge's empty 406, so both the code
+     * exchange and the refresh go to the account host's OAuth server, whose
+     * form endpoint is the one Firefox for Android itself uses.
+     */
+    private const val OAUTH_TOKEN_URL = "https://api.accounts.firefox.com/v1/token"
+    private const val PROFILE_URL = "https://profile.accounts.firefox.com/v1/profile"
+    const val FIREFOX_CLIENT_ID = "5882386c6d801776"
+
+    /**
+     * Firefox for Android's public client. Its registered redirect is a real
+     * page on accounts.firefox.com, so a browser window can finish the flow and
+     * the app can read the code from the address. Desktop's client hands its
+     * urn: answer only to Firefox's own message channel, which is why the
+     * sign-in page used to end in "something went wrong".
+     */
+    const val BROWSER_CLIENT_ID = "a2270f727f45f648"
+    const val BROWSER_REDIRECT_URI = "https://accounts.firefox.com/oauth/success/a2270f727f45f648"
     private const val OAUTH_SCOPE = "profile https://identity.mozilla.com/apps/vpn"
     private const val PICL = "identity.mozilla.com/picl/v1/"
 
@@ -47,6 +64,7 @@ object FirefoxVpnAuth {
     private const val VERIFICATION_EMAIL_2FA = "email-2fa"
 
     private val JSON = "application/json".toMediaType()
+    private const val FORM = "application/x-www-form-urlencoded"
 
     private val random = SecureRandom()
 
@@ -340,32 +358,41 @@ object FirefoxVpnAuth {
      * page ends by sending the browser to a Mozilla address carrying `code`;
      * the window watches for it.
      */
-    fun startBrowserSignIn(): BrowserSignIn {
+    fun startBrowserSignIn(email: String? = null): BrowserSignIn {
         val verifier = base64Url(randomBytes(32))
         val challenge = base64Url(sha256(verifier.toByteArray(StandardCharsets.US_ASCII)))
         val state = toHex(randomBytes(16))
         val url = "https://accounts.firefox.com/authorization" +
-            "?client_id=$FIREFOX_CLIENT_ID" +
-            "&scope=" + java.net.URLEncoder.encode(OAUTH_SCOPE, "UTF-8") +
+            "?client_id=$BROWSER_CLIENT_ID" +
+            "&scope=" + encode(OAUTH_SCOPE) +
             "&response_type=code" +
-            "&access_type=offline" +
+            "&redirect_uri=" + encode(BROWSER_REDIRECT_URI) +
+            "&state=$state" +
             "&code_challenge=$challenge" +
             "&code_challenge_method=S256" +
-            "&state=$state"
+            "&access_type=offline" +
+            (if (email.isNullOrBlank()) "" else "&email=" + encode(email))
         return BrowserSignIn(url, verifier, state)
     }
+
+    private fun encode(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+    private fun form(vararg fields: Pair<String, String>): String =
+        fields.joinToString("&") { (name, value) -> encode(name) + "=" + encode(value) }
 
     /** Redeems the code the browser came back with. */
     suspend fun finishBrowserSignIn(code: String, verifier: String): TokenResult =
         withContext(Dispatchers.IO) {
             try {
-                val body = JsonObject().apply {
-                    addProperty("client_id", FIREFOX_CLIENT_ID)
-                    addProperty("grant_type", "authorization_code")
-                    addProperty("code", code)
-                    addProperty("code_verifier", verifier)
-                }.toString()
-                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT))
+                val body = form(
+                    "client_id" to BROWSER_CLIENT_ID,
+                    "grant_type" to "authorization_code",
+                    "code" to code,
+                    "code_verifier" to verifier,
+                    "redirect_uri" to BROWSER_REDIRECT_URI
+                )
+                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT, FORM))
             } catch (e: FxaException) {
                 TokenResult.Error(e.message2)
             } catch (e: Exception) {
@@ -424,15 +451,17 @@ object FirefoxVpnAuth {
         }
 
     /** Renews an access token without asking for the password again. */
-    suspend fun refreshOAuth(refreshToken: String): TokenResult =
+    suspend fun refreshOAuth(refreshToken: String, clientId: String = BROWSER_CLIENT_ID): TokenResult =
         withContext(Dispatchers.IO) {
             try {
-                val body = JsonObject().apply {
-                    addProperty("client_id", FIREFOX_CLIENT_ID)
-                    addProperty("grant_type", "refresh_token")
-                    addProperty("refresh_token", refreshToken)
-                }.toString()
-                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT))
+                // A refresh token belongs to the client that was issued it.
+                val body = form(
+                    "client_id" to clientId.ifEmpty { BROWSER_CLIENT_ID },
+                    "grant_type" to "refresh_token",
+                    "refresh_token" to refreshToken,
+                    "scope" to OAUTH_SCOPE
+                )
+                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT, FORM))
             } catch (e: FxaException) {
                 TokenResult.Error(e.message2)
             } catch (e: Exception) {
@@ -475,7 +504,7 @@ object FirefoxVpnAuth {
         try {
             val response = client.newCall(
                 Request.Builder()
-                    .url("$FXA_BASE/profile")
+                    .url(PROFILE_URL)
                     .header("Authorization", "Bearer $accessToken")
                     .header("Accept", "application/json")
                     .header("User-Agent", FIREFOX_UA)

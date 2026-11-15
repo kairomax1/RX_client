@@ -28,7 +28,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.AppLog
-import org.json.JSONObject
 
 /**
  * Mozilla's own sign-in page inside the app.
@@ -38,15 +37,15 @@ import org.json.JSONObject
  * browser. The page finishes by sending the window to a Mozilla address that
  * carries `code`; that code is what the app redeems for its tokens.
  *
- * Google's own sign-in refuses to run inside another app's window and shows a
- * warning instead, so those addresses are stopped here and the phone's own
- * accounts are offered: the address is typed into Mozilla's page, and the
- * password stays with Mozilla.
+ * Mozilla's page asks only for an address and Mozilla's own password, so the
+ * phone's accounts are offered first and the chosen address travels in the
+ * page's own address bar: no Google page is involved, and the password stays
+ * where Mozilla types it.
  */
 class FirefoxVpnWebSignInActivity : AppCompatActivity() {
 
     private var expectedState: String = ""
-    private var accountsOffered = false
+    private var startUrl: String = ""
     private lateinit var webView: WebView
     private lateinit var bar: ProgressBar
 
@@ -55,7 +54,7 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        val startUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
+        startUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
         expectedState = intent.getStringExtra(EXTRA_STATE).orEmpty()
         if (startUrl.isEmpty()) {
             setResult(RESULT_CANCELED)
@@ -123,9 +122,7 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                val url = request.url.toString()
-                if (catchCode(url)) return true
-                return leaveForAccounts(url)
+                return catchCode(request.url.toString())
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
@@ -133,14 +130,12 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
                     view.stopLoading()
                 }
             }
-
-            override fun onPageFinished(view: WebView, url: String?) {
-                offerAccountsOnce(url)
-            }
         }
 
         AppLog.info(AppLog.Section.Connection, "FxA: opening Mozilla's sign-in page in the app")
-        webView.loadUrl(startUrl)
+        // Mozilla only needs an address and its own password, so the phone's
+        // own mail accounts are offered first: no Google page is involved.
+        if (!chooseLocalAccount()) webView.loadUrl(startUrl)
     }
 
     // ── The strip at the top ─────────────────────────────────────
@@ -194,23 +189,6 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
 
     // ── Google's addresses, and the phone's own accounts ─────────
 
-    /**
-     * Google will not sign in from inside another app and answers with a
-     * warning, so the window is kept on Mozilla's page and the address is
-     * taken from the accounts already on the phone instead.
-     */
-    private fun leaveForAccounts(url: String): Boolean {
-        val host = runCatching { android.net.Uri.parse(url).host.orEmpty() }.getOrDefault("")
-        val isGoogleSignIn = host == "accounts.google.com" ||
-            host == "accounts.youtube.com" ||
-            (host.endsWith(".google.com") && url.contains("/signin")) ||
-            (host.endsWith(".google.com") && url.contains("/o/oauth2"))
-        if (!isGoogleSignIn) return false
-        AppLog.info(AppLog.Section.Connection, "FxA: Google's own sign-in was skipped; using the phone's accounts")
-        chooseLocalAccount()
-        return true
-    }
-
     private fun localAccounts(): List<String> {
         val manager = AccountManager.get(this)
         val found = mutableListOf<String>()
@@ -238,42 +216,66 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
     }
 
     /**
-     * On Mozilla's page the accounts on this phone are offered straight away,
-     * once, so the address does not have to be typed.
+     * Asks the system for one of the phone's accounts. The system's own picker
+     * shows every account even when this app is not allowed to list them.
+     * Returns false when there is nothing to ask, so the page is loaded plainly.
      */
-    private fun offerAccountsOnce(url: String?) {
-        if (accountsOffered) return
-        val host = runCatching { android.net.Uri.parse(url.orEmpty()).host.orEmpty() }.getOrDefault("")
-        if (host != "accounts.firefox.com") return
-        if (localAccounts().isEmpty()) return
-        accountsOffered = true
-        webView.postDelayed({ chooseLocalAccount() }, 700)
-    }
-
-    private fun chooseLocalAccount() {
+    private fun chooseLocalAccount(): Boolean {
+        val systemPicker = try {
+            AccountManager.newChooseAccountIntent(
+                null,
+                null,
+                arrayOf("com.google"),
+                null,
+                null,
+                null,
+                null
+            )
+        } catch (_: Exception) {
+            null
+        }
+        if (systemPicker != null) {
+            try {
+                startActivityForResult(systemPicker, REQUEST_ACCOUNT)
+                return true
+            } catch (_: Exception) {
+                // Fall through to the plain list, then to the plain page.
+            }
+        }
         val accounts = localAccounts()
         if (accounts.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setMessage(getString(R.string.firefox_vpn_no_local_accounts))
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-            return
+            AppLog.info(AppLog.Section.Connection, "FxA: no account on this phone; the address is typed on Mozilla's page")
+            return false
         }
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.firefox_vpn_local_accounts))
             .setItems(accounts.toTypedArray()) { dialog, which ->
                 dialog.dismiss()
-                fillAddress(accounts[which])
+                loadWithAddress(accounts[which])
             }
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(android.R.string.cancel) { _, _ -> webView.loadUrl(startUrl) }
             .show()
+        return true
     }
 
-    /** Types the chosen address into Mozilla's page, which then asks its password. */
-    private fun fillAddress(email: String) {
-        val quoted = JSONObject.quote(email)
-        webView.evaluateJavascript(FILL_SCRIPT.replace("__EMAIL__", quoted), null)
-        AppLog.info(AppLog.Section.Connection, "FxA: the phone's account was put into Mozilla's page")
+    /** Loads Mozilla's page with that address already in the form. */
+    private fun loadWithAddress(email: String) {
+        val separator = if (startUrl.contains('?')) '&' else '?'
+        val url = startUrl + separator + "email=" +
+            java.net.URLEncoder.encode(email, "UTF-8").replace("+", "%20")
+        AppLog.info(AppLog.Section.Connection, "FxA: Mozilla's page opens with the phone's account ready")
+        webView.loadUrl(url)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_ACCOUNT) return
+        val name = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+        if (resultCode == RESULT_OK && !name.isNullOrEmpty()) {
+            loadWithAddress(name)
+        } else {
+            webView.loadUrl(startUrl)
+        }
     }
 
     // ── The code that ends the sign-in ───────────────────────────
@@ -282,6 +284,8 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
     private fun catchCode(url: String): Boolean {
         // The code may arrive in the query or after a fragment, and the address
         // may not even be one this view can open: the whole string is read.
+        val host = runCatching { android.net.Uri.parse(url).host.orEmpty() }.getOrDefault("")
+        if (host != "accounts.firefox.com") return false
         val code = parameterOf(url, "code").orEmpty()
         if (code.isEmpty()) return false
         val state = parameterOf(url, "state").orEmpty()
@@ -316,6 +320,7 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_STATE = "state"
         const val EXTRA_CODE = "code"
+        private const val REQUEST_ACCOUNT = 4101
 
         private const val BACKGROUND = 0xFF101014.toInt()
         private const val INK = 0xFFF2F2F7.toInt()
@@ -325,37 +330,6 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
         /** Mozilla shows the phone layout for this one, which fits the window. */
         private const val USER_AGENT =
             "Mozilla/5.0 (Android 15; Mobile; rv:158.0) Gecko/158.0 Firefox/158.0"
-
-        /**
-         * Waits for Mozilla's address field, types the address the way the page
-         * itself would, and asks it to carry on. React ignores a plain value
-         * assignment, so the field's own setter is used and the events fired.
-         */
-        private const val FILL_SCRIPT = """
-            (function () {
-              var tries = 0;
-              var timer = setInterval(function () {
-                tries++;
-                var field = document.querySelector('input[type=email], input[name=email]');
-                if (field) {
-                  var setter = Object.getOwnPropertyDescriptor(
-                    window.HTMLInputElement.prototype, 'value').set;
-                  setter.call(field, __EMAIL__);
-                  field.dispatchEvent(new Event('input', { bubbles: true }));
-                  field.dispatchEvent(new Event('change', { bubbles: true }));
-                  field.focus();
-                  clearInterval(timer);
-                  setTimeout(function () {
-                    var button = field.form && field.form.querySelector('button[type=submit]');
-                    if (!button) button = document.querySelector('button[type=submit]');
-                    if (button) button.click();
-                  }, 500);
-                } else if (tries > 80) {
-                  clearInterval(timer);
-                }
-              }, 250);
-            })();
-        """
 
         fun intent(context: Context, url: String, state: String): Intent =
             Intent(context, FirefoxVpnWebSignInActivity::class.java)

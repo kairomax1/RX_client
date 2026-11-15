@@ -241,7 +241,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             when (val tokenResult = FirefoxVpnAuth.exchangeForOAuth(sessionToken)) {
                 is FirefoxVpnAuth.TokenResult.Success -> {
                     val email = _state.value.pendingEmail.orEmpty()
-                    saveTokens(email, tokenResult.tokens)
+                    saveTokens(email, tokenResult.tokens, FirefoxVpnAuth.FIREFOX_CLIENT_ID)
                 }
                 is FirefoxVpnAuth.TokenResult.Error ->
                     _state.update { it.copy(isLoading = false, error = tokenResult.message) }
@@ -272,7 +272,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             when (val tokenResult = FirefoxVpnAuth.exchangeForOAuth(sessionToken)) {
                 is FirefoxVpnAuth.TokenResult.Success -> {
                     val email = _state.value.pendingEmail.orEmpty()
-                    saveTokens(email, tokenResult.tokens)
+                    saveTokens(email, tokenResult.tokens, FirefoxVpnAuth.FIREFOX_CLIENT_ID)
                 }
                 is FirefoxVpnAuth.TokenResult.Error ->
                     _state.update { it.copy(isLoading = false, error = tokenResult.message) }
@@ -283,7 +283,8 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     private fun storeAccount(result: FirefoxVpnAuth.LoginResult.Success) {
         viewModelScope.launch {
             when (val tokenResult = FirefoxVpnAuth.exchangeForOAuth(result.sessionToken)) {
-                is FirefoxVpnAuth.TokenResult.Success -> saveTokens(result.email, tokenResult.tokens)
+                is FirefoxVpnAuth.TokenResult.Success ->
+                    saveTokens(result.email, tokenResult.tokens, FirefoxVpnAuth.FIREFOX_CLIENT_ID)
                 is FirefoxVpnAuth.TokenResult.Error ->
                     _state.update { it.copy(isLoading = false, error = tokenResult.message) }
             }
@@ -294,14 +295,19 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     private suspend fun addressOfTokens(tokens: FirefoxVpnAuth.OAuthTokens): String =
         FirefoxVpnAuth.profileEmail(tokens.accessToken) ?: "Firefox Account"
 
-    private fun saveTokens(email: String, tokens: FirefoxVpnAuth.OAuthTokens) {
+    private fun saveTokens(
+        email: String,
+        tokens: FirefoxVpnAuth.OAuthTokens,
+        clientId: String = FirefoxVpnAuth.BROWSER_CLIENT_ID
+    ) {
         val account = FirefoxVpnStore.StoredAccount(
             id = FirefoxVpnManager.newAccountId(),
             email = email,
             accessToken = tokens.accessToken,
             refreshToken = tokens.refreshToken,
             expiresAt = System.currentTimeMillis() + tokens.expiresIn * 1000,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            clientId = clientId
         )
         FirefoxVpnStore.saveAccount(getApplication(), account)
         FirefoxVpnStore.saveActiveAccountId(getApplication(), account.id)

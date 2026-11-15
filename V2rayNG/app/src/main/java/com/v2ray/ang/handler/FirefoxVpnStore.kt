@@ -32,7 +32,9 @@ object FirefoxVpnStore {
         val accessToken: String,
         val refreshToken: String,
         val expiresAt: Long,
-        val createdAt: Long
+        val createdAt: Long,
+        /** The OAuth client the refresh token belongs to; empty on older files. */
+        val clientId: String = ""
     )
 
     private fun storeDir(context: Context): File {
@@ -95,7 +97,8 @@ object FirefoxVpnStore {
                         accessToken = obj.get("accessToken").asString,
                         refreshToken = obj.get("refreshToken").asString,
                         expiresAt = obj.get("expiresAt").asLong,
-                        createdAt = obj.get("createdAt").asLong
+                        createdAt = obj.get("createdAt").asLong,
+                        clientId = obj.get("clientId")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
                     )
                 )
             }
@@ -141,6 +144,7 @@ object FirefoxVpnStore {
                 addProperty("refreshToken", account.refreshToken)
                 addProperty("expiresAt", account.expiresAt)
                 addProperty("createdAt", account.createdAt)
+                addProperty("clientId", account.clientId)
             }
             json.add(obj)
         }

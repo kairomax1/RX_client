@@ -915,7 +915,7 @@
     <string name="firefox_vpn_not_verified">The sign-in is not confirmed yet.</string>
     <string name="firefox_vpn_resend">Send the code again</string>
     <string name="firefox_vpn_where_mail">The mail goes to the address the Firefox account itself has, which may differ from what you typed.</string>
-    <string name="firefox_vpn_web_hint">Sign in to your Firefox Account here, as you would in a browser. This page handles Mozilla\'s checks itself. When you are done it closes by itself.</string>
+    <string name="firefox_vpn_web_hint">Choose your mail address, then type your Mozilla/Firefox account password here, as you would in a browser. This page handles Mozilla\'s checks itself, and when you are done it closes by itself.</string>
     <string name="firefox_vpn_web_sign_in">Sign in on Mozilla\'s page</string>
     <string name="firefox_vpn_manual_sign_in">Sign in with email and password</string>
     <string name="firefox_vpn_step_one">1. Add your Firefox Account.</string>

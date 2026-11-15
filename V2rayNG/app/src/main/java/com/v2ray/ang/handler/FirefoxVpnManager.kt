@@ -49,7 +49,7 @@ object FirefoxVpnManager {
             return@withContext null
         }
 
-        when (val result = FirefoxVpnAuth.refreshOAuth(account.refreshToken)) {
+        when (val result = FirefoxVpnAuth.refreshOAuth(account.refreshToken, account.clientId)) {
             is FirefoxVpnAuth.TokenResult.Success -> {
                 val tokens = result.tokens
                 FirefoxVpnStore.updateTokens(

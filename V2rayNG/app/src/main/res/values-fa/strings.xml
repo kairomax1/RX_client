@@ -888,7 +888,7 @@
     <string name="firefox_vpn_not_verified">ورود هنوز تأیید نشده است.</string>
     <string name="firefox_vpn_resend">کد را دوباره بفرست</string>
     <string name="firefox_vpn_where_mail">ایمیل به همان آدرسی می‌رود که روی حساب فایرفاکس ثبت شده؛ ممکن است با آنچه نوشتی یکی نباشد.</string>
-    <string name="firefox_vpn_web_hint">همین‌جا مثل یک مرورگر وارد حساب فایرفاکس شو. این صفحه خودش بررسی‌های موزیلا را انجام می‌دهد. وقتی کارت تمام شد، خودش بسته می‌شود.</string>
+    <string name="firefox_vpn_web_hint">اول آدرست را انتخاب کن، بعد رمز حساب موزیلا/فایرفاکس را همین‌جا مثل یک مرورگر بنویس. این صفحه خودش بررسی‌های موزیلا را انجام می‌دهد و وقتی کارت تمام شد، خودش بسته می‌شود.</string>
     <string name="firefox_vpn_web_sign_in">ورود در صفحهٔ موزیلا</string>
     <string name="firefox_vpn_manual_sign_in">ورود با ایمیل و رمز</string>
     <string name="firefox_vpn_step_one">۱. حساب فایرفاکس را اضافه کن.</string>
