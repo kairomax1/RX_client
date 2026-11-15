@@ -226,26 +226,9 @@ object CoreOutboundBuilder {
             settings.address = getServerAddress(profileItem)
             settings.port = profileItem.serverPort.orEmpty().toInt()
             settings.level = AppConfig.DEFAULT_LEVEL
-            if (profileItem.username == "bearer") {
-                // Firefox VPN: Bearer token in Proxy-Authorization header
-                settings.headers = mapOf(
-                    "Proxy-Authorization" to "Bearer ${profileItem.password.orEmpty()}"
-                )
-            } else if (profileItem.username.isNotNullEmpty()) {
+            if (profileItem.username.isNotNullEmpty()) {
                 settings.user = profileItem.username.orEmpty()
                 settings.pass = profileItem.password.orEmpty()
-            }
-        }
-
-        // Firefox VPN needs TLS to the proxy
-        if (profileItem.username == "bearer") {
-            outboundBean?.streamSettings?.let { stream ->
-                stream.network = "tcp"
-                stream.security = "tls"
-                stream.tlsSettings = OutboundBean.StreamSettingsBean.TlsSettingsBean(
-                    serverName = getServerAddress(profileItem),
-                    alpn = listOf("h2", "http/1.1")
-                )
             }
         }
 

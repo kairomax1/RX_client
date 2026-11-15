@@ -18,18 +18,33 @@ object FirefoxVpnServers {
     private const val REMOTE_SETTINGS_URL =
         "https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/vpn-serverlist/records"
     private const val FIREFOX_UA =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
+
+    /** The reserved code of the recommended (anycast) location. */
+    const val RECOMMENDED_CODE = "REC"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * One proxy endpoint. [host] and [port] are the CONNECT endpoint the record
+     * names in its protocols; that is what a client connects to, while
+     * [hostname] is only the record's own name for the server.
+     */
     data class Server(
         val hostname: String,
         val port: Int = 443,
-        val quarantined: Boolean = false
-    )
+        val quarantined: Boolean = false,
+        val host: String = "",
+        val connectPort: Int = 0,
+        val scheme: String = "https"
+    ) {
+        /** The endpoint to open a TLS CONNECT tunnel to. */
+        val connectHost: String get() = host.ifEmpty { hostname }
+        val tunnelPort: Int get() = if (connectPort > 0) connectPort else port
+    }
 
     data class City(
         val name: String,
@@ -81,9 +96,22 @@ object FirefoxVpnServers {
                             for (serverObj in serversArray) {
                                 val server = serverObj.asJsonObject
                                 val hostname = server.get("hostname")?.asString ?: continue
-                                val port = server.get("port")?.asInt ?: 443
+                                val port = server.get("port")?.asInt?.takeIf { it > 0 } ?: 443
                                 val quarantined = server.get("quarantined")?.asBoolean ?: false
-                                servers.add(Server(hostname, port, quarantined))
+                                // The record names its real endpoint in protocols:
+                                // name "connect" is the HTTPS proxy Firefox uses.
+                                var connectHost = ""
+                                var connectPort = 0
+                                var scheme = "https"
+                                server.getAsJsonArray("protocols")?.forEach { protoElement ->
+                                    val proto = protoElement.asJsonObject
+                                    if (proto.string("name") == "connect" && connectHost.isEmpty()) {
+                                        connectHost = proto.string("host").orEmpty()
+                                        connectPort = proto.get("port")?.takeIf { !it.isJsonNull }?.asInt ?: 0
+                                        scheme = proto.string("scheme").orEmpty().ifEmpty { "https" }
+                                    }
+                                }
+                                servers.add(Server(hostname, port, quarantined, connectHost, connectPort, scheme))
                             }
                         }
                         if (servers.isNotEmpty()) {
@@ -113,4 +141,11 @@ object FirefoxVpnServers {
     fun serversFor(country: Country): List<Server> {
         return country.cities.flatMap { it.servers }.filter { !it.quarantined }
     }
+
+    /** The first usable CONNECT endpoint of a country. */
+    fun connectEndpoint(country: Country?): Server? =
+        country?.let { serversFor(it).firstOrNull { server -> server.connectHost.isNotEmpty() } }
+
+    private fun com.google.gson.JsonObject.string(name: String): String? =
+        get(name)?.takeIf { !it.isJsonNull }?.asString
 }

@@ -1,7 +1,6 @@
 package com.v2ray.ang.handler
 
 import android.content.Context
-import com.v2ray.ang.dto.V2rayConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -22,7 +21,9 @@ object FirefoxVpnManager {
         val proxyPassToken: String,
         val countryName: String,
         val quotaRemaining: Long,
-        val quotaLimit: Long
+        val quotaLimit: Long,
+        /** Loopback port the core's HTTP outbound talks to; 0 before the relay starts. */
+        val localPort: Int = 0
     )
 
     sealed class ConnectResult {
@@ -94,17 +95,27 @@ object FirefoxVpnManager {
             }
         }
 
-        // 3. Determine proxy host from server list (or use pass's aud)
+        // 3. Find the CONNECT endpoint of the chosen location
         val countries = FirefoxVpnServers.fetchServerList()
         val country = countries.firstOrNull { it.code == countryCode }
             ?: FirefoxVpnServers.pickRecommended(countries)
         val countryName = country?.name ?: "Recommended"
 
-        // Use the server from the list if available, otherwise the pass aud
-        val serverHost = country?.let { FirefoxVpnServers.serversFor(it).firstOrNull()?.hostname }
-            ?: pass.proxyHost
-        val serverPort = country?.let { FirefoxVpnServers.serversFor(it).firstOrNull()?.port }
-            ?: pass.proxyPort
+        // The list names the real endpoint in each server's protocols; the
+        // ProxyPass's own host is the fallback when the list cannot be read.
+        val endpoint = FirefoxVpnServers.connectEndpoint(country)
+        val serverHost = endpoint?.connectHost?.ifEmpty { null } ?: pass.proxyHost
+        val serverPort = endpoint?.tunnelPort ?: pass.proxyPort
+        if (endpoint != null && endpoint.scheme != "https") {
+            return@withContext ConnectResult.Error("This location only offers ${endpoint.scheme}, which the app cannot use yet")
+        }
+        if (serverHost.isEmpty()) {
+            return@withContext ConnectResult.Error("No proxy address was named for ${countryName.ifEmpty { "this location" }}")
+        }
+
+        // 4. The core cannot send a Bearer header itself; the relay in front of
+        // it does, and the core talks plain HTTP to the loopback.
+        val localPort = FirefoxVpnRelay.start(serverHost, serverPort, pass.token)
 
         ConnectResult.Success(
             ConnectionInfo(
@@ -113,33 +124,8 @@ object FirefoxVpnManager {
                 proxyPassToken = pass.token,
                 countryName = countryName,
                 quotaRemaining = pass.quotaRemaining,
-                quotaLimit = pass.quotaLimit
-            )
-        )
-    }
-
-    /**
-     * Builds an Xray outbound for the Firefox VPN proxy.
-     * Uses HTTP outbound with Bearer ProxyPass in the Proxy-Authorization header.
-     */
-    fun buildOutbound(info: ConnectionInfo): V2rayConfig.OutboundBean {
-        return V2rayConfig.OutboundBean(
-            tag = "firefox-vpn",
-            protocol = "http",
-            settings = V2rayConfig.OutboundBean.OutSettingsBean(
-                address = info.proxyHost,
-                port = info.proxyPort,
-                headers = mapOf(
-                    "Proxy-Authorization" to "Bearer ${info.proxyPassToken}"
-                )
-            ),
-            streamSettings = V2rayConfig.OutboundBean.StreamSettingsBean(
-                network = "tcp",
-                security = "tls",
-                tlsSettings = V2rayConfig.OutboundBean.StreamSettingsBean.TlsSettingsBean(
-                    serverName = info.proxyHost,
-                    alpn = listOf("h2", "http/1.1")
-                )
+                quotaLimit = pass.quotaLimit,
+                localPort = localPort
             )
         )
     }

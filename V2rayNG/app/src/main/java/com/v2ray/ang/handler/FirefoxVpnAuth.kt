@@ -5,6 +5,9 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,27 +22,66 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * Firefox Accounts (FxA) client for the built-in Firefox VPN.
  *
- * Implements the same protocol Firefox itself uses:
- * - scrypt password derivation (N=32768, r=8, p=1)
- * - HAWK request signing for authenticated calls
- * - Session verification (email code, TOTP)
- * - OAuth token issuance with offline access
+ * Follows the protocol Firefox itself uses:
+ * - the password is stretched with PBKDF2 over a salted email, then HKDF, into `authPW`
+ * - authenticated calls are signed with HAWK using an HKDF-derived key
+ * - an OAuth code grant (PKCE) with offline access yields the tokens the
+ *   Guardian API needs for a ProxyPass
  *
- * The client ID and scope match Firefox desktop's built-in VPN so the
- * Guardian API issues a ProxyPass for the Fastly CONNECT proxies.
+ * The client id and scope are Firefox desktop's, so Guardian treats the
+ * session as the browser's built-in VPN.
  */
 object FirefoxVpnAuth {
 
     private const val FXA_BASE = "https://api.accounts.firefox.com/v1"
+    private const val FXA_HOST = "api.accounts.firefox.com"
     private const val OAUTH_TOKEN_URL = "https://oauth.accounts.firefox.com/v1/token"
     private const val FIREFOX_CLIENT_ID = "5882386c6d801776"
     private const val OAUTH_SCOPE = "profile https://identity.mozilla.com/apps/vpn"
-    private const val SERVICE = "sync"
+    private const val PICL = "identity.mozilla.com/picl/v1/"
+
+    private const val FIREFOX_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
+
+    /** FxA asks the account's email address, and the sign-in code, to be confirmed. */
+    private const val VERIFICATION_EMAIL_2FA = "email-2fa"
 
     private val JSON = "application/json".toMediaType()
-    private val FORM = "application/x-www-form-urlencoded".toMediaType()
+
+    private val random = SecureRandom()
+
+    /** The edge keeps a cookie after its bot check; the same jar must carry it. */
+    private val cookieJar = object : CookieJar {
+        private val cookies = mutableListOf<Cookie>()
+
+        @Synchronized
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            for (cookie in cookies) {
+                this.cookies.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
+                this.cookies.add(cookie)
+            }
+        }
+
+        @Synchronized
+        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+            val now = System.currentTimeMillis()
+            cookies.removeAll { it.expiresAt < now }
+            return cookies.filter { it.matches(url) }
+        }
+    }
 
     private val client = OkHttpClient.Builder()
+        .cookieJar(cookieJar)
+        .addInterceptor { chain ->
+            // Sending gzip as the only encoding is what the edge answered with
+            // HTTP 406 for in the reference implementation's A/B tests, and a
+            // desktop Firefox never sends it as the sole encoding either.
+            val request = chain.request().newBuilder()
+                .header("User-Agent", FIREFOX_UA)
+                .header("Accept-Encoding", "identity")
+                .build()
+            chain.proceed(request)
+        }
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -55,11 +97,13 @@ object FirefoxVpnAuth {
             val verified: Boolean
         ) : LoginResult()
 
+        /** FxA mailed a confirmation code; [sessionToken] is not usable until it is entered. */
         data class NeedEmailCode(
             val sessionToken: String,
             val email: String
         ) : LoginResult()
 
+        /** The account has an authenticator app; its code confirms this sign-in. */
         data class NeedTotp(
             val sessionToken: String,
             val email: String
@@ -80,310 +124,467 @@ object FirefoxVpnAuth {
         data class Error(val message: String) : TokenResult()
     }
 
-    // ── Public API ────────────────────────────────────────────────
+    private data class HttpResponse(val code: Int, val body: String)
+
+    private class FxaException(val message2: String, val code: Int = 0, val errno: Int = 0) :
+        Exception(message2)
+
+    // ── Sign-in ───────────────────────────────────────────────────
 
     /**
-     * Starts a sign-in with email and password.
-     * Returns Success when the session is verified, or a "need code" result.
+     * Signs in with email and password.
+     *
+     * FxA answers a verified session with the tokens' precursor; an unverified
+     * one has already been confirmed by a code it sent, so the caller is asked
+     * for it.
      */
     suspend fun login(email: String, password: String): LoginResult =
         withContext(Dispatchers.IO) {
             try {
-                val authPw = deriveAuthPw(password, email)
-                val body = JsonObject().apply {
-                    addProperty("email", email)
-                    addProperty("authPW", authPw)
-                    addProperty("service", SERVICE)
-                    addProperty("rememberMe", true)
+                val trimmed = email.trim()
+                var response = loginAttempt(trimmed, password, VERIFICATION_EMAIL_2FA)
+                // A deployment that does not know the verification method asks
+                // for a plain sign-in instead; errno 107 is "invalid parameter".
+                if (response.code == 400 && errnoOf(response.body) == 107) {
+                    response = loginAttempt(trimmed, password, null)
                 }
-                val resp = post("$FXA_BASE/account/login", body.toString())
-                val json: JsonObject = JsonParser.parseString(resp.body).asJsonObject
+                if (response.code != 200) {
+                    return@withContext LoginResult.Error(messageFor(response), errnoOf(response.body))
+                }
 
-                if (json.has("sessionToken")) {
-                    val sessionToken: String = json.get("sessionToken").asString
-                    val uid: String = json.get("uid").asString
-                    val verified: Boolean = json.get("verified").asBoolean
-                    val accountEmail: String = if (json.has("email")) json.get("email").asString else email
-                    if (verified) {
-                        LoginResult.Success(uid, sessionToken, accountEmail, true)
-                    } else {
-                        LoginResult.NeedEmailCode(sessionToken, accountEmail)
-                    }
-                } else if (json.has("code") && json.get("code").asString == "email_code") {
-                    val sessionToken: String = json.get("sessionToken").asString
-                    LoginResult.NeedEmailCode(sessionToken, email)
-                } else if (json.has("code") && json.get("code").asString == "totp") {
-                    val sessionToken: String = json.get("sessionToken").asString
-                    LoginResult.NeedTotp(sessionToken, email)
+                val json = JsonParser.parseString(response.body).asJsonObject
+                val sessionToken = json.string("sessionToken")
+                    ?: return@withContext LoginResult.Error("Firefox answered without a session token")
+                val uid = json.string("uid").orEmpty()
+
+                if (sessionVerified(sessionToken)) {
+                    LoginResult.Success(uid, sessionToken, trimmed, true)
+                } else if (json.string("verificationMethod") == "totp-2fa") {
+                    LoginResult.NeedTotp(sessionToken, trimmed)
                 } else {
-                    val msg: String = if (json.has("message")) json.get("message").asString else "Unknown error"
-                    val errno: Int = if (json.has("errno")) json.get("errno").asInt else 0
-                    LoginResult.Error(msg, errno)
+                    LoginResult.NeedEmailCode(sessionToken, trimmed)
                 }
+            } catch (e: FxaException) {
+                LoginResult.Error(e.message2, e.errno)
             } catch (e: Exception) {
-                LoginResult.Error(e.message ?: "Network error")
+                LoginResult.Error("No answer from Firefox: ${e.message ?: "network error"}")
             }
         }
 
-    /** Verifies a session with a 6-digit email code. */
+    private fun loginAttempt(email: String, password: String, verificationMethod: String?): HttpResponse {
+        val authPw = deriveAuthPw(email, password)
+        val body = JsonObject().apply {
+            addProperty("email", email)
+            addProperty("authPW", toHex(authPw))
+            if (verificationMethod != null) addProperty("verificationMethod", verificationMethod)
+        }
+        return postJson("$FXA_BASE/account/login", body.toString(), null)
+    }
+
+    /** Whether the session (not just the address) is confirmed. */
+    suspend fun sessionVerified(sessionToken: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val response = get("$FXA_BASE/recovery_email/status", hawkAuthorization("GET", "$FXA_BASE/recovery_email/status", sessionToken, ""))
+            if (response.code != 200) return@withContext false
+            JsonParser.parseString(response.body).asJsonObject.boolean("verified") ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Confirms an unverified session with the code FxA mailed at sign-in. */
     suspend fun verifyEmailCode(sessionToken: String, code: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
-                val body = JsonObject().apply {
-                    addProperty("code", code)
-                    addProperty("sessionToken", sessionToken)
-                }
-                val resp = post("$FXA_BASE/session/verify_code", body.toString())
-                val json = JsonParser.parseString(resp.body).asJsonObject
-                json.get("verified")?.asBoolean == true
+                val url = "$FXA_BASE/session/verify_code"
+                val body = JsonObject().apply { addProperty("code", code.trim()) }.toString()
+                val response = postJson(url, body, hawkAuthorization("POST", url, sessionToken, body))
+                response.code == 200
             } catch (_: Exception) {
                 false
             }
         }
 
-    /** Verifies a session with a TOTP code. */
+    /** Confirms an unverified session with a code from the account's authenticator app. */
     suspend fun verifyTotp(sessionToken: String, code: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
-                val body = JsonObject().apply {
-                    addProperty("code", code)
-                    addProperty("sessionToken", sessionToken)
-                }
-                val resp = post("$FXA_BASE/session/verify/totp", body.toString())
-                val json = JsonParser.parseString(resp.body).asJsonObject
-                json.get("verified")?.asBoolean == true
+                val url = "$FXA_BASE/session/verify/totp"
+                val body = JsonObject().apply { addProperty("code", code.trim()) }.toString()
+                val response = postJson(url, body, hawkAuthorization("POST", url, sessionToken, body))
+                response.code == 200 &&
+                    (JsonParser.parseString(response.body).asJsonObject.boolean("success") ?: false)
             } catch (_: Exception) {
                 false
             }
         }
 
+    // ── OAuth ─────────────────────────────────────────────────────
+
     /**
-     * Exchanges a verified session token for OAuth tokens.
-     * Uses the authorization code flow internally.
+     * Turns a confirmed session into OAuth tokens.
+     *
+     * The code grant is the one Firefox uses for the built-in VPN: an
+     * authorization code issued to a session, redeemed with the PKCE verifier.
      */
     suspend fun exchangeForOAuth(sessionToken: String): TokenResult =
         withContext(Dispatchers.IO) {
             try {
-                // Step 1: get authorization code using session token (HAWK)
-                val codeBody = JsonObject().apply {
+                val verifier = base64Url(randomBytes(32))
+                val challenge = base64Url(sha256(verifier.toByteArray(StandardCharsets.US_ASCII)))
+                val state = toHex(randomBytes(16))
+
+                val url = "$FXA_BASE/oauth/authorization"
+                val body = JsonObject().apply {
                     addProperty("client_id", FIREFOX_CLIENT_ID)
+                    addProperty("response_type", "code")
                     addProperty("scope", OAUTH_SCOPE)
+                    addProperty("state", state)
                     addProperty("access_type", "offline")
+                    addProperty("code_challenge", challenge)
+                    addProperty("code_challenge_method", "S256")
+                }.toString()
+
+                val response = postJson(url, body, hawkAuthorization("POST", url, sessionToken, body), OAUTH_ACCEPT)
+                if (response.code != 200) return@withContext TokenResult.Error(messageFor(response))
+
+                val json = JsonParser.parseString(response.body).asJsonObject
+                val code = json.string("code")
+                    ?: return@withContext TokenResult.Error("Firefox answered without an authorization code")
+                if (json.string("state") != state) {
+                    return@withContext TokenResult.Error("Firefox answered for another request")
                 }
-                val codeResp = postHawk(
-                    "$FXA_BASE/oauth/authorization",
-                    codeBody.toString(),
-                    sessionToken
-                )
-                val codeJson = JsonParser.parseString(codeResp.body).asJsonObject
-                val authCode = codeJson.get("code")?.asString
-                    ?: return@withContext TokenResult.Error("No authorization code received")
 
-                // Step 2: exchange code for tokens
-                val tokenBody = "grant_type=authorization_code" +
-                    "&code=$authCode" +
-                    "&client_id=$FIREFOX_CLIENT_ID" +
-                    "&redirect_uri=https://accounts.firefox.com/signin" +
-                    "&scope=${java.net.URLEncoder.encode(OAUTH_SCOPE, "UTF-8")}"
-                val tokenResp = postForm(OAUTH_TOKEN_URL, tokenBody)
-                val tokenJson = JsonParser.parseString(tokenResp.body).asJsonObject
-
-                val accessToken = tokenJson.get("access_token")?.asString
-                    ?: return@withContext TokenResult.Error("No access token received")
-                val refreshToken = tokenJson.get("refresh_token")?.asString ?: ""
-                val expiresIn = tokenJson.get("expires_in")?.asLong ?: 3600
-                val scope = tokenJson.get("scope")?.asString ?: OAUTH_SCOPE
-
-                TokenResult.Success(
-                    OAuthTokens(accessToken, refreshToken, expiresIn, scope)
-                )
+                val tokenBody = JsonObject().apply {
+                    addProperty("client_id", FIREFOX_CLIENT_ID)
+                    addProperty("grant_type", "authorization_code")
+                    addProperty("code", code)
+                    addProperty("code_verifier", verifier)
+                }.toString()
+                return@withContext tokenResultOf(postJson(OAUTH_TOKEN_URL, tokenBody, null, OAUTH_ACCEPT, null))
+            } catch (e: FxaException) {
+                TokenResult.Error(e.message2)
             } catch (e: Exception) {
-                TokenResult.Error(e.message ?: "OAuth exchange failed")
+                TokenResult.Error("No answer from Firefox: ${e.message ?: "network error"}")
             }
         }
 
-    /** Refreshes an OAuth access token using a refresh token. */
+    /** Renews an access token without asking for the password again. */
     suspend fun refreshOAuth(refreshToken: String): TokenResult =
         withContext(Dispatchers.IO) {
             try {
-                val body = "grant_type=refresh_token" +
-                    "&refresh_token=$refreshToken" +
-                    "&client_id=$FIREFOX_CLIENT_ID"
-                val resp = postForm(OAUTH_TOKEN_URL, body)
-                val json = JsonParser.parseString(resp.body).asJsonObject
-
-                val accessToken = json.get("access_token")?.asString
-                    ?: return@withContext TokenResult.Error("No access token in refresh response")
-                val newRefresh = json.get("refresh_token")?.asString ?: refreshToken
-                val expiresIn = json.get("expires_in")?.asLong ?: 3600
-                val scope = json.get("scope")?.asString ?: OAUTH_SCOPE
-
-                TokenResult.Success(
-                    OAuthTokens(accessToken, newRefresh, expiresIn, scope)
-                )
+                val body = JsonObject().apply {
+                    addProperty("client_id", FIREFOX_CLIENT_ID)
+                    addProperty("grant_type", "refresh_token")
+                    addProperty("refresh_token", refreshToken)
+                }.toString()
+                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT, null))
+            } catch (e: FxaException) {
+                TokenResult.Error(e.message2)
             } catch (e: Exception) {
-                TokenResult.Error(e.message ?: "Token refresh failed")
+                TokenResult.Error("No answer from Firefox: ${e.message ?: "network error"}")
             }
         }
 
-    /** Registers a device record so the account shows this app in connected services. */
+    private fun tokenResultOf(response: HttpResponse): TokenResult {
+        if (response.code != 200) return TokenResult.Error(messageFor(response))
+        val json = JsonParser.parseString(response.body).asJsonObject
+        val accessToken = json.string("access_token")
+            ?: return TokenResult.Error("Firefox answered without an access token")
+        val refresh = json.string("refresh_token").orEmpty()
+        val expiresIn = json.long("expires_in") ?: 3600L
+        val scope = json.string("scope") ?: OAUTH_SCOPE
+        return TokenResult.Success(OAuthTokens(accessToken, refresh, expiresIn, scope))
+    }
+
+    /**
+     * Records this program in the account's connected services as Firefox's
+     * built-in VPN, the way the browser shows it. Best effort: a failure here
+     * does not stop the connection.
+     */
     suspend fun registerDevice(refreshToken: String) {
         withContext(Dispatchers.IO) {
             try {
                 val body = JsonObject().apply {
                     addProperty("name", "Firefox's built-in VPN")
                     addProperty("type", "desktop")
-                }
-                // Device registration uses the refresh token as HAWK credential
-                postHawk("$FXA_BASE/account/device", body.toString(), refreshToken)
+                }.toString()
+                postJson("$FXA_BASE/account/device", body, "Bearer $refreshToken")
             } catch (_: Exception) {
-                // Non-critical; ignore failures
+                // The device list is cosmetic; the tokens stay valid.
             }
         }
     }
 
-    // ── Password derivation (scrypt) ──────────────────────────────
-
-    /**
-     * Derives the authPW for FxA login.
-     * FxA uses: scrypt(password, salt, N=32768, r=8, p=1, dkLen=32)
-     * where salt = hex(SHA256(email.lowercase()))
-     */
-    private fun deriveAuthPw(password: String, email: String): String {
-        val emailHash = MessageDigest.getInstance("SHA-256")
-            .digest(email.lowercase().toByteArray(StandardCharsets.UTF_8))
-        val salt = toHex(emailHash)
-        val derived = scrypt(
-            password.toByteArray(StandardCharsets.UTF_8),
-            salt.toByteArray(StandardCharsets.UTF_8),
-            N = 32768, r = 8, p = 1, dkLen = 32
-        )
-        return toHex(derived)
+    /** Ends a sign-in session once its tokens exist, so it does not linger in the account. */
+    suspend fun destroySession(sessionToken: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                request("DELETE", "$FXA_BASE/session/destroy", null,
+                    hawkAuthorization("DELETE", "$FXA_BASE/session/destroy", sessionToken, ""))
+            } catch (_: Exception) {
+                // Leftover sessions expire on their own.
+            }
+        }
     }
 
-    // ── HAWK signing ──────────────────────────────────────────────
+    // ── Key derivation ────────────────────────────────────────────
 
     /**
-     * Makes a HAWK-signed POST request.
-     * The session/refresh token is used as the HAWK credential.
+     * FxA's password stretch: PBKDF2-SHA256 over the salted address, then
+     * HKDF into the 32-byte value the sign-in request carries.
      */
-    private fun postHawk(url: String, jsonBody: String, token: String): HttpResponse {
-        val tokenBytes = Base64.decode(token, Base64.DEFAULT)
-        val hawkId = Base64.encodeToString(
-            tokenBytes.copyOfRange(0, minOf(32, tokenBytes.size)),
-            Base64.NO_WRAP
-        )
-        val hawkKey = Base64.encodeToString(
-            tokenBytes.copyOfRange(minOf(32, tokenBytes.size), tokenBytes.size),
-            Base64.NO_WRAP
-        )
+    internal fun deriveAuthPw(email: String, password: String): ByteArray {
+        val salt = (PICL + "quickStretch:" + email).toByteArray(StandardCharsets.UTF_8)
+        val stretched = pbkdf2Sha256(password.toByteArray(StandardCharsets.UTF_8), salt, 1000, 32)
+        return hkdfSha256(stretched, ByteArray(1), (PICL + "authPW").toByteArray(StandardCharsets.UTF_8), 32)
+    }
 
+    /** The HAWK id and key a session token stands for. */
+    internal fun deriveHawk(sessionToken: String): Pair<String, ByteArray> {
+        val tokenBytes = fromHex(sessionToken)
+        val out = hkdfSha256(tokenBytes, null, (PICL + "sessionToken").toByteArray(StandardCharsets.UTF_8), 96)
+        return toHex(out.copyOfRange(0, 32)) to out.copyOfRange(32, 64)
+    }
+
+    private fun hawkAuthorization(
+        method: String,
+        url: String,
+        sessionToken: String,
+        payload: String,
+        contentType: String = "application/json; charset=utf-8"
+    ): String {
+        val (id, key) = deriveHawk(sessionToken)
+        val nonce = toHex(randomBytes(6))
         val timestamp = System.currentTimeMillis() / 1000
-        val nonce = randomNonce()
-        val method = "POST"
-        val resource = url.substringAfter("api.accounts.firefox.com").ifEmpty { "/" }
-        val host = "api.accounts.firefox.com"
-        val port = 443
-
-        val normalized = buildString {
-            append("hawk.1.header\n")
-            append("$timestamp\n")
-            append("$nonce\n")
-            append("$method\n")
-            append("$resource\n")
-            append("$host\n")
-            append("$port\n")
-            append("\n") // hash (empty for POST with body already hashed separately)
-            append("\n") // ext
-            append("\n")
-        }
-
-        val mac = hmacSha256(hawkKey.toByteArray(StandardCharsets.UTF_8), normalized)
-        val macB64 = Base64.encodeToString(mac, Base64.NO_WRAP)
-
-        val hawkHeader = "Hawk id=\"$hawkId\", ts=\"$timestamp\", nonce=\"$nonce\", " +
-            "mac=\"$macB64\", hash=\"\""
-
-        val request = Request.Builder()
-            .url(url)
-            .post(jsonBody.toRequestBody(JSON))
-            .header("Authorization", hawkHeader)
-            .header("Content-Type", "application/json")
-            .header("User-Agent", FIREFOX_UA)
-            .build()
-
-        val response = client.newCall(request).execute()
-        val body = response.body?.string() ?: ""
-        if (!response.isSuccessful) {
-            throw Exception("HTTP ${response.code}: $body")
-        }
-        return HttpResponse(response.code, body)
+        val payloadHash = hawkPayloadHash(payload, contentType)
+        val normalized = hawkNormalized(method, url, timestamp, nonce, payloadHash)
+        val mac = hmacSha256(key, normalized.toByteArray(StandardCharsets.UTF_8))
+        return "Hawk id=\"$id\", ts=\"$timestamp\", nonce=\"$nonce\", " +
+            "mac=\"${toHex(mac)}\"" + if (payloadHash.isNotEmpty()) ", hash=\"$payloadHash\"" else ""
     }
 
-    // ── HTTP helpers ──────────────────────────────────────────────
+    /** Hawk hashes the payload together with its content type; an empty payload leaves it empty. */
+    internal fun hawkPayloadHash(payload: String, contentType: String): String =
+        if (payload.isEmpty()) "" else toHex(
+            sha256(("hawk.1.payload\n$contentType\n$payload\n").toByteArray(StandardCharsets.UTF_8))
+        )
 
-    private data class HttpResponse(val code: Int, val body: String)
+    /** The string a Hawk mac is computed over. */
+    internal fun hawkNormalized(
+        method: String,
+        url: String,
+        timestamp: Long,
+        nonce: String,
+        payloadHash: String
+    ): String = listOf(
+        "hawk.1.header",
+        timestamp.toString(),
+        nonce,
+        method.uppercase(),
+        url.substringAfter(FXA_HOST).ifEmpty { "/" },
+        FXA_HOST,
+        "443",
+        payloadHash,
+        "",
+        ""
+    ).joinToString("\n")
 
-    private fun post(url: String, jsonBody: String): HttpResponse {
-        val request = Request.Builder()
-            .url(url)
-            .post(jsonBody.toRequestBody(JSON))
-            .header("Content-Type", "application/json")
-            .header("User-Agent", FIREFOX_UA)
-            .build()
-        val response = client.newCall(request).execute()
-        val body = response.body?.string() ?: ""
-        if (!response.isSuccessful) {
-            throw Exception("HTTP ${response.code}: $body")
+    /** HKDF-SHA256, as FxA's derivation uses it. A null salt means zeros. */
+    private fun hkdfSha256(ikm: ByteArray, salt: ByteArray?, info: ByteArray, length: Int): ByteArray {
+        val prk = hmacSha256(salt ?: ByteArray(32), ikm)
+        val out = ByteArray(length)
+        var previous = ByteArray(0)
+        var offset = 0
+        var counter = 1
+        while (offset < length) {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(prk, "HmacSHA256"))
+            mac.update(previous)
+            mac.update(info)
+            mac.update(counter.toByte())
+            previous = mac.doFinal()
+            val take = minOf(previous.size, length - offset)
+            System.arraycopy(previous, 0, out, offset, take)
+            offset += take
+            counter++
         }
-        return HttpResponse(response.code, body)
+        return out
     }
 
-    private fun postForm(url: String, formBody: String): HttpResponse {
-        val request = Request.Builder()
-            .url(url)
-            .post(formBody.toRequestBody(FORM))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("User-Agent", FIREFOX_UA)
-            .build()
-        val response = client.newCall(request).execute()
-        val body = response.body?.string() ?: ""
-        if (!response.isSuccessful) {
-            throw Exception("HTTP ${response.code}: $body")
-        }
-        return HttpResponse(response.code, body)
-    }
-
-    // ── Crypto helpers ────────────────────────────────────────────
-
-    private fun hmacSha256(key: ByteArray, data: String): ByteArray {
+    private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key, "HmacSHA256"))
-        return mac.doFinal(data.toByteArray(StandardCharsets.UTF_8))
+        mac.init(SecretKeySpec(if (key.isEmpty()) ByteArray(1) else key, "HmacSHA256"))
+        return mac.doFinal(data)
     }
 
-    private fun randomNonce(): String {
-        val bytes = ByteArray(6)
-        SecureRandom().nextBytes(bytes)
-        return Base64.encodeToString(bytes, Base64.NO_WRAP)
+    private fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
+
+    private fun randomBytes(count: Int): ByteArray = ByteArray(count).also { random.nextBytes(it) }
+
+    private fun base64Url(bytes: ByteArray): String =
+        Base64.encodeToString(bytes, Base64.NO_WRAP or Base64.NO_PADDING or Base64.URL_SAFE)
+
+    internal fun toHex(bytes: ByteArray): String {
+        val hex = "0123456789abcdef"
+        val out = StringBuilder(bytes.size * 2)
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            out.append(hex[v ushr 4]).append(hex[v and 0x0F])
+        }
+        return out.toString()
     }
 
-    private fun toHex(bytes: ByteArray): String =
-        bytes.joinToString("") { "%02x".format(it) }
+    private fun fromHex(text: String): ByteArray {
+        val clean = text.trim()
+        val out = ByteArray(clean.length / 2)
+        for (i in out.indices) {
+            out[i] = clean.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+        }
+        return out
+    }
 
-    private const val FIREFOX_UA =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0"
+    // ── HTTP ──────────────────────────────────────────────────────
 
-    // ── Scrypt (pure Kotlin, RFC 7914) ───────────────────────────
+    private fun postJson(
+        url: String,
+        body: String,
+        authorization: String?,
+        accept: String = "application/json",
+        contentType: String = "application/json; charset=utf-8"
+    ): HttpResponse = request("POST", url, body, authorization, accept, contentType)
+
+    private fun get(url: String, authorization: String?): HttpResponse =
+        request("GET", url, null, authorization)
+
+    private fun request(
+        method: String,
+        url: String,
+        body: String?,
+        authorization: String?,
+        accept: String = "application/json",
+        contentType: String = "application/json; charset=utf-8"
+    ): HttpResponse {
+        val builder = Request.Builder()
+            .url(url)
+            .header("Accept", accept)
+            .header("Accept-Language", "en-US, en")
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
+        if (authorization != null) builder.header("Authorization", authorization)
+
+        when (method) {
+            "POST" -> builder.post((body ?: "").toRequestBody(JSON))
+            "DELETE" -> builder.delete()
+            else -> builder.get()
+        }
+        if (body != null) builder.header("Content-Type", contentType)
+
+        client.newCall(builder.build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.code == 406) {
+                throw FxaException(
+                    "Mozilla's security check (Fastly) refused this request. " +
+                        "Try again later or on another network."
+                )
+            }
+            if (response.code >= 500) {
+                throw FxaException("Firefox's servers answered ${response.code}. Try again later.")
+            }
+            return HttpResponse(response.code, text)
+        }
+    }
+
+    // ── Messages ──────────────────────────────────────────────────
+
+    private fun errnoOf(body: String): Int = try {
+        val json = JsonParser.parseString(body).asJsonObject
+        json.get("errno")?.takeIf { !it.isJsonNull }?.asInt ?: 0
+    } catch (_: Exception) {
+        0
+    }
+
+    private fun messageFor(response: HttpResponse): String {
+        val errno = errnoOf(response.body)
+        val known = when (errno) {
+            102 -> "There is no Firefox account with this email."
+            125 -> "Mozilla blocked this sign-in attempt. Wait a while and try again."
+            120 -> "The email's letter case differs from the account's. Write it exactly as registered."
+            170 -> "The password is wrong."
+            195 -> "Too many attempts. Wait a few minutes."
+            106 -> "The email is not correct."
+            else -> null
+        }
+        if (known != null) return known
+        val serverMessage = try {
+            JsonParser.parseString(response.body).asJsonObject.string("message")
+        } catch (_: Exception) {
+            null
+        }
+        return serverMessage?.let { "Firefox: $it (${response.code})" }
+            ?: "Firefox refused the request (HTTP ${response.code})"
+    }
+
+    private fun JsonObject.string(name: String): String? =
+        get(name)?.takeIf { !it.isJsonNull }?.asString
+
+    private fun JsonObject.boolean(name: String): Boolean? =
+        get(name)?.takeIf { !it.isJsonNull }?.asBoolean
+
+    private fun JsonObject.long(name: String): Long? =
+        get(name)?.takeIf { !it.isJsonNull }?.asLong
+
+    private const val OAUTH_ACCEPT = "application/json;q=0.9,*/*;q=0.2"
+
+    // ── PBKDF2-SHA256 / scrypt ────────────────────────────────────
 
     /**
-     * Scrypt key derivation function.
-     * @param password the password
-     * @param salt the salt
-     * @param N CPU/memory cost parameter (must be power of 2)
-     * @param r block size
-     * @param p parallelization parameter
-     * @param dkLen desired key length
+     * PBKDF2-HMAC-SHA256. Written out because the platform's
+     * PBKDF2WithHmacSHA256 only exists from Android 8.
+     */
+    internal fun pbkdf2Sha256(
+        password: ByteArray,
+        salt: ByteArray,
+        iterations: Int,
+        dkLen: Int
+    ): ByteArray {
+        // SecretKeySpec refuses an empty key. HMAC zero-pads its key to the
+        // 64-byte block, so an empty key and one zero byte are the same key.
+        val keyBytes = if (password.isEmpty()) ByteArray(1) else password
+        val hLen = 32
+        val blocks = (dkLen + hLen - 1) / hLen
+        val result = ByteArray(dkLen)
+        var offset = 0
+        for (block in 1..blocks) {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+            mac.update(salt)
+            mac.update(
+                byteArrayOf(
+                    ((block shr 24) and 0xFF).toByte(),
+                    ((block shr 16) and 0xFF).toByte(),
+                    ((block shr 8) and 0xFF).toByte(),
+                    (block and 0xFF).toByte()
+                )
+            )
+            var u = mac.doFinal()
+            val t = u.copyOf()
+            for (i in 1 until iterations) {
+                val inner = Mac.getInstance("HmacSHA256")
+                inner.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+                u = inner.doFinal(u)
+                for (j in t.indices) t[j] = (t[j].toInt() xor u[j].toInt()).toByte()
+            }
+            val copyLen = minOf(hLen, dkLen - offset)
+            System.arraycopy(t, 0, result, offset, copyLen)
+            offset += copyLen
+        }
+        return result
+    }
+
+    /**
+     * scrypt key derivation (RFC 7914). Kept for the protocol's own tests; FxA
+     * itself uses PBKDF2 + HKDF above.
      */
     internal fun scrypt(
         password: ByteArray,
@@ -438,7 +639,7 @@ object FirefoxVpnAuth {
             System.arraycopy(x, 0, b, i * 64, 64)
         }
 
-        // Reorder: even blocks first, then odd blocks
+        // Even blocks first, then the odd ones.
         val tmp = ByteArray(blockSize)
         for (i in 0 until r) {
             System.arraycopy(b, (2 * i) * 64, tmp, i * 64, 64)
@@ -521,45 +722,4 @@ object FirefoxVpnAuth {
     }
 
     private fun rotl(v: Int, n: Int): Int = (v shl n) or (v ushr (32 - n))
-
-    private fun pbkdf2Sha256(
-        password: ByteArray,
-        salt: ByteArray,
-        iterations: Int,
-        dkLen: Int
-    ): ByteArray {
-        val mac = Mac.getInstance("HmacSHA256")
-        // SecretKeySpec refuses an empty key. HMAC zero-pads its key to the 64-byte block,
-        // so an empty key and a single zero byte give exactly the same result.
-        val keyBytes = if (password.isEmpty()) ByteArray(1) else password
-        mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
-        val hLen = 32
-        val numBlocks = (dkLen + hLen - 1) / hLen
-        val result = ByteArray(dkLen)
-        var offset = 0
-
-        for (block in 1..numBlocks) {
-            mac.reset()
-            mac.update(salt)
-            mac.update(byteArrayOf(
-                ((block shr 24) and 0xFF).toByte(),
-                ((block shr 16) and 0xFF).toByte(),
-                ((block shr 8) and 0xFF).toByte(),
-                (block and 0xFF).toByte()
-            ))
-            var u = mac.doFinal()
-            val t = u.copyOf()
-            for (i in 1 until iterations) {
-                mac.reset()
-                u = mac.doFinal(u)
-                for (j in t.indices) {
-                    t[j] = (t[j].toInt() xor u[j].toInt()).toByte()
-                }
-            }
-            val copyLen = minOf(hLen, dkLen - offset)
-            System.arraycopy(t, 0, result, offset, copyLen)
-            offset += copyLen
-        }
-        return result
-    }
 }

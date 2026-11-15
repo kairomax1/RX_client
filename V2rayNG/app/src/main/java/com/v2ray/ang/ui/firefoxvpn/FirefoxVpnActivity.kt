@@ -291,26 +291,19 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             when (val result = FirefoxVpnManager.connect(getApplication(), account, countryCode)) {
                 is FirefoxVpnManager.ConnectResult.Success -> {
                     val info = result.info
-                    // Create a ProfileItem for the Firefox VPN proxy
+                    // The core is pointed at the loopback relay, which adds the
+                    // Bearer header the Fastly proxy wants.
                     val profile = com.v2ray.ang.dto.entities.ProfileItem(
                         configType = com.v2ray.ang.enums.EConfigType.HTTP,
                         remarks = "Firefox VPN (${info.countryName})",
-                        server = info.proxyHost,
-                        serverPort = info.proxyPort.toString(),
-                        username = "bearer",
-                        password = info.proxyPassToken,
-                        network = "tcp",
-                        security = "tls",
-                        sni = info.proxyHost
+                        server = "127.0.0.1",
+                        serverPort = info.localPort.toString()
                     )
-                    val guid = java.util.UUID.randomUUID().toString()
+                    val guid = "firefox-vpn"
                     com.v2ray.ang.handler.MmkvManager.encodeServerConfig(guid, profile)
                     com.v2ray.ang.handler.MmkvManager.setSelectServer(guid)
 
-                    // Start the VPN service
-                    com.v2ray.ang.core.LauncherManager.startService(
-                        getApplication(), guid = guid
-                    )
+                    com.v2ray.ang.core.LauncherManager.startService(getApplication(), guid = guid)
 
                     _state.update {
                         it.copy(
@@ -321,10 +314,12 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                     }
                     AppLog.info(
                         AppLog.Section.Connection,
-                        "Firefox VPN connected via ${info.countryName} (${info.proxyHost})"
+                        "Firefox VPN connected via ${info.countryName} " +
+                            "(proxy ${info.proxyHost}, relay port ${info.localPort})"
                     )
                 }
                 is FirefoxVpnManager.ConnectResult.Error -> {
+                    com.v2ray.ang.handler.FirefoxVpnRelay.stop()
                     _state.update { it.copy(isConnecting = false, error = result.message) }
                 }
             }
@@ -333,6 +328,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
 
     fun disconnect() {
         com.v2ray.ang.core.LauncherManager.stopService(getApplication())
+        com.v2ray.ang.handler.FirefoxVpnRelay.stop()
         _state.update { it.copy(connectionInfo = null) }
         AppLog.info(AppLog.Section.Connection, "Firefox VPN disconnected")
     }

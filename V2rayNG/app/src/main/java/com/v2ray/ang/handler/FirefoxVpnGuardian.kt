@@ -80,11 +80,20 @@ object FirefoxVpnGuardian {
 
                 // Parse JWT claims (no signature verification needed — we just read aud/exp)
                 val claims = parseJwtClaims(token)
-                val aud = claims["aud"]?.toString() ?: ""
+                // aud is the proxy URI, e.g. "https://proxy.example.com:443";
+                // some passes carry it as a one-item list.
+                val aud = when (val value = claims["aud"]) {
+                    is List<*> -> value.firstOrNull()?.toString().orEmpty()
+                    null -> ""
+                    else -> value.toString()
+                }
                 val exp = (claims["exp"] as? Number)?.toLong() ?: 0
 
-                // aud is the proxy URI, e.g. "https://proxy.example.com:443"
-                val proxyUri = java.net.URI(aud)
+                val proxyUri = try {
+                    java.net.URI(aud)
+                } catch (_: Exception) {
+                    return@withContext PassResult.Error("Invalid proxy address in token")
+                }
                 val proxyHost = proxyUri.host ?: ""
                 val proxyPort = if (proxyUri.port > 0) proxyUri.port else 443
 

@@ -21,23 +21,63 @@ class FirefoxVpnAuthTest {
         assertEquals(expected, result.joinToString(" ") { "%02x".format(it) })
     }
 
-    /** The parameters Firefox Accounts uses, checked against a reference implementation. */
+    /** The password stretch Firefox Accounts performs, checked against a reference implementation. */
     @Test
-    fun scryptMatchesFirefoxAccountParameters() {
-        val result = FirefoxVpnAuth.scrypt(
-            password = "testpassword".toByteArray(),
-            salt = "testsalt".toByteArray(),
-            N = 32768, r = 8, p = 1, dkLen = 32
+    fun deriveAuthPwMatchesFirefoxAccounts() {
+        val authPw = FirefoxVpnAuth.deriveAuthPw("test@example.com", "password")
+        assertEquals(
+            "a624b128b0e54c3377fe16ca819c09d867827328bd8c740e620bffe3d1208475",
+            FirefoxVpnAuth.toHex(authPw)
         )
-        val expected = "c8bd4f0495664cfee04d145f4798e072fee5aed5e9f36b80f0e1aefcbed2f51f"
-        assertEquals(expected, result.joinToString("") { "%02x".format(it) })
+    }
+
+    /** A session token turns into the Hawk id and key the API expects. */
+    @Test
+    fun deriveHawkMatchesReference() {
+        val token = "a1b2c3d4e5f6".repeat(10)
+        val (id, key) = FirefoxVpnAuth.deriveHawk(token)
+        assertEquals("0f721872645a2c87bac6d0629ca577c195397f8b8fc210fc47f7b0acc11d241a", id)
+        assertEquals(
+            "add141ab70931c450eebbadd9d33fdca0e438b7c8ac5dab81df896be66c134f0",
+            FirefoxVpnAuth.toHex(key)
+        )
+    }
+
+    /** The Hawk string covers the body hash and the request line, as the API checks it. */
+    @Test
+    fun hawkNormalizedAndPayloadHashMatchReference() {
+        val payload = """{"email":"a@b.c","authPW":"00"}"""
+        val contentType = "application/json; charset=utf-8"
+        val payloadHash = FirefoxVpnAuth.hawkPayloadHash(payload, contentType)
+        assertEquals(
+            "e31a1d6163aa7376c5a2b3d0c687500128e6d70b479c3e4ea13d05d10ddda64c",
+            payloadHash
+        )
+
+        val normalized = FirefoxVpnAuth.hawkNormalized(
+            method = "POST",
+            url = "https://api.accounts.firefox.com/v1/account/login",
+            timestamp = 1_700_000_000L,
+            nonce = "abcdef123456",
+            payloadHash = payloadHash
+        )
+        assertEquals(
+            "hawk.1.header\n1700000000\nabcdef123456\nPOST\n/v1/account/login" +
+                "\napi.accounts.firefox.com\n443\n$payloadHash\n\n",
+            normalized
+        )
+    }
+
+    @Test
+    fun anEmptyPayloadLeavesTheHashEmpty() {
+        assertEquals("", FirefoxVpnAuth.hawkPayloadHash("", "application/json"))
     }
 
     @Test
     fun scryptIsDeterministic() {
         val a = FirefoxVpnAuth.scrypt("x".toByteArray(), "y".toByteArray(), 1024, 8, 1, 32)
         val b = FirefoxVpnAuth.scrypt("x".toByteArray(), "y".toByteArray(), 1024, 8, 1, 32)
-        assertEquals(a.joinToString("") { "%02x".format(it) }, b.joinToString("") { "%02x".format(it) })
+        assertEquals(FirefoxVpnAuth.toHex(a), FirefoxVpnAuth.toHex(b))
         assertTrue(a.size == 32)
     }
 }
