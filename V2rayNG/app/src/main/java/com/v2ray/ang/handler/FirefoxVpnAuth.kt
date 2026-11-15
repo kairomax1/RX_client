@@ -261,7 +261,7 @@ object FirefoxVpnAuth {
                     addProperty("code", code)
                     addProperty("code_verifier", verifier)
                 }.toString()
-                return@withContext tokenResultOf(postJson(OAUTH_TOKEN_URL, tokenBody, null, OAUTH_ACCEPT, null))
+                return@withContext tokenResultOf(postJson(OAUTH_TOKEN_URL, tokenBody, null, OAUTH_ACCEPT))
             } catch (e: FxaException) {
                 TokenResult.Error(e.message2)
             } catch (e: Exception) {
@@ -278,7 +278,7 @@ object FirefoxVpnAuth {
                     addProperty("grant_type", "refresh_token")
                     addProperty("refresh_token", refreshToken)
                 }.toString()
-                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT, null))
+                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT))
             } catch (e: FxaException) {
                 TokenResult.Error(e.message2)
             } catch (e: Exception) {
