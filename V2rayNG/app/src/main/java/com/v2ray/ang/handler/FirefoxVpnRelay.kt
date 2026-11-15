@@ -8,6 +8,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -43,6 +44,27 @@ object FirefoxVpnRelay {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
     private const val MAX_HEADER_BYTES = 16 * 1024
 
+    /** Bytes carried per read: a page-sized chunk, so a pump is not the limit. */
+    private const val PUMP_BUFFER_BYTES = 32 * 1024
+
+    /**
+     * Sockets kept ready to the proxy, so opening a tunnel does not wait for a
+     * TCP and a TLS handshake first. Two is what a phone page opens at once;
+     * a third is dialled while they are being used.
+     */
+    private const val WARM_COUNT = 4
+
+    /**
+     * How long a ready socket is trusted. Fastly closes an idle connection
+     * quietly, and a socket closed that way is noticed the moment a CONNECT
+     * is written to it — the tunnel then opens on a fresh one — so keeping
+     * them longer costs nothing but the handshake that replaces them.
+     */
+    private const val WARM_AGE_MILLIS = 30_000
+
+    /** Send and receive windows: a phone on a slow link still fills a pipe. */
+    private const val SOCKET_BUFFER_BYTES = 256 * 1024
+
     /** One address the proxy may be reached on, and what it belongs to. */
     data class Endpoint(val host: String, val port: Int, val label: String = "") {
         override fun toString(): String =
@@ -66,6 +88,45 @@ object FirefoxVpnRelay {
         Shape("host-target", true, false),
         Shape("host-proxy", false, false)
     )
+
+    /**
+     * Connections to the proxy already made, waiting to be given a CONNECT.
+     *
+     * A page opens several at once and each one used to pay for a TCP and a
+     * TLS handshake before it could ask for anything — two round trips to a
+     * server on another continent. Keeping a few ready takes that off the
+     * wait, and a session the proxy remembers makes the ones that are not
+     * ready start faster too.
+     */
+    private data class Warm(val socket: SSLSocket, val host: String, val port: Int, val madeAt: Long) {
+        fun fresh(now: Long): Boolean =
+            !socket.isClosed && socket.isConnected && now - madeAt < WARM_AGE_MILLIS
+    }
+
+    private val warm = ConcurrentLinkedQueue<Warm>()
+    private val warmInFlight = AtomicInteger(0)
+
+    @Volatile
+    private var warmThread: Thread? = null
+
+    @Volatile
+    private var warmHost: String = ""
+
+    @Volatile
+    private var warmPort: Int = 0
+
+    /**
+     * TLS sessions are remembered per context, so every handshake after the
+     * first to the same server is resumed instead of made again. One context
+     * for the life of the process is what makes that work.
+     */
+    private val tlsContext: SSLContext by lazy {
+        SSLContext.getInstance("TLS").apply { init(null, null, null) }
+    }
+
+    /** How many tunnels opened on a connection that was already there. */
+    private val warmed = AtomicInteger(0)
+    private val dialed = AtomicInteger(0)
 
     /** Only the Worker's pipe needs it, to read this install's key. */
     @Volatile
@@ -148,6 +209,7 @@ object FirefoxVpnRelay {
         if (cloudflareAddress == null && endpoints.isNotEmpty()) {
             resolve()
         }
+        if (cloudflareAddress == null) keepWarm()
         AppLog.info(
             AppLog.Section.Connection,
             "Firefox VPN relay listening on 127.0.0.1:${server.localPort} through " +
@@ -168,6 +230,17 @@ object FirefoxVpnRelay {
         cloudflareAddress = null
         endpoints = emptyList()
         activeEndpoint = null
+        warmThread?.interrupt()
+        warmThread = null
+        drainWarm()
+        val opened = dialed.getAndSet(0)
+        val ready = warmed.getAndSet(0)
+        if (opened + ready > 0) {
+            AppLog.info(
+                AppLog.Section.Connection,
+                "Firefox VPN: $ready of ${opened + ready} tunnels opened on a connection that was ready"
+            )
+        }
         for (socket in openSockets) {
             try {
                 socket.close()
@@ -307,7 +380,12 @@ object FirefoxVpnRelay {
         val pageHost = PROBE_TARGET.substringBefore(':')
         val pagePort = PROBE_TARGET.substringAfter(':').toInt()
         return try {
-            val tls = dialTls(endpoint.host, endpoint.port, timeoutMillis) ?: return null
+            // The number is what a tunnel really costs, so it is measured the
+            // way one is opened: on a connection that is ready when there is
+            // one, otherwise on a fresh one.
+            val ready = takeWarm(endpoint.host, endpoint.port)
+            val tls = ready ?: dialTls(endpoint.host, endpoint.port, timeoutMillis) ?: return null
+            if (ready == null) dialed.incrementAndGet()
             tls.use { outer ->
                 outer.soTimeout = timeoutMillis
                 outer.getOutputStream().apply {
@@ -346,11 +424,106 @@ object FirefoxVpnRelay {
         }
     }
 
+    // ── Connections kept ready ────────────────────────────────────
+
+    /**
+     * Keeps a few connections to the proxy ready. One is dialled at a time in
+     * the background, so the phone is never busy handshaking when a page asks
+     * for a tunnel, and a socket that has waited too long is let go.
+     */
+    private fun keepWarm() {
+        val endpoint = activeEndpoint ?: return
+        warmHost = endpoint.host
+        warmPort = endpoint.port
+        warmThread?.interrupt()
+        warmThread = thread(name = "firefox-vpn-warm", isDaemon = true) {
+            while (running) {
+                val now = System.currentTimeMillis()
+                var ready = 0
+                val kept = mutableListOf<Warm>()
+                for (candidate in warm) {
+                    if (candidate.fresh(now)) {
+                        kept += candidate
+                        ready++
+                    } else {
+                        close(candidate.socket)
+                    }
+                }
+                // The queue is emptied and refilled so a stale socket cannot
+                // be handed out while it is being counted.
+                warm.clear()
+                warm.addAll(kept)
+
+                val wanted = WARM_COUNT - ready - warmInFlight.get()
+                if (wanted > 0) {
+                    warmInFlight.incrementAndGet()
+                    val made = dialTls(warmHost, warmPort)
+                    warmInFlight.decrementAndGet()
+                    if (made != null && running) {
+                        warm.add(Warm(made, warmHost, warmPort, System.currentTimeMillis()))
+                    } else {
+                        close(made)
+                    }
+                }
+                try {
+                    Thread.sleep(if (ready >= WARM_COUNT) 5_000 else 300)
+                } catch (_: InterruptedException) {
+                    return@thread
+                }
+            }
+        }
+    }
+
+    /**
+     * Hands over a connection that is ready for this address, or null when
+     * there is none. A connection made for another address is not one: the
+     * proxy it belongs to is a different server.
+     */
+    private fun takeWarm(host: String, port: Int): SSLSocket? {
+        val now = System.currentTimeMillis()
+        val others = mutableListOf<Warm>()
+        var found: SSLSocket? = null
+        while (true) {
+            val candidate = warm.poll() ?: break
+            when {
+                found != null || candidate.host != host || candidate.port != port ->
+                    if (candidate.fresh(now)) others += candidate else close(candidate.socket)
+                !candidate.fresh(now) -> close(candidate.socket)
+                else -> found = candidate.socket
+            }
+        }
+        // What was taken out for another address goes back.
+        warm.addAll(others)
+        if (found != null) warmed.incrementAndGet()
+        return found
+    }
+
+    private fun drainWarm() {
+        while (true) {
+            val candidate = warm.poll() ?: return
+            close(candidate.socket)
+        }
+    }
+
+    private fun close(socket: SSLSocket?) {
+        try {
+            socket?.close()
+        } catch (_: Exception) {
+        }
+    }
+
     // ── Serving the core ──────────────────────────────────────────
 
     private fun handle(client: Socket) {
         var upstream: Tunnel? = null
         try {
+            // The core talks to this relay over loopback: no delay, and wider
+            // windows, so the phone side is never what the tunnel waits for.
+            runCatching {
+                client.tcpNoDelay = true
+                client.receiveBufferSize = SOCKET_BUFFER_BYTES
+                client.sendBufferSize = SOCKET_BUFFER_BYTES
+            }
             client.soTimeout = CONNECT_TIMEOUT_MILLIS
             val fromClient = BufferedInputStream(client.getInputStream())
             val head = readHead(fromClient) ?: return
@@ -473,41 +646,78 @@ object FirefoxVpnRelay {
             noteFailure("no address to dial")
             return null
         }
-        val tls = dialTls(endpoint.host, endpoint.port) ?: run {
-            noteFailure("${endpoint.host} cannot be reached")
-            return null
-        }
-        val buffered = BufferedInputStream(tls.getInputStream())
-        val statusLine = try {
-            tls.getOutputStream().apply {
-                write(connectRequest(target, bearerToken).toByteArray(Charsets.ISO_8859_1))
-                flush()
-            }
-            readHead(buffered)?.substringBefore("\r\n")
-        } catch (e: Exception) {
-            noteFailure(e.message ?: "the proxy closed the connection")
-            null
-        }
-        if (statusLine == null || !statusLine.contains(" 200")) {
-            noteFailure(statusLine?.trim() ?: "the proxy did not answer")
-            try {
-                tls.close()
+
+        // A connection that is already made saves two round trips; only when
+        // there is none, or when the proxy has closed the one there was, is a
+        // fresh one dialled.
+        var tls = takeWarm(endpoint.host, endpoint.port)
+        var statusLine: String? = null
+        var buffered: BufferedInputStream? = null
+        if (tls != null) {
+            val stream = BufferedInputStream(tls.getInputStream())
+            statusLine = try {
+                tls.getOutputStream().apply {
+                    write(connectRequest(target, bearerToken).toByteArray(Charsets.ISO_8859_1))
+                    flush()
+                }
+                readHead(stream)?.substringBefore("\r\n")
             } catch (_: Exception) {
+                null
             }
+            if (statusLine != null && statusLine.contains(" 200")) {
+                buffered = stream
+            } else {
+                close(tls)
+                tls = null
+                statusLine = null
+            }
+        }
+        if (tls == null) {
+            val fresh = dialTls(endpoint.host, endpoint.port) ?: run {
+                noteFailure("${endpoint.host} cannot be reached")
+                return null
+            }
+            dialed.incrementAndGet()
+            val stream = BufferedInputStream(fresh.getInputStream())
+            statusLine = try {
+                fresh.getOutputStream().apply {
+                    write(connectRequest(target, bearerToken).toByteArray(Charsets.ISO_8859_1))
+                    flush()
+                }
+                readHead(stream)?.substringBefore("\r\n")
+            } catch (e: Exception) {
+                noteFailure(e.message ?: "the proxy closed the connection")
+                null
+            }
+            if (statusLine == null || !statusLine.contains(" 200")) {
+                noteFailure(statusLine?.trim() ?: "the proxy did not answer")
+                close(fresh)
+                return null
+            }
+            tls = fresh
+            buffered = stream
+        }
+        val tunnel = tls ?: return null
+        val tunnelIn = buffered ?: run {
+            close(tunnel)
             return null
+        }
+        // A tunnel may be silent for as long as its two ends keep it: a wait
+        // that cuts it off after a few quiet seconds drops the connections an
+        // app holds open, which is what made the tunnel feel unstable.
+        try {
+            tunnel.soTimeout = 0
+        } catch (_: Exception) {
         }
         failures.set(0)
         problem = null
         // The bytes already read past the head belong to the tunnel, so the
         // same buffered stream travels on instead of a fresh one.
         return object : Tunnel {
-            override val input: InputStream get() = buffered
-            override val output: OutputStream get() = tls.getOutputStream()
+            override val input: InputStream get() = tunnelIn
+            override val output: OutputStream get() = tunnel.getOutputStream()
             override fun close() {
-                try {
-                    tls.close()
-                } catch (_: Exception) {
-                }
+                close(tunnel)
             }
         }
     }
@@ -544,19 +754,38 @@ object FirefoxVpnRelay {
         val index = list.indexOfFirst { it.host == current?.host && it.port == current.port }
         val next = list[((index + 1) % list.size)]
         activeEndpoint = next
+        // What is ready belongs to the address that was being used.
+        drainWarm()
+        if (running && cloudflareAddress == null) keepWarm()
         AppLog.info(AppLog.Section.Connection, "Firefox VPN: trying $next instead")
     }
 
-    /** The TLS connection to the proxy, dialled straight from the phone. */
+    /**
+     * The TLS connection to the proxy, dialled straight from the phone.
+     *
+     * Nagle is off: a tunnel carries small writes (the start of a handshake,
+     * a tap of a button) that would otherwise wait for a partner that is
+     * waiting for them. The windows are widened so a slow phone link does not
+     * decide the speed of the whole connection.
+     */
     private fun dialTls(host: String, port: Int, timeoutMillis: Int = CONNECT_TIMEOUT_MILLIS): SSLSocket? =
         try {
             val address = InetSocketAddress(host, port)
             val raw = Socket()
+            raw.tcpNoDelay = true
+            raw.receiveBufferSize = SOCKET_BUFFER_BYTES
+            raw.sendBufferSize = SOCKET_BUFFER_BYTES
             raw.connect(address, timeoutMillis)
             raw.soTimeout = timeoutMillis
 
-            val factory: SSLSocketFactory = SSLContext.getDefault().socketFactory
+            val factory: SSLSocketFactory = tlsContext.socketFactory
             val tls = factory.createSocket(raw, host, port, true) as SSLSocket
+            try {
+                tls.tcpNoDelay = true
+                tls.receiveBufferSize = SOCKET_BUFFER_BYTES
+                tls.sendBufferSize = SOCKET_BUFFER_BYTES
+            } catch (_: Exception) {
+            }
             val parameters = tls.sslParameters
             parameters.serverNames = listOf(SNIHostName(host))
             // Firefox offers both; offering one alone is what makes the proxy take
@@ -595,7 +824,7 @@ object FirefoxVpnRelay {
     }
 
     private fun pump(input: InputStream, output: OutputStream) {
-        val buffer = ByteArray(16 * 1024)
+        val buffer = ByteArray(PUMP_BUFFER_BYTES)
         while (true) {
             val read = try {
                 input.read(buffer)

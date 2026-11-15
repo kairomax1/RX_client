@@ -958,6 +958,7 @@
     <string name="firefox_vpn_err_unreachable">This phone cannot reach Mozilla\'s proxy at all. Turn the Cloudflare relay on.</string>
     <string name="firefox_vpn_err_no_traffic">Mozilla answered, but no page came back through it. Try again in a moment, or turn the relay on.</string>
     <string name="firefox_vpn_err_no_pass">Mozilla did not issue a pass for this account. Open Mozilla\'s own page and sign in again.</string>
+    <string name="firefox_vpn_err_no_permission">The phone did not allow the VPN, so nothing could be tunnelled. Allow it in the dialog that opens, or turn another VPN app off.</string>
     <string name="firefox_vpn_relay_refused">The relay is deployed, but Mozilla refused the tunnel through it: %1$s</string>
     <string name="firefox_vpn_err_407">the account was not accepted (407)</string>
     <string name="firefox_vpn_err_421">this address was refused (421)</string>

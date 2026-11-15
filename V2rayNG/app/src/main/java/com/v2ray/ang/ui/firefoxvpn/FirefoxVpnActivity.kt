@@ -3,6 +3,8 @@ package com.v2ray.ang.ui.firefoxvpn
 import android.app.Application
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -71,14 +73,18 @@ import com.v2ray.ang.handler.FirefoxVpnManager
 import com.v2ray.ang.handler.FirefoxVpnRelay
 import com.v2ray.ang.handler.FirefoxVpnServers
 import com.v2ray.ang.handler.FirefoxVpnStore
+import com.v2ray.ang.handler.ServiceRuntimeState
+import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.RxFogBackground
 import com.v2ray.ang.ui.compose.RxPromptFont
 import com.v2ray.ang.ui.compose.rxScreenBrush
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -87,6 +93,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -143,7 +150,9 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val connectStep: Int = 0,
         val connectTotal: Int = 0,
         val pingDone: Int = 0,
-        val pingTotal: Int = 0
+        val pingTotal: Int = 0,
+        /** The phone's VPN permission is being asked for; the core cannot start without it. */
+        val askVpnPermission: Boolean = false
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -190,8 +199,13 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
 
     fun selectCountry(code: String) {
         FirefoxVpnStore.saveSelectedCountry(getApplication(), code)
+        pickedByHand = true
         _state.update { it.copy(selectedCountryCode = code) }
     }
+
+    /** Set when the location was chosen by hand rather than left on the default. */
+    @Volatile
+    private var pickedByHand: Boolean = false
 
     fun selectAccount(id: String) {
         FirefoxVpnStore.saveActiveAccountId(getApplication(), id)
@@ -402,6 +416,54 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     private var reconnects: Int = 0
 
     /**
+     * The phone's VPN permission, asked for before the first tunnel.
+     *
+     * Nothing the app does counts as connected without it: the service starts,
+     * finds it has no permission and stops again, and the screen would go on
+     * saying connected while no page opens. So the question is asked here and
+     * the answer is waited for.
+     */
+    private var permissionAnswer: CompletableDeferred<Boolean>? = null
+
+    private suspend fun ensureVpnPermission(): Boolean {
+        if (!SettingsManager.isVpnMode()) return true
+        val answer = CompletableDeferred<Boolean>()
+        permissionAnswer = answer
+        _state.update { it.copy(askVpnPermission = true) }
+        return try {
+            withTimeout(120_000) { answer.await() }
+        } catch (_: TimeoutCancellationException) {
+            false
+        } finally {
+            permissionAnswer = null
+            _state.update { it.copy(askVpnPermission = false) }
+        }
+    }
+
+    /** Called by the screen with what the phone's permission dialog answered. */
+    fun onVpnPermissionResult(granted: Boolean) {
+        permissionAnswer?.complete(granted)
+    }
+
+    /** Set when the core was asked to start and did not, and what that means. */
+    @Volatile
+    private var coreRefused = false
+
+    /**
+     * Waits for the core to really be up. The relay answers on loopback
+     * whether the core runs or not, so the only honest witness is the flag the
+     * daemon itself writes.
+     */
+    private suspend fun waitForCore(timeoutMillis: Long = 15_000): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (ServiceRuntimeState.isRunning(getApplication())) return true
+            delay(400)
+        }
+        return false
+    }
+
+    /**
      * Opens a tunnel and refuses to call it connected until a real page has
      * come back through it. Countries this phone cannot reach are skipped, and
      * the ones it can reach are tried from the fastest.
@@ -432,6 +494,21 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                     it.copy(
                         isConnecting = false,
                         error = it.error ?: contextString(R.string.firefox_vpn_err_no_pass)
+                    )
+                }
+                return@launch
+            }
+
+            if (!ensureVpnPermission()) {
+                AppLog.error(
+                    AppLog.Section.Connection,
+                    "Firefox VPN: the phone's VPN permission was not given"
+                )
+                _state.update {
+                    it.copy(
+                        isConnecting = false,
+                        tryingCountry = null,
+                        error = contextString(R.string.firefox_vpn_err_no_permission)
                     )
                 }
                 return@launch
@@ -489,40 +566,60 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * The locations worth trying, measured first so the order is a real one:
-     * the chosen country, the recommended one, and the nearest others.
+     * The locations worth trying, quickest first.
+     *
+     * The order is measured, not guessed: whatever the last test left is
+     * reused, and the rest is timed once. A location that has been chosen by
+     * hand is tried first, because it was asked for; without a choice the
+     * quickest one is used, which is what keeps the delay low.
      */
     private suspend fun candidates(pass: FirefoxVpnGuardian.ProxyPass): List<String> {
         val countries = _state.value.countries
         if (countries.isEmpty()) return listOf(_state.value.selectedCountryCode.orEmpty())
-        val chosen = _state.value.selectedCountryCode
-        val pool = (
-            listOfNotNull(chosen) +
-                listOf(FirefoxVpnServers.RECOMMENDED_CODE) +
-                countries.map { it.code }
-            ).distinct().take(3)
 
-        val gate = Semaphore(3)
-        val measured = coroutineScope {
-            pool.map { code ->
-                val country = countries.firstOrNull { it.code == code }
-                async(Dispatchers.IO) {
-                    gate.withPermit {
-                        val value = country?.let { FirefoxVpnServers.ping(it, pass.token) }
-                        if (country != null) {
-                            _state.update { state ->
-                                state.copy(pings = state.pings + (country.code to value))
+        val stored = _state.value.pings
+        val known = countries.count { stored.containsKey(it.code) }
+        val chosen = _state.value.selectedCountryCode
+
+        // Nothing to go on, or only a little: time enough of them to have an
+        // order. A test that was already run is not repeated on every connect.
+        if (known < 3) {
+            val sample = (
+                listOfNotNull(chosen) +
+                    listOf(FirefoxVpnServers.RECOMMENDED_CODE) +
+                    countries.map { it.code }
+                ).distinct().take(8)
+            val gate = Semaphore(4)
+            coroutineScope {
+                sample.map { code ->
+                    val country = countries.firstOrNull { it.code == code }
+                    async(Dispatchers.IO) {
+                        gate.withPermit {
+                            val value = country?.let { FirefoxVpnServers.ping(it, pass.token) }
+                            if (country != null) {
+                                _state.update { state ->
+                                    state.copy(pings = state.pings + (country.code to value))
+                                }
                             }
                         }
-                        code to value
                     }
-                }
-            }.awaitAll()
+                }.awaitAll()
+            }
         }
-        return measured.sortedWith(
-            compareBy<Pair<String, Int?>> { it.second == null }
-                .thenBy { it.second ?: Int.MAX_VALUE }
-        ).map { it.first }
+
+        val measured = _state.value.pings
+        val ordered = countries.sortedWith(
+            compareBy<FirefoxVpnServers.Country> { measured[it.code] == null }
+                .thenBy { measured[it.code] ?: Int.MAX_VALUE }
+                .thenBy { it.name }
+        ).map { it.code }
+        // A choice made by hand is honoured; the rest follow by delay.
+        val first = if (pickedByHand && chosen != null) {
+            listOf(chosen) + ordered.filter { it != chosen }
+        } else {
+            ordered
+        }
+        return first.take(4)
     }
 
     /** Builds one tunnel and asks it for a real page; null when it stays silent. */
@@ -563,6 +660,19 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         com.v2ray.ang.handler.MmkvManager.setSelectServer(TUNNEL_GUID)
         com.v2ray.ang.core.LauncherManager.startService(getApplication(), guid = TUNNEL_GUID)
 
+        // The relay would answer on loopback even with the core down, so the
+        // core itself is waited for: without it the phone's own traffic never
+        // reaches the tunnel and nothing opens in any app.
+        if (!waitForCore()) {
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Firefox VPN: the core never started, so no traffic reaches the tunnel"
+            )
+            coreRefused = true
+            stopTunnel()
+            return null
+        }
+
         if (!FirefoxVpnCheck.waitUntilCarries(info.localPort, 15_000)) {
             AppLog.error(
                 AppLog.Section.Connection,
@@ -571,6 +681,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             stopTunnel()
             return null
         }
+        coreRefused = false
         AppLog.info(
             AppLog.Section.Connection,
             "Firefox VPN: verified through ${info.countryName} (relay ${info.localPort})"
@@ -586,7 +697,11 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             var missed = 0
             while (isActive) {
                 delay(25_000)
-                val ok = withContext(Dispatchers.IO) { FirefoxVpnCheck.through(localPort) }
+                // Both halves are watched: the core carrying the phone's
+                // traffic, and the relay carrying it on.
+                val up = ServiceRuntimeState.isRunning(getApplication())
+                val ok = up && withContext(Dispatchers.IO) { FirefoxVpnCheck.through(localPort) }
+                if (!up) coreRefused = true
                 _state.update { it.copy(tested = ok) }
                 if (ok) {
                     missed = 0
@@ -744,6 +859,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             else -> code
         }
         return when {
+            coreRefused -> contextString(R.string.firefox_vpn_err_no_permission)
             rejection.isNotEmpty() -> contextString(R.string.firefox_vpn_err_refused, rejection)
             problem.contains("cannot be reached") ||
                 problem.contains("no answer") ||
@@ -774,8 +890,25 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = MaterialTheme.colorScheme
     val captchaImage by FirefoxVpnCaptcha.pendingImage.collectAsStateWithLifecycle()
+    val vpnPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.onVpnPermissionResult(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+    LaunchedEffect(state.askVpnPermission) {
+        if (state.askVpnPermission) {
+            val context = viewModel.getApplication<Application>()
+            val intent = android.net.VpnService.prepare(context)
+            if (intent == null) {
+                viewModel.onVpnPermissionResult(true)
+            } else {
+                vpnPermissionLauncher.launch(intent)
+            }
+        }
+    }
+
     val browserLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+        ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val code = result.data?.getStringExtra(FirefoxVpnWebSignInActivity.EXTRA_CODE).orEmpty()
         val address = result.data?.getStringExtra(FirefoxVpnWebSignInActivity.EXTRA_EMAIL).orEmpty()
