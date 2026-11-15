@@ -74,7 +74,7 @@ object FirefoxVpnGuardian {
                     return@withContext PassResult.Error(msg, response.code)
                 }
 
-                val json = JsonParser.parseString(body).asJsonObject()
+                val json = JsonParser.parseString(body).asJsonObject
                 val token = json.get("token")?.asString
                     ?: return@withContext PassResult.Error("Empty token in Guardian response")
 
@@ -160,7 +160,7 @@ object FirefoxVpnGuardian {
         val parts = token.split(".")
         if (parts.size < 2) return emptyMap()
         val payload = Base64.decode(parts[1], Base64.URL_SAFE)
-        val json = JsonParser.parseString(String(payload, StandardCharsets.UTF_8)).asJsonObject()
+        val json = JsonParser.parseString(String(payload, StandardCharsets.UTF_8)).asJsonObject
         val map = mutableMapOf<String, Any?>()
         for ((key, value) in json.entrySet()) {
             map[key] = when {

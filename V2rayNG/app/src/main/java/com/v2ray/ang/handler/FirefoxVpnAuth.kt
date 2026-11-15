@@ -97,33 +97,28 @@ object FirefoxVpnAuth {
                     addProperty("rememberMe", true)
                 }
                 val resp = post("$FXA_BASE/account/login", body.toString())
-                val json = JsonParser.parseString(resp.body).asJsonObject()
+                val json: JsonObject = JsonParser.parseString(resp.body).asJsonObject
 
-                when {
-                    json.has("sessionToken") -> {
-                        val sessionToken = json.get("sessionToken").asString
-                        val uid = json.get("uid").asString
-                        val verified = json.get("verified").asBoolean
-                        val accountEmail = json.get("email")?.asString ?: email
-                        if (verified) {
-                            LoginResult.Success(uid, sessionToken, accountEmail, true)
-                        } else {
-                            LoginResult.NeedEmailCode(sessionToken, accountEmail)
-                        }
+                if (json.has("sessionToken")) {
+                    val sessionToken: String = json.get("sessionToken").asString
+                    val uid: String = json.get("uid").asString
+                    val verified: Boolean = json.get("verified").asBoolean
+                    val accountEmail: String = if (json.has("email")) json.get("email").asString else email
+                    if (verified) {
+                        LoginResult.Success(uid, sessionToken, accountEmail, true)
+                    } else {
+                        LoginResult.NeedEmailCode(sessionToken, accountEmail)
                     }
-                    json.has("code") && json.get("code").asString == "email_code" -> {
-                        val sessionToken = json.get("sessionToken").asString
-                        LoginResult.NeedEmailCode(sessionToken, email)
-                    }
-                    json.has("code") && json.get("code").asString == "totp" -> {
-                        val sessionToken = json.get("sessionToken").asString
-                        LoginResult.NeedTotp(sessionToken, email)
-                    }
-                    else -> {
-                        val msg = json.get("message")?.asString ?: "Unknown error"
-                        val errno = json.get("errno")?.asInt ?: 0
-                        LoginResult.Error(msg, errno)
-                    }
+                } else if (json.has("code") && json.get("code").asString == "email_code") {
+                    val sessionToken: String = json.get("sessionToken").asString
+                    LoginResult.NeedEmailCode(sessionToken, email)
+                } else if (json.has("code") && json.get("code").asString == "totp") {
+                    val sessionToken: String = json.get("sessionToken").asString
+                    LoginResult.NeedTotp(sessionToken, email)
+                } else {
+                    val msg: String = if (json.has("message")) json.get("message").asString else "Unknown error"
+                    val errno: Int = if (json.has("errno")) json.get("errno").asInt else 0
+                    LoginResult.Error(msg, errno)
                 }
             } catch (e: Exception) {
                 LoginResult.Error(e.message ?: "Network error")
@@ -139,7 +134,7 @@ object FirefoxVpnAuth {
                     addProperty("sessionToken", sessionToken)
                 }
                 val resp = post("$FXA_BASE/session/verify_code", body.toString())
-                val json = JsonParser.parseString(resp.body).asJsonObject()
+                val json = JsonParser.parseString(resp.body).asJsonObject
                 json.get("verified")?.asBoolean == true
             } catch (_: Exception) {
                 false
@@ -155,7 +150,7 @@ object FirefoxVpnAuth {
                     addProperty("sessionToken", sessionToken)
                 }
                 val resp = post("$FXA_BASE/session/verify/totp", body.toString())
-                val json = JsonParser.parseString(resp.body).asJsonObject()
+                val json = JsonParser.parseString(resp.body).asJsonObject
                 json.get("verified")?.asBoolean == true
             } catch (_: Exception) {
                 false
@@ -180,7 +175,7 @@ object FirefoxVpnAuth {
                     codeBody.toString(),
                     sessionToken
                 )
-                val codeJson = JsonParser.parseString(codeResp.body).asJsonObject()
+                val codeJson = JsonParser.parseString(codeResp.body).asJsonObject
                 val authCode = codeJson.get("code")?.asString
                     ?: return@withContext TokenResult.Error("No authorization code received")
 
@@ -191,7 +186,7 @@ object FirefoxVpnAuth {
                     "&redirect_uri=https://accounts.firefox.com/signin" +
                     "&scope=${java.net.URLEncoder.encode(OAUTH_SCOPE, "UTF-8")}"
                 val tokenResp = postForm(OAUTH_TOKEN_URL, tokenBody)
-                val tokenJson = JsonParser.parseString(tokenResp.body).asJsonObject()
+                val tokenJson = JsonParser.parseString(tokenResp.body).asJsonObject
 
                 val accessToken = tokenJson.get("access_token")?.asString
                     ?: return@withContext TokenResult.Error("No access token received")
@@ -215,7 +210,7 @@ object FirefoxVpnAuth {
                     "&refresh_token=$refreshToken" +
                     "&client_id=$FIREFOX_CLIENT_ID"
                 val resp = postForm(OAUTH_TOKEN_URL, body)
-                val json = JsonParser.parseString(resp.body).asJsonObject()
+                val json = JsonParser.parseString(resp.body).asJsonObject
 
                 val accessToken = json.get("access_token")?.asString
                     ?: return@withContext TokenResult.Error("No access token in refresh response")

@@ -57,7 +57,7 @@ object FirefoxVpnServers {
             if (!response.isSuccessful) return@withContext emptyList()
 
             val body = response.body?.string() ?: return@withContext emptyList()
-            val json = JsonParser.parseString(body).asJsonObject()
+            val json = JsonParser.parseString(body).asJsonObject
             val data = json.getAsJsonArray("data") ?: return@withContext emptyList()
 
             val countries = mutableListOf<Country>()
