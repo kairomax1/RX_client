@@ -1,8 +1,11 @@
 package com.v2ray.ang.handler
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 
 class FirefoxVpnAuthTest {
 
@@ -79,5 +82,45 @@ class FirefoxVpnAuthTest {
         val b = FirefoxVpnAuth.scrypt("x".toByteArray(), "y".toByteArray(), 1024, 8, 1, 32)
         assertEquals(FirefoxVpnAuth.toHex(a), FirefoxVpnAuth.toHex(b))
         assertTrue(a.size == 32)
+    }
+
+    /** The proof of work the edge asks for: two characters whose hash is given. */
+    @Test
+    fun proofOfWorkIsSolved() {
+        val base = "Zm9vYmFy"
+        val answer = "aa"
+        val target = MessageDigest.getInstance("SHA-256")
+            .digest((base + answer).toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        assertEquals(answer, FirefoxVpnAuth.solvePow(base, target))
+    }
+
+    @Test
+    fun aProofOfWorkWithoutAnAnswerIsReported() {
+        val impossible = "00".repeat(32)
+        assertNull(FirefoxVpnAuth.solvePow("base", impossible))
+    }
+
+    /** The script's own call names the tasks, the token and the prefix it belongs to. */
+    @Test
+    fun challengeInitIsReadFromTheScript() {
+        val script = """var x = 1; init([{"ty":"pow","data":{"base":"abc"}},{"ty":"captcha"}], "TOKEN123", "/_fs-ch-9x"); more();"""
+        val parsed = FirefoxVpnAuth.parseChallengeInit(script, "/_fs-ch-9x")
+        assertNotNull(parsed)
+        assertEquals(2, parsed!!.first.size())
+        assertEquals("pow", parsed.first[0].asJsonObject.get("ty").asString)
+        assertEquals("TOKEN123", parsed.second)
+    }
+
+    @Test
+    fun aScriptForAnotherPrefixIsIgnored() {
+        val script = """init([{"ty":"pow"}], "TOKEN", "/_fs-ch-aaaa")"""
+        assertNull(FirefoxVpnAuth.parseChallengeInit(script, "/_fs-ch-bbbb"))
+    }
+
+    @Test
+    fun onlyAPageWithTheChallengeMarksCounts() {
+        assertTrue(FirefoxVpnAuth.isChallengePage("<html>Client Challenge<script src=\"/_fs-ch-1a/x\">"))
+        assertTrue(!FirefoxVpnAuth.isChallengePage("<html>Firefox Accounts</html>"))
     }
 }

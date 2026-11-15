@@ -50,8 +50,11 @@ object FirefoxVpnAuth {
 
     private val random = SecureRandom()
 
-    /** The edge keeps a cookie after its bot check; the same jar must carry it. */
-    private val cookieJar = object : CookieJar {
+    /**
+     * The edge keeps a cookie after its bot check; every later request has to
+     * carry the same one, so the jar travels with the client.
+     */
+    internal class FirefoxCookieJar : CookieJar {
         private val cookies = mutableListOf<Cookie>()
 
         @Synchronized
@@ -68,7 +71,25 @@ object FirefoxVpnAuth {
             cookies.removeAll { it.expiresAt < now }
             return cookies.filter { it.matches(url) }
         }
+
+        /** Takes the cookies another jar earned. */
+        @Synchronized
+        fun adopt(other: FirefoxCookieJar) {
+            val earned = other.snapshot()
+            for (cookie in earned) {
+                cookies.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
+                cookies.add(cookie)
+            }
+        }
+
+        @Synchronized
+        private fun snapshot(): List<Cookie> = cookies.toList()
+
+        @Synchronized
+        fun isEmpty(): Boolean = cookies.isEmpty()
     }
+
+    private val cookieJar = FirefoxCookieJar()
 
     private val client = OkHttpClient.Builder()
         .cookieJar(cookieJar)
@@ -141,35 +162,93 @@ object FirefoxVpnAuth {
     suspend fun login(email: String, password: String): LoginResult =
         withContext(Dispatchers.IO) {
             try {
-                val trimmed = email.trim()
-                var response = loginAttempt(trimmed, password, VERIFICATION_EMAIL_2FA)
+                val typed = email.trim()
+                AppLog.info(AppLog.Section.Connection, "FxA: signing in as $typed")
+                var response = loginAttempt(typed, password, VERIFICATION_EMAIL_2FA)
+
                 // A deployment that does not know the verification method asks
                 // for a plain sign-in instead; errno 107 is "invalid parameter".
-                if (response.code == 400 && errnoOf(response.body) == 107) {
-                    response = loginAttempt(trimmed, password, null)
+                if (errnoOf(response.body) == 107) {
+                    logStep("login without a verification method", response)
+                    response = loginAttempt(typed, password, null)
+                }
+                // errno 120 is "incorrect email case": the stretch is case
+                // sensitive, so the account's own spelling has to be used.
+                if (errnoOf(response.body) == 120) {
+                    val realEmail = emailInError(response.body)
+                    if (realEmail.isNotEmpty() && realEmail != typed) {
+                        logStep("login with the account's own spelling $realEmail", response)
+                        response = loginAttempt(realEmail, password, VERIFICATION_EMAIL_2FA)
+                        if (errnoOf(response.body) == 107) {
+                            response = loginAttempt(realEmail, password, null)
+                        }
+                        if (response.code == 200) {
+                            return@withContext finishLogin(response, realEmail)
+                        }
+                    }
                 }
                 if (response.code != 200) {
+                    logStep("login refused", response)
                     return@withContext LoginResult.Error(messageFor(response), errnoOf(response.body))
                 }
-
-                val json = JsonParser.parseString(response.body).asJsonObject
-                val sessionToken = json.string("sessionToken")
-                    ?: return@withContext LoginResult.Error("Firefox answered without a session token")
-                val uid = json.string("uid").orEmpty()
-
-                if (sessionVerified(sessionToken)) {
-                    LoginResult.Success(uid, sessionToken, trimmed, true)
-                } else if (json.string("verificationMethod") == "totp-2fa") {
-                    LoginResult.NeedTotp(sessionToken, trimmed)
-                } else {
-                    LoginResult.NeedEmailCode(sessionToken, trimmed)
-                }
+                finishLogin(response, typed)
             } catch (e: FxaException) {
+                AppLog.error(AppLog.Section.Connection, "FxA: ${e.message2}")
                 LoginResult.Error(e.message2, e.errno)
             } catch (e: Exception) {
+                AppLog.error(AppLog.Section.Connection, "FxA: no answer from Firefox (${e.javaClass.simpleName}: ${e.message})")
                 LoginResult.Error("No answer from Firefox: ${e.message ?: "network error"}")
             }
         }
+
+    /**
+     * Reads the sign-in answer: an account whose address and session are both
+     * confirmed signs straight in, otherwise FxA has sent or will accept a code.
+     */
+    private fun finishLogin(response: HttpResponse, email: String): LoginResult {
+        val json = try {
+            JsonParser.parseString(response.body).asJsonObject
+        } catch (_: Exception) {
+            return LoginResult.Error("Firefox's answer could not be read")
+        }
+        val sessionToken = json.string("sessionToken")
+            ?: return LoginResult.Error("Firefox answered without a session token")
+        val uid = json.string("uid").orEmpty()
+        val verified = json.boolean("verified") ?: false
+        val method = json.string("verificationMethod").orEmpty()
+        val reason = json.string("verificationReason").orEmpty()
+
+        AppLog.info(
+            AppLog.Section.Connection,
+            "FxA: login accepted, verified=$verified method=${method.ifEmpty { "-" }} reason=${reason.ifEmpty { "-" }}"
+        )
+
+        return when {
+            verified && method != "email-2fa" && method != "totp-2fa" ->
+                LoginResult.Success(uid, sessionToken, email, true)
+            method == "totp-2fa" -> LoginResult.NeedTotp(sessionToken, email)
+            else -> LoginResult.NeedEmailCode(sessionToken, email)
+        }
+    }
+
+    private fun logStep(step: String, response: HttpResponse) {
+        val errno = errnoOf(response.body)
+        val message = try {
+            JsonParser.parseString(response.body).asJsonObject.string("message").orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        AppLog.info(
+            AppLog.Section.Connection,
+            "FxA: $step -> HTTP ${response.code} errno=$errno${if (message.isEmpty()) "" else " ($message)"}"
+        )
+    }
+
+    private fun emailInError(body: String): String = try {
+        JsonParser.parseString(body).asJsonObject.string("email").orEmpty()
+    } catch (_: Exception) {
+        ""
+    }
 
     private fun loginAttempt(email: String, password: String, verificationMethod: String?): HttpResponse {
         val authPw = deriveAuthPw(email, password)
@@ -471,6 +550,12 @@ object FirefoxVpnAuth {
             .header("Accept-Language", "en-US, en")
             .header("Cache-Control", "no-cache")
             .header("Pragma", "no-cache")
+        // The sign-in page's own origin; the edge treats a request without it
+        // as less browser-like than one with it.
+        if (url.startsWith(FXA_BASE)) {
+            builder.header("Origin", "https://accounts.firefox.com")
+            builder.header("Referer", "https://accounts.firefox.com/")
+        }
         if (authorization != null) builder.header("Authorization", authorization)
 
         when (method) {
@@ -480,18 +565,317 @@ object FirefoxVpnAuth {
         }
         if (body != null) builder.header("Content-Type", contentType)
 
-        client.newCall(builder.build()).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            if (response.code == 406) {
-                throw FxaException(
-                    "Mozilla's security check (Fastly) refused this request. " +
-                        "Try again later or on another network."
-                )
+        val path = url.substringAfter("://").substringAfter('/')
+        var solved = false
+        while (true) {
+            client.newCall(builder.build()).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                AppLog.info(AppLog.Section.Connection, "FxA: $method /$path -> HTTP ${response.code}")
+                if (response.code == 406) {
+                    AppLog.error(
+                        AppLog.Section.Connection,
+                        "FxA: the edge served its anti-bot challenge instead of the account API"
+                    )
+                    // One solve and one retry: the cookie the challenge earns is
+                    // what the next request needs.
+                    if (!solved && solveChallenge()) {
+                        solved = true
+                        return@use
+                    }
+                    throw FxaException(
+                        "Mozilla's security check refused this request. Open Firefox once on this " +
+                            "network, then try again; if it keeps failing, use another network."
+                    )
+                }
+                if (response.code >= 500) {
+                    throw FxaException("Firefox's servers answered ${response.code}. Try again later.")
+                }
+                return HttpResponse(response.code, text)
             }
-            if (response.code >= 500) {
-                throw FxaException("Firefox's servers answered ${response.code}. Try again later.")
+        }
+    }
+
+    // ── Fastly's anti-bot challenge ───────────────────────────────
+
+    private const val CHALLENGE_MARK = "/_fs-ch-"
+    private const val MAX_CHALLENGE_ROUNDS = 8
+    private const val POW_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+    private val challengePrefixPattern = Regex("/_fs-ch-[A-Za-z0-9]+")
+    private val initStartPattern = Regex("""\binit\s*\(\s*\[""")
+
+    /**
+     * Answers the edge's client challenge so the account API lets a non-browser
+     * client through.
+     *
+     * The challenge is a small JSON handshake: the page names a script prefix,
+     * the script lists the tasks (a two-character proof of work, a token
+     * request, a metrics form), and the answers go back to `fst-post-back`
+     * until the edge says success and hands out its cookie. Nothing here runs
+     * JavaScript; the tasks are solved directly.
+     */
+    private fun solveChallenge(): Boolean {
+        for (base in listOf(FXA_BASE.substringBefore("/v1"), "https://accounts.firefox.com")) {
+            try {
+                if (solveChallengeOnHost(base)) {
+                    AppLog.info(AppLog.Section.Connection, "FxA: the edge's challenge was answered on ${base.substringAfter("://")}")
+                    return true
+                }
+            } catch (e: FxaException) {
+                AppLog.error(AppLog.Section.Connection, "FxA: challenge on ${base.substringAfter("://")} failed: ${e.message2}")
+            } catch (e: Exception) {
+                AppLog.error(AppLog.Section.Connection, "FxA: challenge on ${base.substringAfter("://")} failed: ${e.message ?: e.javaClass.simpleName}")
             }
-            return HttpResponse(response.code, text)
+        }
+        return false
+    }
+
+    private fun solveChallengeOnHost(base: String): Boolean {
+        // A solver that already holds a valid cookie is served the real page,
+        // so each attempt starts with an empty jar of its own.
+        val jar = FirefoxCookieJar()
+        val solver = client.newBuilder().cookieJar(jar).build()
+        val pageUrl = "$base/"
+
+        val page = fetchText(solver, pageUrl) ?: return false
+        if (!isChallengePage(page)) return false
+
+        val prefix = challengePrefixPattern.find(page)?.value ?: return false
+        val script = fetchText(solver, "$base$prefix/script.js?reload=true") ?: return false
+        var parsed = parseChallengeInit(script, prefix) ?: return false
+        var challenges = parsed.first
+        var token = parsed.second
+
+        for (round in 1..MAX_CHALLENGE_ROUNDS) {
+            val answers = mutableListOf<com.google.gson.JsonElement>()
+            for (challenge in challenges) {
+                val type = challenge.asJsonObject.string("ty").orEmpty()
+                answers.add(answerChallenge(solver, base, prefix, token, type, challenge.asJsonObject))
+            }
+
+            val postBack = JsonObject().apply {
+                addProperty("token", token)
+                add("data", com.google.gson.JsonArray().apply { answers.forEach { add(it) } })
+            }
+            val response = postJsonOn(
+                solver,
+                "$base$prefix/fst-post-back",
+                postBack.toString(),
+                origin = base
+            )
+            if (response.code != 200) {
+                throw FxaException("The edge answered the challenge with HTTP ${response.code}")
+            }
+            val result = JsonParser.parseString(response.body).asJsonObject
+            if (result.string("status") == "success") {
+                // The cookie is only good if the page now clears on this path.
+                val after = fetchText(solver, pageUrl)
+                if (after != null && isChallengePage(after)) {
+                    throw FxaException("The edge did not accept the challenge from this network")
+                }
+                cookieJar.adopt(jar)
+                if (jar.isEmpty()) throw FxaException("The edge issued no cookie")
+                AppLog.info(AppLog.Section.Connection, "FxA: challenge finished after $round round(s)")
+                return true
+            }
+            val next = result.getAsJsonArray("ch")
+            token = result.string("tok").orEmpty()
+            if (next == null || next.size() == 0 || token.isEmpty()) {
+                throw FxaException("The edge sent no next challenge round")
+            }
+            challenges = next
+        }
+        throw FxaException("The challenge did not finish in $MAX_CHALLENGE_ROUNDS rounds")
+    }
+
+    private fun answerChallenge(
+        solver: OkHttpClient,
+        base: String,
+        prefix: String,
+        token: String,
+        type: String,
+        data: JsonObject
+    ): com.google.gson.JsonElement = when (type) {
+        "pow" -> {
+            val challengeBase = data.string("base").orEmpty()
+            val hash = data.string("hash").orEmpty()
+            val answer = solvePow(challengeBase, hash)
+                ?: throw FxaException("The edge's proof of work had no answer")
+            JsonObject().apply {
+                addProperty("ty", "pow")
+                addProperty("base", challengeBase)
+                addProperty("answer", answer)
+                addProperty("hmac", data.string("hmac").orEmpty())
+                addProperty("expires", data.string("expires").orEmpty())
+            }
+        }
+        "pat" -> {
+            // A browser can mint a private access token; this client cannot, and
+            // an empty one makes the edge fall back to the proof of work.
+            val auth = try {
+                val url = "$base$prefix/pat?token=${java.net.URLEncoder.encode(token, "UTF-8")}"
+                val response = postJsonOn(solver, url, "", origin = base, accept = "text/plain")
+                if (response.code == 200) JsonParser.parseString(response.body).asJsonObject.string("auth").orEmpty() else ""
+            } catch (_: Exception) {
+                ""
+            }
+            JsonObject().apply {
+                addProperty("ty", "pat")
+                addProperty("auth", auth)
+            }
+        }
+        "clientmetrics" -> JsonObject().apply {
+            addProperty("ty", "clientmetrics")
+            addProperty("webdriver", false)
+            add("bot_detection_result", JsonObject().apply {
+                addProperty("bot_detected", false)
+                add("bot_kind", com.google.gson.JsonNull.INSTANCE)
+            })
+            add("browser_metrics", JsonObject().apply {
+                addProperty("client_data", "{}")
+                add("error_trace", com.google.gson.JsonNull.INSTANCE)
+            })
+            add("detector_results", JsonObject())
+            addProperty("v", 2)
+        }
+        "captcha" -> throw FxaException(
+            "Mozilla asks for a picture check that the app cannot answer. Sign in once from Firefox, then try again."
+        )
+        else -> throw FxaException("Mozilla asked for a check of an unknown kind ($type)")
+    }
+
+    /** The challenge's proof of work: two characters whose hash is the given one. */
+    internal fun solvePow(base: String, hashHex: String): String? {
+        val target = try {
+            fromHex(hashHex)
+        } catch (_: Exception) {
+            return null
+        }
+        if (target.size != 32) return null
+        for (first in POW_ALPHABET) {
+            for (second in POW_ALPHABET) {
+                val candidate = "$base$first$second"
+                if (sha256(candidate.toByteArray(StandardCharsets.UTF_8)).contentEquals(target)) {
+                    return "$first$second"
+                }
+            }
+        }
+        return null
+    }
+
+    internal fun isChallengePage(page: String): Boolean =
+        page.contains(CHALLENGE_MARK) && page.contains("Client Challenge")
+
+    /**
+     * Reads the challenge list and its token out of the challenge script: the
+     * call is `init([...tasks...], "token", "prefix")`.
+     */
+    internal fun parseChallengeInit(script: String, prefix: String): Pair<com.google.gson.JsonArray, String>? {
+        val starts = initStartPattern.findAll(script).map { it.range.last }.toList()
+        // The last valid call wins; earlier ones can be helpers or old forms.
+        for (start in starts.asReversed()) {
+            val arrayText = sliceJsonArray(script, start) ?: continue
+            val challenges = try {
+                JsonParser.parseString(arrayText).asJsonArray
+            } catch (_: Exception) {
+                continue
+            }
+            if (challenges.size() == 0) continue
+            val after = script.substring(start + arrayText.length)
+            val strings = stringLiterals(after).take(2)
+            if (strings.size < 2) continue
+            val token = strings[0]
+            if (strings[1] != prefix || token.isEmpty()) continue
+            if (challenges.any { it.asJsonObject.string("ty").isNullOrEmpty() }) continue
+            return challenges to token
+        }
+        return null
+    }
+
+    /** Cuts the JSON array that starts at [start], respecting strings and escapes. */
+    private fun sliceJsonArray(text: String, start: Int): String? {
+        var depth = 0
+        var inString = false
+        var i = start
+        while (i < text.length) {
+            val c = text[i]
+            if (inString) {
+                when (c) {
+                    '\\' -> i++
+                    '"' -> inString = false
+                }
+            } else {
+                when (c) {
+                    '"' -> inString = true
+                    '[', '{' -> depth++
+                    ']', '}' -> {
+                        depth--
+                        if (depth == 0) return text.substring(start, i + 1)
+                    }
+                }
+            }
+            i++
+        }
+        return null
+    }
+
+    /** The plain string literals of a script fragment, unescaped just enough for tokens. */
+    private fun stringLiterals(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] == '"') {
+                val start = i + 1
+                var j = start
+                val builder = StringBuilder()
+                while (j < text.length) {
+                    val c = text[j]
+                    if (c == '\\' && j + 1 < text.length) {
+                        builder.append(text[j + 1])
+                        j += 2
+                        continue
+                    }
+                    if (c == '"') break
+                    builder.append(c)
+                    j++
+                }
+                out.add(builder.toString())
+                i = j + 1
+            } else {
+                i++
+            }
+        }
+        return out
+    }
+
+    private fun fetchText(solver: OkHttpClient, url: String): String? {
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .get()
+            .build()
+        solver.newCall(request).execute().use { response ->
+            if (response.code != 200) return null
+            return response.body?.string()
+        }
+    }
+
+    private fun postJsonOn(
+        solver: OkHttpClient,
+        url: String,
+        body: String,
+        origin: String,
+        accept: String = "application/json"
+    ): HttpResponse {
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", accept)
+            .header("Origin", origin)
+            .header("Content-Type", "application/json")
+            .post(body.toRequestBody(JSON))
+            .build()
+        solver.newCall(request).execute().use { response ->
+            return HttpResponse(response.code, response.body?.string().orEmpty())
         }
     }
 
