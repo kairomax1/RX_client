@@ -56,6 +56,7 @@ import com.v2ray.ang.handler.FirefoxVpnStore
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.RxFogBackground
 import com.v2ray.ang.ui.compose.RxPromptFont
+import com.v2ray.ang.ui.compose.rxScreenBrush
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -65,12 +66,11 @@ class FirefoxVpnActivity : BaseComponentActivity() {
 
     private val viewModel: FirefoxVpnViewModel by viewModels()
 
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            RxFogBackground(Modifier.fillMaxSize()) {
-                FirefoxVpnScreen(viewModel)
-            }
+    @Composable
+    override fun ScreenContent() {
+        Box(Modifier.fillMaxSize().background(rxScreenBrush())) {
+            RxFogBackground(Modifier.fillMaxSize())
+            FirefoxVpnScreen(viewModel)
         }
     }
 
@@ -781,7 +781,7 @@ private fun AddAccountDialog(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(stringResource(R.string.cancel))
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
         }
