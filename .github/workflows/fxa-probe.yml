@@ -8,40 +8,24 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Ask the account API what it thinks of us
         run: |
           FIREFOX_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0'
-          CHROME_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
-          BODY='{"email":"nobody@example.com","authPW":"0000000000000000000000000000000000000000000000000000000000000000"}'
-
-          probe() {
-            name="$1"; shift
-            result=$(curl -s -m 20 -o /tmp/body.txt -w '%{http_code}' "$@" \
-              -H 'Content-Type: application/json' \
-              --data "$BODY" \
+          out=""
+          for mode in "h1 --http1.1" "h2 --http2"; do
+            set -- $mode
+            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$2" -A "$FIREFOX_UA" \
+              -H 'Content-Type: application/json' --data '{"email":"nobody@example.com","authPW":"00"}' \
               https://api.accounts.firefox.com/v1/account/login || true)
-            snippet=$(head -c 90 /tmp/body.txt | tr -d '\n' | tr -d '\r')
-            out="$out | $name=$result{$snippet}"
-          }
-
-          probe "h1-firefox" --http1.1 -A "$FIREFOX_UA" -H 'Accept: application/json'
-          probe "h2-firefox" --http2 -A "$FIREFOX_UA" -H 'Accept: application/json'
-          probe "h2-chrome" --http2 -A "$CHROME_UA" -H 'Accept: application/json'
-          probe "h2-firefox-full" --http2 -A "$FIREFOX_UA" \
-            -H 'Accept: application/json' -H 'Accept-Language: en-US, en' \
-            -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-            -H 'Origin: https://accounts.firefox.com' -H 'Referer: https://accounts.firefox.com/' \
-            -H 'Sec-Fetch-Dest: empty' -H 'Sec-Fetch-Mode: no-cors' -H 'Sec-Fetch-Site: none' \
-            -H 'Priority: u=4'
-          probe "h2-chrome-full" --http2 -A "$CHROME_UA" \
-            -H 'Accept: application/json' -H 'Accept-Language: en-US, en' \
-            -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-            -H 'Origin: https://accounts.firefox.com' -H 'Referer: https://accounts.firefox.com/'
-
-          site=$(curl -s -m 20 -A "$FIREFOX_UA" https://accounts.firefox.com/ | grep -c '_fs-ch-')
-          api_root=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -A "$FIREFOX_UA" https://api.accounts.firefox.com/)
+            out="$out $1=$code"
+          done
+          site=$(curl -s -m 20 -A "$FIREFOX_UA" https://accounts.firefox.com/ | grep -c '_fs-ch-' || true)
           token=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -A "$FIREFOX_UA" -H 'Accept-Encoding: identity' \
             -H 'Content-Type: application/json' --data '{"client_id":"5882386c6d801776","grant_type":"refresh_token","refresh_token":"x"}' \
-            https://oauth.accounts.firefox.com/v1/token)
-
-          echo "::notice::api-root=$api_root site-challenge-marks=$site token-endpoint=$token$out"
+            https://oauth.accounts.firefox.com/v1/token || true)
+          echo "::notice::site-challenge-marks=$site token-endpoint=$token$out"
+      - name: Run the challenge solver
+        run: |
+          python3 -m pip install --quiet requests
+          python3 .github/fxa-probe/solve.py
