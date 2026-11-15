@@ -473,7 +473,8 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         _state.value.accounts.firstOrNull { it.id == _state.value.activeAccountId }
 
     /** Reads a string with the app's own resources. */
-    private fun contextString(resId: Int): String = getApplication<Application>().getString(resId)
+    private fun contextString(resId: Int, vararg args: Any): String =
+        getApplication<Application>().getString(resId, *args)
 
     /**
      * Asks Mozilla for the pass this account tunnels with. One pass serves
