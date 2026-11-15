@@ -84,18 +84,22 @@ object FirefoxVpnStore {
         return try {
             val key = getOrCreateKey(context)
             val decrypted = decrypt(file.readBytes(), key)
-            val json = JsonParser.parseString(String(decrypted, StandardCharsets.UTF_8)).asJsonArray()
-            json.map { item ->
+            val json = JsonParser.parseString(String(decrypted, StandardCharsets.UTF_8)).asJsonArray
+            val result = mutableListOf<StoredAccount>()
+            for (item in json) {
                 val obj = item.asJsonObject
-                StoredAccount(
-                    id = obj.get("id").asString,
-                    email = obj.get("email").asString,
-                    accessToken = obj.get("accessToken").asString,
-                    refreshToken = obj.get("refreshToken").asString,
-                    expiresAt = obj.get("expiresAt").asLong,
-                    createdAt = obj.get("createdAt").asLong
+                result.add(
+                    StoredAccount(
+                        id = obj.get("id").asString,
+                        email = obj.get("email").asString,
+                        accessToken = obj.get("accessToken").asString,
+                        refreshToken = obj.get("refreshToken").asString,
+                        expiresAt = obj.get("expiresAt").asLong,
+                        createdAt = obj.get("createdAt").asLong
+                    )
                 )
             }
+            result
         } catch (_: Exception) {
             emptyList()
         }
