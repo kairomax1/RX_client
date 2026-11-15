@@ -896,4 +896,16 @@
     <string name="firefox_vpn_enter_email_code">Enter the code sent to %1$s</string>
     <string name="firefox_vpn_enter_totp">Enter your authenticator code</string>
     <string name="firefox_vpn_quota">Used %.1f GB of %.1f GB</string>
+    <string name="firefox_vpn_section_account">Account</string>
+    <string name="firefox_vpn_section_country">Location</string>
+    <string name="firefox_vpn_section_usage">Usage</string>
+    <string name="firefox_vpn_no_account_hint">Sign in with your Firefox Account. The password is not kept; only the sign-in tokens are saved.</string>
+    <string name="firefox_vpn_connecting">Connecting…</string>
+    <string name="firefox_vpn_captcha_title">Mozilla\'s picture check</string>
+    <string name="firefox_vpn_captcha_hint">Type the characters in the picture. Mozilla asks for this once per sign-in.</string>
+    <string name="firefox_vpn_captcha_send">Send</string>
+    <string name="firefox_vpn_ready">Ready to connect</string>
+    <string name="firefox_vpn_recommended">Recommended</string>
+    <string name="firefox_vpn_account_count">%1$d accounts</string>
+    <string name="firefox_vpn_remove_account">Remove account</string>
 </resources>

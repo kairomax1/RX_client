@@ -72,6 +72,13 @@ object FirefoxVpnAuth {
             return cookies.filter { it.matches(url) }
         }
 
+        /** Puts one cookie in the jar. */
+        @Synchronized
+        fun add(cookie: Cookie) {
+            cookies.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
+            cookies.add(cookie)
+        }
+
         /** Takes the cookies another jar earned. */
         @Synchronized
         fun adopt(other: FirefoxCookieJar) {
@@ -536,6 +543,45 @@ object FirefoxVpnAuth {
     private fun get(url: String, authorization: String?): HttpResponse =
         request("GET", url, null, authorization)
 
+    /**
+     * Takes the cookies a real Firefox window earned for Mozilla's hosts.
+     *
+     * The edge's challenge is answered by the browser's own JavaScript when the
+     * user signs in there, and the cookie it leaves is what a non-browser client
+     * needs. The names are copied to each host the app talks to.
+     */
+    fun adoptBrowserCookies(header: String) {
+        if (header.isBlank()) return
+        val pairs = header.split(";")
+            .map { it.trim() }
+            .filter { it.contains("=") && !it.startsWith("=") }
+        if (pairs.isEmpty()) return
+        val hosts = listOf(
+            "api.accounts.firefox.com",
+            "oauth.accounts.firefox.com",
+            "accounts.firefox.com",
+            "firefox.settings.services.mozilla.com",
+            "vpn.mozilla.org"
+        )
+        var added = 0
+        for (host in hosts) {
+            for (pair in pairs) {
+                val name = pair.substringBefore("=").trim()
+                val value = pair.substringAfter("=").trim()
+                if (name.isEmpty() || value.isEmpty()) continue
+                try {
+                    cookieJar.add(
+                        Cookie.Builder().name(name).value(value).domain(host).path("/").build()
+                    )
+                    added++
+                } catch (_: Exception) {
+                    // A cookie the builder refuses is not worth stopping for.
+                }
+            }
+        }
+        AppLog.info(AppLog.Section.Connection, "FxA: took $added cookies from the browser window")
+    }
+
     private fun request(
         method: String,
         url: String,
@@ -550,9 +596,13 @@ object FirefoxVpnAuth {
             .header("Accept-Language", "en-US, en")
             .header("Cache-Control", "no-cache")
             .header("Pragma", "no-cache")
-        // The sign-in page's own origin; the edge treats a request without it
-        // as less browser-like than one with it.
-        if (url.startsWith(FXA_BASE)) {
+        // The header profile Firefox sends on its OAuth grants. The edge reads
+        // it when deciding whether a client is a browser.
+        builder.header("Sec-Fetch-Dest", "empty")
+        builder.header("Sec-Fetch-Mode", "no-cors")
+        builder.header("Sec-Fetch-Site", "none")
+        builder.header("Priority", "u=4")
+        if (url.startsWith(FXA_BASE) || url.startsWith(OAUTH_TOKEN_URL.substringBefore("/v1"))) {
             builder.header("Origin", "https://accounts.firefox.com")
             builder.header("Referer", "https://accounts.firefox.com/")
         }
@@ -566,7 +616,7 @@ object FirefoxVpnAuth {
         if (body != null) builder.header("Content-Type", contentType)
 
         val path = url.substringAfter("://").substringAfter('/')
-        var solved = false
+        var solveAttempts = 0
         while (true) {
             client.newCall(builder.build()).execute().use { response ->
                 val text = response.body?.string().orEmpty()
@@ -578,8 +628,8 @@ object FirefoxVpnAuth {
                     )
                     // One solve and one retry: the cookie the challenge earns is
                     // what the next request needs.
-                    if (!solved && solveChallenge()) {
-                        solved = true
+                    if (solveAttempts < 2 && solveChallenge()) {
+                        solveAttempts++
                         return@use
                     }
                     throw FxaException(
@@ -738,9 +788,19 @@ object FirefoxVpnAuth {
             add("detector_results", JsonObject())
             addProperty("v", 2)
         }
-        "captcha" -> throw FxaException(
-            "Mozilla asks for a picture check that the app cannot answer. Sign in once from Firefox, then try again."
-        )
+        "captcha" -> {
+            // The edge wants a person: show the picture in the app and send back
+            // what was read. This is the only challenge that cannot be solved here.
+            val image = data.string("image_b64").orEmpty()
+            if (image.isEmpty()) throw FxaException("Mozilla asked for a picture check without a picture")
+            AppLog.info(AppLog.Section.Connection, "FxA: Mozilla asks for a picture check; waiting for the answer")
+            val typed = FirefoxVpnCaptcha.ask(image)
+                ?: throw FxaException("The picture check was not answered")
+            JsonObject().apply {
+                addProperty("ty", "captcha")
+                addProperty("answer", typed)
+            }
+        }
         else -> throw FxaException("Mozilla asked for a check of an unknown kind ($type)")
     }
 

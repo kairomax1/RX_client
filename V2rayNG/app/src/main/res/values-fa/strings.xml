@@ -869,4 +869,16 @@
     <string name="firefox_vpn_enter_email_code">کدی که به %1$s ارسال شده را وارد کن</string>
     <string name="firefox_vpn_enter_totp">کد احراز هویت خود را وارد کن</string>
     <string name="firefox_vpn_quota">مصرف %.1f گیگ از %.1f گیگ</string>
+    <string name="firefox_vpn_section_account">حساب</string>
+    <string name="firefox_vpn_section_country">موقعیت</string>
+    <string name="firefox_vpn_section_usage">مصرف</string>
+    <string name="firefox_vpn_no_account_hint">با حساب فایرفاکس وارد شو. رمز عبور ذخیره نمی‌شود؛ فقط کلیدهای ورود نگه داشته می‌شوند.</string>
+    <string name="firefox_vpn_connecting">در حال اتصال…</string>
+    <string name="firefox_vpn_captcha_title">تست تصویری موزیلا</string>
+    <string name="firefox_vpn_captcha_hint">حرف‌های داخل تصویر را بنویس. موزیلا این را یک‌بار در هر ورود می‌پرسد.</string>
+    <string name="firefox_vpn_captcha_send">بفرست</string>
+    <string name="firefox_vpn_ready">آمادهٔ اتصال</string>
+    <string name="firefox_vpn_recommended">پیشنهادی</string>
+    <string name="firefox_vpn_account_count">%1$d حساب</string>
+    <string name="firefox_vpn_remove_account">حذف حساب</string>
 </resources>
