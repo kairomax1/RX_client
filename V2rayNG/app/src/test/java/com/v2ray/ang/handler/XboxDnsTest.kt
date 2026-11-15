@@ -12,7 +12,7 @@ class XboxDnsTest {
 
     /** A DNS answer to [id] with one A record per address, each named by a pointer to the question. */
     private fun answer(id: Int, host: String, addresses: List<String>, rcode: Int = 0): ByteArray {
-        val question = ConsoleDns.buildQuery(host, id)
+        val question = XboxDns.buildQuery(host, id)
         question[2] = 0x81.toByte()
         question[3] = (0x80 or rcode).toByte()
         question[7] = addresses.size.toByte()
@@ -51,7 +51,7 @@ class XboxDnsTest {
         assertNull(XboxDns.parseAnswer(message, message.size, 0x4321), "another question's answer")
         val refused = answer(7, "login.live.com", emptyList(), rcode = 5)
         assertNull(XboxDns.parseAnswer(refused, refused.size, 7))
-        val question = ConsoleDns.buildQuery("login.live.com", 7)
+        val question = XboxDns.buildQuery("login.live.com", 7)
         assertNull(XboxDns.parseAnswer(question, question.size, 7), "a question is not an answer")
         assertNull(XboxDns.parseAnswer(message, message.size - 3, 0x1234), "cut short")
         assertNull(XboxDns.parseAnswer(byteArrayOf(1, 2, 3), 3, null))
@@ -132,5 +132,52 @@ class XboxDnsTest {
             )
         ).map { it.address }
         assertEquals(listOf("4.0.0.1", "5.0.0.1", "3.0.0.1", "2.0.0.1", "6.0.0.1", "1.0.0.1"), ranked)
+    }
+
+    @Test
+    fun onlyARealAnswerThatIsNotARefusalCountsAsOpen() {
+        assertEquals(200, XboxDns.parseStatus("HTTP/1.1 200 OK\r\n"))
+        assertEquals(403, XboxDns.parseStatus("HTTP/1.1 403 Forbidden"))
+        assertEquals(404, XboxDns.parseStatus("HTTP/2 404"))
+        assertEquals(-1, XboxDns.parseStatus("<html>blocked"))
+        assertEquals(-1, XboxDns.parseStatus(""))
+        assertTrue(XboxDns.isOpen(200))
+        assertTrue(XboxDns.isOpen(404), "the service answered; it only has nothing at that path")
+        assertTrue(XboxDns.isOpen(302))
+        assertFalse(XboxDns.isOpen(403), "what a sanction block answers")
+        assertFalse(XboxDns.isOpen(451))
+        assertFalse(XboxDns.isOpen(-1), "a connection the filter cut")
+    }
+
+    @Test
+    fun servicesNameHostsOfTheAppNotBareSites() {
+        assertEquals("discord.com", XboxDns.hostOf("discord.com/api/v9/gateway"))
+        assertEquals("gateway.discord.gg", XboxDns.hostOf("gateway.discord.gg"))
+        val all = XboxDns.GAMES + XboxDns.DISCORD
+        assertEquals(all.size, all.map { it.id }.toSet().size)
+        for (service in all) {
+            assertTrue(service.names.isNotEmpty(), service.id)
+            for (entry in service.names) {
+                assertFalse(entry.startsWith("www.") && service.id != "bungie", "$entry is a web site")
+                assertFalse("://" in entry, entry)
+            }
+        }
+    }
+
+    @Test
+    fun cloudflareIsDiscordsOwnGround() {
+        assertTrue(XboxDns.isCloudflare(ip("162.159.137.232")))
+        assertFalse(XboxDns.isCloudflare(ip("178.22.122.110")))
+        assertTrue(XboxDns.isUnusual(ip("178.22.122.110"), emptySet(), XboxDns::isCloudflare))
+        assertFalse(XboxDns.isUnusual(ip("162.159.137.232"), emptySet(), XboxDns::isCloudflare))
+    }
+
+    @Test
+    fun questionIsAWellFormedDnsPacket() {
+        val expected = byteArrayOf(
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x01, 'a'.code.toByte(), 0x02, 'i'.code.toByte(), 'r'.code.toByte(), 0x00, 0x00, 0x01, 0x00, 0x01,
+        )
+        assertEquals(expected.toList(), XboxDns.buildQuery("a.ir", 0x1234).toList())
     }
 }

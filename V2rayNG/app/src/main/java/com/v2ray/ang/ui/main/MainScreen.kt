@@ -363,7 +363,6 @@ fun MainScreen(
                     showQuickSheet = false
                     if (destination == MainDestination.DnsMode) {
                         dnsModeViewModel.refresh()
-                        dnsModeViewModel.probeConsoleDns()
                         showDnsMode = true
                     } else {
                         onNavigate(destination)
@@ -383,7 +382,6 @@ fun MainScreen(
                     if (enabled) mainViewModel.testAllAndConnectBest()
                 },
                 onSetEnabledOnly = dnsModeViewModel::setEnabled,
-                onProbeConsoleDns = dnsModeViewModel::probeConsoleDns,
                 onUseAether = mainViewModel::connectAether,
                 onAddDomain = dnsModeViewModel::addDomain,
                 onClearDomains = dnsModeViewModel::clearDomains,

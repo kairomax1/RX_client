@@ -13,7 +13,10 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /**
- * Finds DNS servers that get an Xbox, or the Xbox app, past the sanction block. The console
+ * Finds DNS servers that get an app past a sanction or filter block: the Xbox app (below),
+ * Discord, or a game together with Xbox ([carries], [opensWithout]).
+ *
+ * Xbox: finds DNS servers that get an Xbox, or the Xbox app, past the sanction block. The console
  * accepts nothing but a DNS address, so only a server that sends the Xbox Live names to a
  * relay of its own is of any use; an ordinary resolver, however quick, changes nothing.
  *
@@ -57,6 +60,8 @@ object XboxDns {
         val millis: Long,
         /** Two-letter country Microsoft sees through the relay; empty when unknown. */
         val country: String = "",
+        /** Labels of the services other than Xbox this server opens. */
+        val services: List<String> = emptyList(),
     )
 
     /** What the examination of one server found. */
@@ -79,6 +84,86 @@ object XboxDns {
     )
 
     internal const val SWEEP_NAMES = 2
+
+    /** What the user wants a DNS server for. */
+    enum class Purpose { Xbox, Discord, Games }
+
+    /**
+     * A service and the addresses its own app talks to (not its web site). An entry may carry
+     * a path, for a host whose bare address answers "forbidden" to everyone.
+     */
+    data class Service(val id: String, val label: String, val names: List<String>)
+
+    /** The Discord app: its API and the gateway every client keeps open. */
+    val DISCORD = Service("discord", "Discord", listOf("discord.com/api/v9/gateway", "gateway.discord.gg"))
+
+    /**
+     * Games that are filtered in Iran or refuse Iranian addresses, each with the sign-in and
+     * service hosts its client uses. Games of one publisher share the publisher's hosts.
+     */
+    val GAMES = listOf(
+        Service("cod", "Warzone / Call of Duty", listOf("s.activision.com", "profile.callofduty.com", "oauth.battle.net")),
+        Service("ea", "Battlefield / EA FC / Apex", listOf("accounts.ea.com", "gateway.ea.com", "service-aggregation-layer.juno.ea.com")),
+        Service("warthunder", "War Thunder", listOf("login.gaijin.net", "auth.gaijinent.com", "yupmaster.gaijinent.com")),
+        Service("roblox", "Roblox", listOf("auth.roblox.com", "apis.roblox.com", "clientsettings.roblox.com", "gamejoin.roblox.com")),
+        Service("epic", "Fortnite / Rocket League", listOf("account-public-service-prod.ol.epicgames.com/account/api/version", "fortnite-public-service-prod11.ol.epicgames.com", "launcher-public-service-prod06.ol.epicgames.com")),
+        Service("riot", "Valorant / League of Legends", listOf("auth.riotgames.com", "clientconfig.rpg.riotgames.com")),
+        Service("blizzard", "Overwatch / Battle.net", listOf("oauth.battle.net", "account.battle.net")),
+        Service("rockstar", "GTA Online / Rockstar", listOf("signin.rockstargames.com", "prod.ros.rockstargames.com", "auth-prod.ros.rockstargames.com")),
+        Service("ubisoft", "Rainbow Six / Ubisoft", listOf("public-ubiservices.ubi.com")),
+        Service("steam", "Steam / CS2 / Dota 2", listOf("api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/", "login.steampowered.com")),
+        Service("playstation", "PlayStation Network", listOf("auth.api.sonyentertainmentnetwork.com", "ca.account.sony.com")),
+        Service("minecraft", "Minecraft", listOf("api.minecraftservices.com", "sessionserver.mojang.com")),
+        Service("bungie", "Destiny 2", listOf("www.bungie.net")),
+        Service("hoyo", "Genshin Impact", listOf("hk4e-sdk-os.hoyoverse.com")),
+        Service("tarkov", "Escape from Tarkov", listOf("launcher.escapefromtarkov.com", "prod.escapefromtarkov.com")),
+        Service("supercell", "Clash of Clans / Brawl Stars", listOf("id.supercell.com")),
+        Service("pubg", "PUBG", listOf("accounts.krafton.com")),
+        Service("nintendo", "Nintendo", listOf("accounts.nintendo.com")),
+        Service("wargaming", "World of Tanks", listOf("api.worldoftanks.eu", "wgcps-eu.wargaming.net")),
+    )
+
+    /** The host of an entry of [Service.names]. */
+    internal fun hostOf(entry: String): String = entry.substringBefore('/')
+
+    /** Lists of open DNS servers, renewed by their makers every day; read by [updateList]. */
+    private val LIST_SOURCES = listOf(
+        "https://raw.githubusercontent.com/proabiral/Fresh-Resolvers/master/resolvers.txt",
+        "https://raw.githubusercontent.com/rix4uni/resolvers/main/resolvers.txt",
+        "https://raw.githubusercontent.com/trickest/resolvers/main/resolvers.txt",
+        "https://raw.githubusercontent.com/blechschmidt/massdns/master/lists/resolvers.txt",
+        "https://public-dns.info/nameserver/ir.txt",
+    )
+    private const val EXTRA_FILE = "rx-dns-extra.txt"
+    private const val KEY_LIST_CHECKED = "rx_dns_list_checked"
+    private const val LIST_EVERY_MILLIS = 15 * 60 * 1000L
+
+    /**
+     * Adds the servers of the public lists to the ones the app carries. Looks at most every
+     * fifteen minutes; a list that did not change costs one short request. Returns how many
+     * servers the phone now knows beyond the bundled ones.
+     */
+    fun updateList(context: Context): Int {
+        val file = java.io.File(context.filesDir, EXTRA_FILE)
+        val known = LinkedHashSet<Int>()
+        if (file.exists()) runCatching { known.addAll(parseAddresses(file.readText())) }
+        val now = System.currentTimeMillis()
+        if (now - MmkvManager.decodeSettingsLong(KEY_LIST_CHECKED, 0L) < LIST_EVERY_MILLIS) return known.size
+        MmkvManager.encodeSettings(KEY_LIST_CHECKED, now)
+        val before = known.size
+        var answered = 0
+        for (source in LIST_SOURCES) {
+            val tagKey = "rx_dns_tag_" + source.hashCode().toUInt().toString(16)
+            val answer = PublicConfigs.fetch(source, MmkvManager.decodeSettingsString(tagKey).takeIf { file.exists() })
+            if (answer.code == 200 || answer.code == 304) answered++
+            val body = answer.body ?: continue
+            known.addAll(parseAddresses(body).filterNot { isUnroutable(it) })
+            MmkvManager.encodeSettings(tagKey, answer.tag)
+        }
+        if (known.size != before) runCatching { file.writeText(known.joinToString("\n") { toText(it) }) }
+        AppLog.info(AppLog.Section.Other, "DNS scanner: $answered of ${LIST_SOURCES.size} server lists answered, ${known.size - before} new servers, ${known.size} beyond the bundled ones")
+        return known.size
+    }
 
     /** A Microsoft service that answers with the country it sees the caller in. */
     private const val GEO_HOST = "geo.prod.do.dsp.mp.microsoft.com"
@@ -150,17 +235,31 @@ object XboxDns {
 
     /**
      * Every address to sweep, in the order to ask them: named services, then the addresses
-     * Iranian tools list, then everything else.
+     * Iranian tools list, then everything else, then what [updateList] brought.
      */
     fun loadAll(context: Context, named: List<Named>): IntArray {
         val first = named.flatMap { listOfNotNull(toInt(it.primary), toInt(it.secondary)) }
         val second = parseAddresses(context.assets.open("rx_dns_priority.txt").bufferedReader().use { it.readText() })
         val rest = parsePacked(context.assets.open("rx_dns_all.bin").use { it.readBytes() })
+        val extra = runCatching { parseAddresses(java.io.File(context.filesDir, EXTRA_FILE).readText()) }.getOrDefault(emptyList())
         val seen = HashSet<Int>(rest.size * 2)
-        val ordered = ArrayList<Int>(rest.size + 256)
+        val ordered = ArrayList<Int>(rest.size + extra.size + 256)
         for (address in first + second) if (seen.add(address)) ordered.add(address)
         for (address in rest) if (seen.add(address)) ordered.add(address)
+        for (address in extra) if (seen.add(address)) ordered.add(address)
         return ordered.toIntArray()
+    }
+
+    /** A plain DNS question for the A record of [host]. */
+    internal fun buildQuery(host: String, id: Int): ByteArray {
+        val name = host.split('.').flatMap { label -> listOf(label.length.toByte()) + label.toByteArray(Charsets.US_ASCII).toList() }
+        val header = byteArrayOf(
+            (id shr 8).toByte(), id.toByte(),
+            0x01, 0x00, // recursion desired
+            0x00, 0x01, // one question
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        )
+        return header + name.toByteArray() + byteArrayOf(0x00, 0x00, 0x01, 0x00, 0x01)
     }
 
     /** IPv4 addresses in the answer to question [id]; null when it is not a clean answer to it. */
@@ -225,12 +324,17 @@ object XboxDns {
     }
 
     /** True for an address that could be a relay: reachable, not Microsoft's, not what everyone gives. */
-    internal fun isUnusual(address: Int, common: Set<Int>): Boolean =
-        !isUnroutable(address) && address !in common && !isMicrosoft(address)
+    internal fun isUnusual(address: Int, common: Set<Int>, own: (Int) -> Boolean = ::isMicrosoft): Boolean =
+        !isUnroutable(address) && address !in common && !own(address)
+
+    /** True for an address in Cloudflare's ranges, where Discord's own names live. */
+    fun isCloudflare(address: Int): Boolean = PublicConfigs.isCloudflare(
+        byteArrayOf((address ushr 24).toByte(), (address ushr 16).toByte(), (address ushr 8).toByte(), address.toByte())
+    )
 
     /** True when a sweep reply holds an address worth examining. */
-    internal fun isSuspect(heard: Heard, common: Set<Int>): Boolean =
-        heard.answers.any { list -> list.any { isUnusual(it, common) } }
+    fun isSuspect(heard: Heard, common: Set<Int>, own: (Int) -> Boolean = ::isMicrosoft): Boolean =
+        heard.answers.any { list -> list.any { isUnusual(it, common, own) } }
 
     /**
      * The relay a server points to, from its answers to [APP_NAMES] in that order: an unusual
@@ -250,17 +354,23 @@ object XboxDns {
     internal fun sweepId(address: Int, name: Int): Int = (((address * 31 + (address ushr 13)) and 0x1FFF) shl 3) or name
 
     /**
-     * Asks every address the first [SWEEP_NAMES] names. [onHeard] is called (from another
+     * Asks every address the first [SWEEP_NAMES] of [names]. [onHeard] is called (from another
      * thread) as soon as a server has answered them all; [onSent] with how many were asked so
      * far. Returns when all were asked and the last answers had time to arrive, or
      * [cancelled] was set.
      */
-    fun sweep(addresses: IntArray, cancelled: AtomicBoolean, onSent: (Int) -> Unit, onHeard: (Heard) -> Unit) {
+    fun sweep(
+        addresses: IntArray,
+        cancelled: AtomicBoolean,
+        onSent: (Int) -> Unit,
+        onHeard: (Heard) -> Unit,
+        names: List<String> = APP_NAMES.take(SWEEP_NAMES),
+    ) {
         val index = HashMap<Int, Int>(addresses.size * 2)
         addresses.forEachIndexed { position, address -> index[address] = position }
         val sentAt = LongArray(addresses.size)
         val answers = arrayOfNulls<List<Int>>(addresses.size * SWEEP_NAMES)
-        val queries = APP_NAMES.take(SWEEP_NAMES).map { ConsoleDns.buildQuery(it, 0) }
+        val queries = names.take(SWEEP_NAMES).map { buildQuery(it, 0) }
         DatagramSocket().use { socket ->
             socket.soTimeout = 300
             runCatching { socket.receiveBufferSize = 4 * 1024 * 1024 }
@@ -335,7 +445,7 @@ object XboxDns {
                 DatagramSocket().use { socket ->
                     socket.soTimeout = QUERY_TIMEOUT_MILLIS
                     val id = (System.nanoTime() and 0xFFFF).toInt()
-                    val query = ConsoleDns.buildQuery(host, id)
+                    val query = buildQuery(host, id)
                     socket.send(DatagramPacket(query, query.size, InetAddress.getByName(server), 53))
                     val buffer = ByteArray(1500)
                     val packet = DatagramPacket(buffer, buffer.size)
@@ -369,6 +479,60 @@ object XboxDns {
         // A relay that carries no Xbox Live name, or only one name, does nothing for the app.
         if (!live || carried < 2) return Examined(null, 0, "", answered)
         return Examined(relay, carried, if (cancelled.get()) "" else seenCountry(relayText), answered)
+    }
+
+    /**
+     * The HTTP status the service at [entry] gives when reached at [address] with its real
+     * name and certificate; -1 when the connection, the certificate or the answer fails.
+     */
+    internal fun probe(address: String, entry: String): Int = try {
+        val host = hostOf(entry)
+        secure(address, host) { socket ->
+            socket.outputStream.write(
+                "GET /${entry.substringAfter('/', "")} HTTP/1.1\r\nHost: $host\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+                    .toByteArray(Charsets.US_ASCII)
+            )
+            socket.outputStream.flush()
+            val buffer = ByteArray(64)
+            var size = 0
+            while (size < 16) {
+                val read = socket.inputStream.read(buffer, size, buffer.size - size)
+                if (read <= 0) break
+                size += read
+            }
+            parseStatus(String(buffer, 0, size, Charsets.ISO_8859_1))
+        }
+    } catch (e: Exception) {
+        -1
+    }
+
+    /** The status of an HTTP answer's first line; -1 when it is none. */
+    internal fun parseStatus(head: String): Int =
+        Regex("^HTTP/\\d(?:\\.\\d)? (\\d{3})").find(head)?.groupValues?.get(1)?.toInt() ?: -1
+
+    /**
+     * True when a status means the service let the caller in. 403 and 451 are what sanction
+     * and geo blocks answer with; -1 is a connection the filter cut.
+     */
+    internal fun isOpen(status: Int): Boolean = status > 0 && status != 403 && status != 451
+
+    /** True when every address of [service] opens with the phone's own DNS, with no help. */
+    fun opensWithout(service: Service, cancelled: AtomicBoolean): Boolean = service.names.all { entry ->
+        if (cancelled.get()) return false
+        val address = runCatching {
+            InetAddress.getAllByName(hostOf(entry)).firstOrNull { it.address.size == 4 }?.hostAddress
+        }.getOrNull()
+        address != null && isOpen(probe(address, entry))
+    }
+
+    /**
+     * True when every address of [service] opens through the addresses [server] gives for
+     * it: the real certificate is presented there and the service does not refuse.
+     */
+    fun carries(server: String, service: Service, cancelled: AtomicBoolean): Boolean = service.names.all { entry ->
+        if (cancelled.get()) return false
+        val address = resolve(server, hostOf(entry))?.firstOrNull { !isUnroutable(it) } ?: return false
+        isOpen(probe(toText(address), entry))
     }
 
     /** True when [address] presents a valid certificate for [host]. */
@@ -424,6 +588,7 @@ object XboxDns {
      */
     internal fun rank(results: List<Proven>): List<Proven> = results.sortedWith(
         compareByDescending<Proven> { it.redirects }
+            .thenByDescending { it.services.size }
             .thenBy { it.country == "IR" }
             .thenByDescending { it.passed }
             .thenByDescending { it.name.isNotEmpty() }

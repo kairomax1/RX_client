@@ -235,6 +235,21 @@ object CoreOutboundBuilder {
         return outboundBean
     }
 
+    /** Mobile carriers drop the NAT entry of a silent UDP flow within a minute; this keeps it. */
+    private const val WIREGUARD_KEEP_ALIVE_SECONDS = 25
+
+    /**
+     * The packet size for a WireGuard tunnel. Configs ask for 1420, which fits plain Ethernet
+     * only: on mobile data and PPPoE the handshake passes and then large packets vanish, so
+     * the tunnel "connects" and loads nothing. 1280 fits every path (it is the IPv6 minimum);
+     * anything above 1380 is brought down to it, a smaller wish is kept.
+     */
+    internal fun wireguardMtu(wanted: Int?): Int = when {
+        wanted == null || wanted > 1380 -> 1280
+        wanted < 1280 -> 1280
+        else -> wanted
+    }
+
     private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
         val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
 
@@ -275,7 +290,10 @@ object CoreOutboundBuilder {
                 peer.preSharedKey = profileItem.preSharedKey?.nullIfBlank()
                 peer.endpoint = Utils.getIpv6Address(profileItem.server) + ":${profileItem.serverPort}"
             }
-            wireguard.mtu = profileItem.mtu
+            wireguard.peers?.firstOrNull()?.keepAlive = WIREGUARD_KEEP_ALIVE_SECONDS
+            wireguard.mtu = wireguardMtu(profileItem.mtu)
+            // With IPv6 off, an endpoint name is not tried over an address family that leads nowhere.
+            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) != true) wireguard.domainStrategy = "ForceIPv4"
             wireguard.remoteDNS = remotes
             wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
         }

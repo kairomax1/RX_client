@@ -438,3 +438,24 @@ Nine items, delivered together.
 - Not built: relays for the domestic-only network. What the reports from the 2026 shutdowns
   name as working is DNS tunnelling (dnstt and relatives) through resolvers inside the country,
   which needs a new client core and tunnel servers; a domestic VPS relay needs a paid server.
+
+### Task F (2026-11-15): DNS scanner for Xbox / Discord / games, more sources, WireGuard, clean-up
+- Scanner is now "DNS scanner" (`xbox_dns_title`); first page asks the purpose
+  (`XboxDns.Purpose`): Xbox (method unchanged), Discord, Games (picker over `XboxDns.GAMES`).
+- "Opens" = resolve the app's own host through the candidate DNS, TLS to the returned address
+  with the real name + certificate, HTTP GET; open when a status comes back that is not
+  403/451 (`probe`, `isOpen`, `carries`). Services that already open with the phone's own DNS
+  (`opensWithout`) are shown as such and give a DNS no credit. Games: Xbox examination AND at
+  least one chosen blocked game. No ping measurement anywhere.
+- Game hosts were chosen from knowledge of the clients' APIs and only checked for DNS existence
+  from the sandbox; behaviour under sanction is unverified per service.
+- Online resolver lists: `XboxDns.LIST_SOURCES`, at most every 15 min at scan start, stored in
+  `filesDir/rx-dns-extra.txt`. Log lines start "DNS scan".
+- `PublicConfigs.SOURCES`: 48 -> 82 lists.
+- WireGuard: MTU clamped to 1280 when the config asks >1380 or nothing
+  (`CoreOutboundBuilder.wireguardMtu`), keep-alive 25 s, `ForceIPv4` when IPv6 is off.
+- Removed: `ConsoleDns` (old "DNS for Xbox" page in the DNS-mode card, speed-only check that
+  the scanner replaced) and its strings; `buildQuery` moved into `XboxDns`.
+- DNS tunnel: not built. Clients exist (anonvector/SlipNet AGPL, dnstt-xyz/dnstt_xyz_app,
+  masterking32/MasterDnsVPN) but every one needs a server address + key; no maintained list
+  of public servers was found. Needs its own Go/Rust core (~10 MB per ABI).

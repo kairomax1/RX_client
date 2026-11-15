@@ -694,22 +694,12 @@
     <string name="dns_mode_devices_port">Port: %s</string>
     <string name="dns_mode_devices_no_network">The phone is not on Wi-Fi and its hotspot is off. Turn one on and open this card again.</string>
     <string name="dns_mode_devices_password">A password is set for the proxy of the app, and consoles have nowhere to enter one. Remove it in settings.</string>
-    <string name="dns_mode_xbox">Xbox (DNS only)</string>
-    <string name="dns_mode_xbox_checking">Checking the anti-sanction DNS services on this connection…</string>
-    <string name="dns_mode_xbox_none">None of the anti-sanction DNS services answered just now. Check again in a few minutes.</string>
-    <string name="dns_mode_xbox_how">On the Xbox go to Settings → Network → Advanced settings → DNS settings → Manual and enter these two.</string>
-    <string name="dns_mode_xbox_service">%1$s — %2$s ms</string>
-    <string name="dns_mode_xbox_primary">Primary: %s</string>
-    <string name="dns_mode_xbox_secondary">Secondary: %s</string>
-    <string name="dns_mode_xbox_limits">This DNS belongs to a public service; the app did not create it. It only lifts sanctions: it does not open filtered sites and does not lower game ping.</string>
-    <string name="dns_mode_xbox_again">Check again</string>
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
     <string name="dns_mode_use_aether">I have no config; connect with Aether</string>
     <string name="dns_mode_aether_note">Aether is finding a route; this can take up to a minute</string>
     <string name="drawer_app_log">App log</string>
     <string name="aether_searching">Aether: route %1$s of %2$s (%3$s)</string>
     <string name="aether_starting">Aether is starting…</string>
-    <string name="dns_mode_console_dns">Anti-sanction DNS for a console or other devices (%s)</string>
     <string name="log_section_all">All</string>
     <string name="log_section_connection">Connection</string>
     <string name="log_section_core">Core</string>
@@ -730,7 +720,7 @@
     <string name="log_empty_errors">No errors recorded</string>
     <string name="log_tag_error">ERROR</string>
     <string name="log_back">Back</string>
-    <string name="xbox_dns_title">Xbox DNS scanner</string>
+    <string name="xbox_dns_title">DNS scanner</string>
     <string name="xbox_dns_intro">Every DNS server the app knows is tried on your own connection. The Xbox site is not tested, because it opens without help; the addresses the Xbox app and the console talk to are. Only a DNS that sends those through a relay of its own counts as anti-sanction.</string>
     <string name="xbox_dns_start">Start scan</string>
     <string name="xbox_dns_again">Scan again</string>
@@ -769,4 +759,15 @@
     <string name="notification_action_disconnect">Disconnect my config</string>
     <string name="notification_action_reconnect">Refresh my config</string>
     <string name="public_game">Game mode</string>
+    <string name="dns_scan_ask">What do you want to test DNS for?</string>
+    <string name="dns_scan_xbox">Xbox</string>
+    <string name="dns_scan_discord">Discord</string>
+    <string name="dns_scan_games">Sanctioned and filtered games</string>
+    <string name="dns_scan_pick_games">Which games? (the DNS must carry Xbox and the game)</string>
+    <string name="dns_scan_intro_discord">The addresses the Discord app itself uses are tested, not the web site. A DNS counts only when Discord is blocked on your connection and really opens through that DNS. Voice calls may still need a VPN.</string>
+    <string name="dns_scan_intro_games">For each game the addresses its own client uses are tested, not its web site. A DNS is listed only when it carries Xbox and also opens at least one chosen game that is blocked on your connection. In-game ping is not measured; only the sanction or filter block.</string>
+    <string name="dns_scan_open_already">Open on your connection without any DNS: %1$s</string>
+    <string name="dns_scan_none">On this connection no DNS opened what you chose. Try another network (Wi-Fi or another SIM); if it is the same there, a DNS cannot fix it and a VPN is needed.</string>
+    <string name="dns_scan_opens">Opens: %1$s</string>
+    <string name="dns_scan_other">Test for something else</string>
 </resources>

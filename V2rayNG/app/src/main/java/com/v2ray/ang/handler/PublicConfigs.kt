@@ -137,6 +137,40 @@ object PublicConfigs {
         Source("Argh94/V2RayAutoConfig", "main", "configs/Germany.txt", small = false),
         Source("Argh94/V2RayAutoConfig", "main", "configs/Netherlands.txt", small = false),
         Source("Argh94/V2RayAutoConfig", "main", "configs/France.txt", small = false),
+        Source("Argh94/V2RayAutoConfig", "main", "configs/Canada.txt", small = false),
+        Source("Argh94/V2RayAutoConfig", "main", "configs/Singapore.txt", small = false),
+        Source("Argh94/V2RayAutoConfig", "main", "configs/Trojan.txt", small = false),
+        Source("Surfboardv2ray/TGParse", "main", "splitted/trojan", small = false),
+        Source("Surfboardv2ray/TGParse", "main", "splitted/vmess", small = false),
+        Source("mahdibland/V2RayAggregator", "master", "sub/splitted/ss.txt", small = false),
+        Source("mahdibland/V2RayAggregator", "master", "sub/splitted/trojan.txt", small = false),
+        Source("mahdibland/V2RayAggregator", "master", "sub/splitted/vmess.txt", small = false),
+        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub13.txt", small = false),
+        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub14.txt", small = false),
+        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub15.txt", small = false),
+        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub16.txt", small = false),
+        Source("SoliSpirit/v2ray-configs", "main", "Protocols/vless.txt", small = false),
+        Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/vless.txt", small = false),
+        Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/trojan.txt", small = false),
+        Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/ss.txt", small = false),
+        Source("hamedcode/port-based-v2ray-configs", "main", "sub/vmess.txt", small = false),
+        Source("hamedcode/port-based-v2ray-configs", "main", "sub/port_8443.txt", small = false),
+        Source("barry-far/V2ray-Config", "main", "Sub5.txt", small = false),
+        Source("barry-far/V2ray-Config", "main", "Sub7.txt", small = false),
+        Source("barry-far/V2ray-Config", "main", "Sub9.txt", small = false),
+        Source("barry-far/V2ray-Config", "main", "Sub14.txt", small = false),
+        Source("barry-far/V2ray-Config", "main", "Sub15.txt", small = false),
+        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/lt/all.txt", small = false),
+        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/kr/all.txt", small = false),
+        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/cz/all.txt", small = false),
+        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/filtered/subs/vless.txt", small = false),
+        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/filtered/subs/trojan.txt", small = false),
+        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/filtered/subs/ss.txt", small = false),
+        Source("Leon406/SubCrawler", "main", "sub/share/v2", small = false),
+        Source("Leon406/SubCrawler", "main", "sub/share/ss", small = false),
+        Source("sakha1370/OpenRay", "main", "output/kind/vless.txt", small = false),
+        Source("shabane/kamaji", "master", "hub/trojan.txt", small = false),
+        Source("shabane/kamaji", "master", "hub/vmess.txt", small = false),
     )
 
     /** Cloudflare's published IPv4 ranges, as address and prefix length. */
@@ -306,9 +340,9 @@ object PublicConfigs {
     private fun cacheFile(context: Context, source: Source) =
         File(cacheDir(context), source.address.hashCode().toUInt().toString(16) + ".txt")
 
-    private class Answer(val code: Int, val body: String?, val tag: String?)
+    internal class Answer(val code: Int, val body: String?, val tag: String?)
 
-    private fun fetch(address: String, knownTag: String? = null, post: String? = null): Answer = try {
+    internal fun fetch(address: String, knownTag: String? = null, post: String? = null): Answer = try {
         val connection = URL(address).openConnection() as HttpURLConnection
         connection.connectTimeout = 8000
         connection.readTimeout = 12000
