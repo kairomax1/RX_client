@@ -101,9 +101,12 @@ object XboxDns {
      * Games that are filtered in Iran or refuse Iranian addresses, each with the sign-in and
      * service hosts its client uses. Games of one publisher share the publisher's hosts.
      */
+    // Every address below answers a plain GET from outside Iran with something other than 403
+    // (checked by .github/workflows/probe.yml), so a 403 here means a refusal of this caller.
+    // Addresses that refuse everyone (403 to all) cannot tell anything and are not listed.
     val GAMES = listOf(
-        Service("cod", "Warzone / Call of Duty", listOf("s.activision.com", "profile.callofduty.com", "oauth.battle.net")),
-        Service("ea", "Battlefield / EA FC / Apex", listOf("accounts.ea.com", "gateway.ea.com", "service-aggregation-layer.juno.ea.com")),
+        Service("cod", "Warzone / Call of Duty", listOf("auth3.prod.demonware.net", "oauth.battle.net", "my.callofduty.com")),
+        Service("ea", "Battlefield / EA FC / Apex", listOf("accounts.ea.com", "gateway.ea.com", "service-aggregation-layer.juno.ea.com/graphql")),
         Service("warthunder", "War Thunder", listOf("login.gaijin.net", "auth.gaijinent.com", "yupmaster.gaijinent.com")),
         Service("roblox", "Roblox", listOf("auth.roblox.com", "apis.roblox.com", "clientsettings.roblox.com", "gamejoin.roblox.com")),
         Service("epic", "Fortnite / Rocket League", listOf("account-public-service-prod.ol.epicgames.com/account/api/version", "fortnite-public-service-prod11.ol.epicgames.com", "launcher-public-service-prod06.ol.epicgames.com")),
@@ -112,13 +115,12 @@ object XboxDns {
         Service("rockstar", "GTA Online / Rockstar", listOf("signin.rockstargames.com", "prod.ros.rockstargames.com", "auth-prod.ros.rockstargames.com")),
         Service("ubisoft", "Rainbow Six / Ubisoft", listOf("public-ubiservices.ubi.com")),
         Service("steam", "Steam / CS2 / Dota 2", listOf("api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/", "login.steampowered.com")),
-        Service("playstation", "PlayStation Network", listOf("auth.api.sonyentertainmentnetwork.com", "ca.account.sony.com")),
-        Service("minecraft", "Minecraft", listOf("api.minecraftservices.com", "sessionserver.mojang.com")),
+        Service("playstation", "PlayStation Network", listOf("auth.api.sonyentertainmentnetwork.com/2.0/oauth/token", "ca.account.sony.com/api/v1/ssocookie")),
+        Service("minecraft", "Minecraft", listOf("api.minecraftservices.com/minecraft/profile", "sessionserver.mojang.com/session/minecraft/profile/069a79f444e94726a5befca90e38aaf5")),
         Service("bungie", "Destiny 2", listOf("www.bungie.net")),
         Service("hoyo", "Genshin Impact", listOf("hk4e-sdk-os.hoyoverse.com")),
-        Service("tarkov", "Escape from Tarkov", listOf("launcher.escapefromtarkov.com", "prod.escapefromtarkov.com")),
         Service("supercell", "Clash of Clans / Brawl Stars", listOf("id.supercell.com")),
-        Service("pubg", "PUBG", listOf("accounts.krafton.com")),
+        Service("pubg", "PUBG", listOf("api.pubg.com/status", "accounts.pubg.com")),
         Service("nintendo", "Nintendo", listOf("accounts.nintendo.com")),
         Service("wargaming", "World of Tanks", listOf("api.worldoftanks.eu", "wgcps-eu.wargaming.net")),
     )
