@@ -1025,20 +1025,8 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                     }
                 }
 
-                // The way out through Cloudflare
-                item { SectionTitle(stringResource(R.string.firefox_vpn_relay_title)) }
-                item {
-                    RelayCard(
-                        enabled = state.relayEnabled,
-                        address = state.relayAddress,
-                        onToggle = { viewModel.setRelayEnabled(it) },
-                        onAddressChange = { viewModel.setRelayAddress(it) },
-                        onSave = { viewModel.saveRelayAddress() },
-                        onShowCode = { viewModel.showRelayCode() },
-                        onCheck = { viewModel.checkRelay() },
-                        verdict = state.relayVerdict
-                    )
-                }
+                // The way out through Cloudflare is left out of the screen for
+                // now; the code behind it stays, ready to be shown again.
 
                 // Usage
                 state.connectionInfo?.let { info ->
@@ -1090,10 +1078,6 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
             onResend = { viewModel.resendCode() },
             onCheckAgain = { viewModel.checkSession() }
         )
-    }
-
-    state.relayCode?.let { code ->
-        RelayCodeDialog(code = code, onDismiss = { viewModel.hideRelayCode() })
     }
 
     val image = captchaImage
@@ -1379,6 +1363,10 @@ private fun QuotaCard(info: FirefoxVpnManager.ConnectionInfo) {
 }
 
 // ── The way out through Cloudflare ────────────────────────────────
+//
+// Kept although the screen no longer shows it: the card comes back when the
+// relay is wanted again. Nothing below is compiled away, and the handler and
+// the view model behind it are untouched.
 
 @Composable
 private fun RelayCard(

@@ -38,8 +38,6 @@ private enum class DnsPage { Main, AddSite, Devices }
 fun MainDnsModeCard(
     state: DnsModeUiState,
     onSetEnabled: (Boolean) -> Unit,
-    /** Switches the mode without looking for a config to connect to. */
-    onSetEnabledOnly: (Boolean) -> Unit,
     onAddDomain: (String) -> Boolean,
     onClearDomains: () -> Unit,
     onSetSharing: (Boolean) -> Unit,
@@ -82,7 +80,7 @@ fun MainDnsModeCard(
                             text = stringResource(R.string.dns_mode_use_aether),
                             tone = RxPromptTone.Ghost,
                             onClick = {
-                                if (!state.enabled) onSetEnabledOnly(true)
+                                if (!state.enabled) onSetEnabled(true)
                                 noteText = aetherNote
                                 noteTick++
                                 onUseAether()

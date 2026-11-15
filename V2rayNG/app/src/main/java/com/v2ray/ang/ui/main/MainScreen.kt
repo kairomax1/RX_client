@@ -375,13 +375,10 @@ fun MainScreen(
             val dnsState by dnsModeViewModel.state.collectAsStateWithLifecycle()
             MainDnsModeCard(
                 state = dnsState,
-                onSetEnabled = { enabled ->
-                    dnsModeViewModel.setEnabled(enabled)
-                    // Switching on: find the best config and connect to it. The plain restart
-                    // right after this covers the case where there is nothing to test.
-                    if (enabled) mainViewModel.testAllAndConnectBest()
-                },
-                onSetEnabledOnly = dnsModeViewModel::setEnabled,
+                // Switching the mode only switches it: no config is tested and
+                // none is connected. Whatever is connected stays connected, and
+                // if nothing is, nothing is started.
+                onSetEnabled = dnsModeViewModel::setEnabled,
                 onUseAether = mainViewModel::connectAether,
                 onAddDomain = dnsModeViewModel::addDomain,
                 onClearDomains = dnsModeViewModel::clearDomains,
