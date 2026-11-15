@@ -46,6 +46,7 @@ import org.json.JSONObject
 class FirefoxVpnWebSignInActivity : AppCompatActivity() {
 
     private var expectedState: String = ""
+    private var accountsOffered = false
     private lateinit var webView: WebView
     private lateinit var bar: ProgressBar
 
@@ -131,6 +132,10 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
                 if (url != null && catchCode(url)) {
                     view.stopLoading()
                 }
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                offerAccountsOnce(url)
             }
         }
 
@@ -230,6 +235,19 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
             }
         }
         return found
+    }
+
+    /**
+     * On Mozilla's page the accounts on this phone are offered straight away,
+     * once, so the address does not have to be typed.
+     */
+    private fun offerAccountsOnce(url: String?) {
+        if (accountsOffered) return
+        val host = runCatching { android.net.Uri.parse(url.orEmpty()).host.orEmpty() }.getOrDefault("")
+        if (host != "accounts.firefox.com") return
+        if (localAccounts().isEmpty()) return
+        accountsOffered = true
+        webView.postDelayed({ chooseLocalAccount() }, 700)
     }
 
     private fun chooseLocalAccount() {
