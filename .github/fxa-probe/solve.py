@@ -110,57 +110,63 @@ def answer(challenges_data, prefix_url, token, type_):
     raise RuntimeError("unknown challenge type " + type_)
 
 
-page = session.get(SITE + "/", headers={"Accept": "text/html,application/xhtml+xml"}, timeout=20)
-html = page.text
-note("page=%d marks=%d clientchallenge=%s" % (
-    page.status_code, html.count("/_fs-ch-"), "Client Challenge" in html))
+try:
+    page = session.get(SITE + "/", headers={"Accept": "text/html,application/xhtml+xml"}, timeout=20)
+    html = page.text
+    note("page=%d marks=%d clientchallenge=%s" % (
+        page.status_code, html.count("/_fs-ch-"), "Client Challenge" in html))
 
-match = re.search(r"/_fs-ch-[A-Za-z0-9]+", html)
-if not match:
-    note("no-challenge-prefix")
-    print("::notice::" + " | ".join(notes))
-    sys.exit(0)
-prefix = match.group(0)
-prefix_url = SITE + prefix
+    match = re.search(r"/_fs-ch-[A-Za-z0-9]+", html)
+    if not match:
+        note("no-challenge-prefix")
+        print("::notice::" + " | ".join(notes))
+        sys.exit(0)
+    prefix = match.group(0)
+    prefix_url = SITE + prefix
 
-script = session.get(prefix_url + "/script.js?reload=true", timeout=20).text
-note("script=%d bytes init=%d" % (len(script), len(re.findall(r"\binit\s*\(", script))))
+    script = session.get(prefix_url + "/script.js?reload=true", timeout=20).text
+    note("script=%d bytes init=%d" % (len(script), len(re.findall(r"\binit\s*\(", script))))
 
-parsed = parse_init(script, prefix)
-if parsed is None:
-    note("init-not-parsed")
-    print("::notice::" + " | ".join(notes))
-    sys.exit(0)
+    parsed = parse_init(script, prefix)
+    if parsed is None:
+        note("init-not-parsed")
+        print("::notice::" + " | ".join(notes))
+        sys.exit(0)
 
-challenges, token = parsed
-note("challenges=" + ",".join(c.get("ty", "?") for c in challenges))
+    challenges, token = parsed
+    note("challenges=" + ",".join(c.get("ty", "?") for c in challenges))
 
-for round_index in range(8):
-    answers = [answer(c, prefix_url, token, c.get("ty", "")) for c in challenges]
-    response = session.post(
-        prefix_url + "/fst-post-back",
-        data=json.dumps({"token": token, "data": answers}),
-        headers={"Content-Type": "application/json", "Origin": SITE, "Accept": "application/json"},
+    for round_index in range(8):
+        answers = [answer(c, prefix_url, token, c.get("ty", "")) for c in challenges]
+        response = session.post(
+            prefix_url + "/fst-post-back",
+            data=json.dumps({"token": token, "data": answers}),
+            headers={"Content-Type": "application/json", "Origin": SITE, "Accept": "application/json"},
+            timeout=20,
+        )
+        note("postback=%d" % response.status_code)
+        result = response.json()
+        if result.get("status") == "success":
+            break
+        challenges = result.get("ch") or []
+        token = result.get("tok", "")
+        if not challenges or not token:
+            note("no-next-round")
+            break
+
+    after = session.get(SITE + "/", headers={"Accept": "text/html"}, timeout=20).text
+    note("cleared=%s cookies=%d" % ("Client Challenge" not in after, len(session.cookies)))
+
+    api = session.post(
+        API,
+        data=json.dumps({"email": "nobody@example.com", "authPW": "00" * 32}),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
         timeout=20,
     )
-    note("postback=%d" % response.status_code)
-    result = response.json()
-    if result.get("status") == "success":
-        break
-    challenges = result.get("ch") or []
-    token = result.get("tok", "")
-    if not challenges or not token:
-        note("no-next-round")
-        break
-
-after = session.get(SITE + "/", headers={"Accept": "text/html"}, timeout=20).text
-note("cleared=%s cookies=%d" % ("Client Challenge" not in after, len(session.cookies)))
-
-api = session.post(
-    API,
-    data=json.dumps({"email": "nobody@example.com", "authPW": "00" * 32}),
-    headers={"Content-Type": "application/json", "Accept": "application/json"},
-    timeout=20,
-)
-note("api=%d %s" % (api.status_code, api.text[:120].replace("\n", " ")))
-print("::notice::" + " | ".join(notes))
+    note("api=%d %s" % (api.status_code, api.text[:120].replace("\n", " ")))
+    print("::notice::" + " | ".join(notes))
+except Exception as error:
+    import traceback
+    note("failed: %s: %s" % (type(error).__name__, error))
+    note(traceback.format_exc().splitlines()[-3].strip()[:160])
+    print("::notice::" + " | ".join(notes))
