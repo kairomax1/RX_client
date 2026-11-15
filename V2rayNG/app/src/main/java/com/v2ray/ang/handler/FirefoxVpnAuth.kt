@@ -322,6 +322,57 @@ object FirefoxVpnAuth {
             }
         }
 
+    // ── Signing in on Mozilla's own page ──────────────────────────
+
+    /** What the browser window needs to start, and what the code is redeemed with. */
+    data class BrowserSignIn(
+        val url: String,
+        val verifier: String,
+        val state: String
+    )
+
+    /**
+     * Builds the address of Mozilla's own sign-in page for this app.
+     *
+     * Everything that a non-browser client struggles with — the edge's
+     * challenge, the mailed code, an authenticator — is handled by that page
+     * itself, because it runs Mozilla's JavaScript in a real browser view. The
+     * page ends by sending the browser to a Mozilla address carrying `code`;
+     * the window watches for it.
+     */
+    fun startBrowserSignIn(): BrowserSignIn {
+        val verifier = base64Url(randomBytes(32))
+        val challenge = base64Url(sha256(verifier.toByteArray(StandardCharsets.US_ASCII)))
+        val state = toHex(randomBytes(16))
+        val url = "https://accounts.firefox.com/authorization" +
+            "?client_id=$FIREFOX_CLIENT_ID" +
+            "&scope=" + java.net.URLEncoder.encode(OAUTH_SCOPE, "UTF-8") +
+            "&response_type=code" +
+            "&access_type=offline" +
+            "&code_challenge=$challenge" +
+            "&code_challenge_method=S256" +
+            "&state=$state"
+        return BrowserSignIn(url, verifier, state)
+    }
+
+    /** Redeems the code the browser came back with. */
+    suspend fun finishBrowserSignIn(code: String, verifier: String): TokenResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JsonObject().apply {
+                    addProperty("client_id", FIREFOX_CLIENT_ID)
+                    addProperty("grant_type", "authorization_code")
+                    addProperty("code", code)
+                    addProperty("code_verifier", verifier)
+                }.toString()
+                tokenResultOf(postJson(OAUTH_TOKEN_URL, body, null, OAUTH_ACCEPT))
+            } catch (e: FxaException) {
+                TokenResult.Error(e.message2)
+            } catch (e: Exception) {
+                TokenResult.Error("No answer from Firefox: ${e.message ?: "network error"}")
+            }
+        }
+
     // ── OAuth ─────────────────────────────────────────────────────
 
     /**
@@ -416,6 +467,29 @@ object FirefoxVpnAuth {
             } catch (_: Exception) {
                 // The device list is cosmetic; the tokens stay valid.
             }
+        }
+    }
+
+    /** The account's address, asked of Mozilla with the token the sign-in produced. */
+    suspend fun profileEmail(accessToken: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val response = client.newCall(
+                Request.Builder()
+                    .url("$FXA_BASE/profile")
+                    .header("Authorization", "Bearer $accessToken")
+                    .header("Accept", "application/json")
+                    .header("User-Agent", FIREFOX_UA)
+                    .header("Accept-Encoding", "identity")
+                    .get()
+                    .build()
+            ).execute()
+            response.use {
+                if (it.code != 200) return@withContext null
+                JsonParser.parseString(it.body?.string().orEmpty())
+                    .asJsonObject.string("email")
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 

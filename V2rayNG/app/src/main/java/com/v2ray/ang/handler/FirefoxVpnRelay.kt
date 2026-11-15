@@ -154,12 +154,14 @@ object FirefoxVpnRelay {
         tls.sslParameters = parameters
         tls.startHandshake()
 
+        // Firefox's own CONNECT: Host names the destination, not the proxy, and
+        // nothing else but the bearer travels with it. The proxy answers 400 to
+        // anything else.
         val request = buildString {
             append("CONNECT $target HTTP/1.1\r\n")
-            append("Host: $proxyHost\r\n")
+            append("Host: $target\r\n")
             append("Proxy-Authorization: Bearer $bearerToken\r\n")
             append("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0\r\n")
-            append("Proxy-Connection: keep-alive\r\n")
             append("\r\n")
         }
         tls.outputStream.apply {

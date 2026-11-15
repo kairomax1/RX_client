@@ -101,11 +101,12 @@ object FirefoxVpnManager {
             ?: FirefoxVpnServers.pickRecommended(countries)
         val countryName = country?.name ?: "Recommended"
 
-        // The list names the real endpoint in each server's protocols; the
-        // ProxyPass's own host is the fallback when the list cannot be read.
+        // The ProxyPass names the proxy it is valid for in its audience; a
+        // different host would present a pass that is not meant for it. The
+        // list's own endpoint is only the fallback.
         val endpoint = FirefoxVpnServers.connectEndpoint(country)
-        val serverHost = endpoint?.connectHost?.ifEmpty { null } ?: pass.proxyHost
-        val serverPort = endpoint?.tunnelPort ?: pass.proxyPort
+        val serverHost = pass.proxyHost.ifEmpty { endpoint?.connectHost.orEmpty() }
+        val serverPort = if (pass.proxyHost.isNotEmpty()) pass.proxyPort else endpoint?.tunnelPort ?: 443
         if (endpoint != null && endpoint.scheme != "https") {
             return@withContext ConnectResult.Error("This location only offers ${endpoint.scheme}, which the app cannot use yet")
         }

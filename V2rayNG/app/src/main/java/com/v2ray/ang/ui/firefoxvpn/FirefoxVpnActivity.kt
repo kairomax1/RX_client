@@ -111,7 +111,9 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val pendingSessionToken: String? = null,
         val pendingEmail: String? = null,
         val needCodeType: String? = null,
-        val connectionInfo: FirefoxVpnManager.ConnectionInfo? = null
+        val connectionInfo: FirefoxVpnManager.ConnectionInfo? = null,
+        val browserUrl: String? = null,
+        val browserState: String? = null
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -279,6 +281,10 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** The browser flow learns the account's address from its tokens; show it. */
+    private suspend fun addressOfTokens(tokens: FirefoxVpnAuth.OAuthTokens): String =
+        FirefoxVpnAuth.profileEmail(tokens.accessToken) ?: "Firefox Account"
+
     private fun saveTokens(email: String, tokens: FirefoxVpnAuth.OAuthTokens) {
         val account = FirefoxVpnStore.StoredAccount(
             id = FirefoxVpnManager.newAccountId(),
@@ -303,6 +309,38 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             )
         }
         viewModelScope.launch { FirefoxVpnAuth.registerDevice(tokens.refreshToken) }
+    }
+
+    /** Kept only while the browser window is open; it redeems the code. */
+    private var browserVerifier: String? = null
+
+    fun startBrowserSignIn() {
+        val signIn = FirefoxVpnAuth.startBrowserSignIn()
+        browserVerifier = signIn.verifier
+        _state.update {
+            it.copy(error = null, success = null, browserUrl = signIn.url, browserState = signIn.state)
+        }
+    }
+
+    fun clearBrowserRequest() {
+        _state.update { it.copy(browserUrl = null, browserState = null) }
+    }
+
+    fun completeBrowserSignIn(code: String) {
+        val verifier = browserVerifier
+        _state.update { it.copy(browserUrl = null, browserState = null) }
+        if (verifier == null || code.isEmpty()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            when (val result = FirefoxVpnAuth.finishBrowserSignIn(code, verifier)) {
+                is FirefoxVpnAuth.TokenResult.Success -> {
+                    browserVerifier = null
+                    saveTokens(addressOfTokens(result.tokens), result.tokens)
+                }
+                is FirefoxVpnAuth.TokenResult.Error ->
+                    _state.update { it.copy(isLoading = false, error = result.message) }
+            }
+        }
     }
 
     fun removeAccount(id: String) {
@@ -366,8 +404,31 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = MaterialTheme.colorScheme
     val captchaImage by FirefoxVpnCaptcha.pendingImage.collectAsStateWithLifecycle()
+    val browserLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val code = result.data?.getStringExtra(FirefoxVpnWebSignInActivity.EXTRA_CODE).orEmpty()
+        if (result.resultCode == android.app.Activity.RESULT_OK && code.isNotEmpty()) {
+            viewModel.completeBrowserSignIn(code)
+        } else {
+            viewModel.clearBrowserRequest()
+        }
+    }
 
     LaunchedEffect(Unit) { viewModel.loadCountries() }
+
+    LaunchedEffect(state.browserUrl) {
+        val url = state.browserUrl
+        if (url != null) {
+            browserLauncher.launch(
+                FirefoxVpnWebSignInActivity.intent(
+                    context = viewModel.getApplication(),
+                    url = url,
+                    state = state.browserState.orEmpty()
+                )
+            )
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -425,21 +486,43 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                 if (state.accounts.isEmpty()) {
                     item {
                         Card {
-                            Text(
-                                text = stringResource(R.string.firefox_vpn_no_account_hint),
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
-                                color = colors.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(10.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = stringResource(R.string.firefox_vpn_step_one),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+                                    color = colors.onSurface
+                                )
+                                Text(
+                                    text = stringResource(R.string.firefox_vpn_step_two),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+                                    color = colors.onSurfaceVariant
+                                )
+                                Text(
+                                    text = stringResource(R.string.firefox_vpn_step_three),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+                                    color = colors.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
                             Button(
-                                onClick = { viewModel.showAddAccount() },
-                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { viewModel.startBrowserSignIn() },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
                             ) {
                                 Text(
-                                    stringResource(R.string.firefox_vpn_add_account),
+                                    stringResource(R.string.firefox_vpn_web_sign_in),
                                     style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont)
+                                )
+                            }
+                            TextButton(
+                                onClick = { viewModel.showAddAccount() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    stringResource(R.string.firefox_vpn_manual_sign_in),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont),
+                                    color = colors.onSurfaceVariant
                                 )
                             }
                         }
@@ -454,12 +537,14 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         )
                     }
                     item {
-                        TextButton(onClick = { viewModel.showAddAccount() }) {
-                            Text(
-                                stringResource(R.string.firefox_vpn_add_account),
-                                style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont),
-                                color = colors.primary
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { viewModel.startBrowserSignIn() }) {
+                                Text(
+                                    stringResource(R.string.firefox_vpn_add_account),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont),
+                                    color = colors.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -478,7 +563,17 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         }
                     }
                 }
-                if (state.countries.isEmpty()) {
+                if (state.accounts.isEmpty()) {
+                    item {
+                        Card {
+                            Text(
+                                text = stringResource(R.string.firefox_vpn_need_account),
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+                                color = colors.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else if (state.countries.isEmpty()) {
                     item {
                         Card {
                             Text(
@@ -490,7 +585,11 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         }
                     }
                 } else {
-                    items(state.countries) { country ->
+                    // The recommended location first, then the rest by name.
+                    val ordered = state.countries.sortedWith(
+                        compareBy({ it.code != FirefoxVpnServers.RECOMMENDED_CODE }, { it.name })
+                    )
+                    items(ordered) { country ->
                         CountryRow(
                             country = country,
                             selected = country.code == state.selectedCountryCode,
