@@ -214,12 +214,17 @@ object FirefoxVpnRelay {
     private fun openPipe(): Tunnel? {
         val viaCloudflare = cloudflareAddress
         if (viaCloudflare != null) {
-            return FirefoxVpnCloudflare.openTunnel(
+            val pipe = FirefoxVpnCloudflare.openTunnel(
                 address = viaCloudflare,
                 context = appContext ?: return null,
                 host = proxyHost,
                 port = proxyPort
-            )
+            ) ?: return null
+            return object : Tunnel {
+                override val input: InputStream get() = pipe.input
+                override val output: OutputStream get() = pipe.output
+                override fun close() = pipe.close()
+            }
         }
         val address = InetSocketAddress(proxyHost, proxyPort)
         val raw = Socket()
