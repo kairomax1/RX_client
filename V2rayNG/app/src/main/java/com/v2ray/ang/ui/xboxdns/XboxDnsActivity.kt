@@ -195,6 +195,16 @@ private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
                     item(key = "relaysTitle") {
                         SectionTitle(stringResource(R.string.xbox_dns_relays_title, state.relays.size.toString()), RelayGreen)
                     }
+                    if (state.partialOnly) {
+                        item(key = "partial") {
+                            Text(
+                                text = stringResource(R.string.dns_scan_partial),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.onSurface,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
                     items(state.relays, key = { "relay-" + it.address }) { result ->
                         ResultRow(result = result, onCopy = copy)
                     }
@@ -411,7 +421,7 @@ private fun ResultRow(result: XboxDns.Proven, onCopy: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = if (result.redirects) {
+                text = if (result.redirects && result.passed > 0) {
                     stringResource(
                         R.string.xbox_dns_result_line,
                         result.passed.toString(),

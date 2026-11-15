@@ -850,4 +850,5 @@
     <string name="dns_scan_none">روی این اینترنت هیچ DNSی چیزی را که انتخاب کردی باز نکرد. روی یک اینترنت دیگر (وای‌فای یا سیم‌کارت دیگر) هم امتحان کن؛ اگر آن‌جا هم همین بود، با DNS درست نمی‌شود و VPN لازم است.</string>
     <string name="dns_scan_opens">باز می‌کند: %1$s</string>
     <string name="dns_scan_other">تست برای چیز دیگر</string>
+    <string name="dns_scan_partial">هیچ DNSی Xbox و بازی انتخابی را با هم باز نکرد. این‌ها فقط همان چیزی را باز می‌کنند که زیرشان نوشته شده.</string>
 </resources>

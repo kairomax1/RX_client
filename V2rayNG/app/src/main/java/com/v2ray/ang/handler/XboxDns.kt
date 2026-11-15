@@ -14,7 +14,7 @@ import javax.net.ssl.SSLSocketFactory
 
 /**
  * Finds DNS servers that get an app past a sanction or filter block: the Xbox app (below),
- * Discord, or a game together with Xbox ([carries], [opensWithout]).
+ * Discord, or a game together with Xbox ([carries], [statusWithout]).
  *
  * Xbox: finds DNS servers that get an Xbox, or the Xbox app, past the sanction block. The console
  * accepts nothing but a DNS address, so only a server that sends the Xbox Live names to a
@@ -516,24 +516,27 @@ object XboxDns {
      */
     internal fun isOpen(status: Int): Boolean = status > 0 && status != 403 && status != 451
 
-    /** True when every address of [service] opens with the phone's own DNS, with no help. */
-    fun opensWithout(service: Service, cancelled: AtomicBoolean): Boolean = service.names.all { entry ->
-        if (cancelled.get()) return false
+    /** The status [entry] gives with the phone's own DNS, with no help; -1 when it cannot be reached. */
+    fun statusWithout(entry: String): Int {
         val address = runCatching {
             InetAddress.getAllByName(hostOf(entry)).firstOrNull { it.address.size == 4 }?.hostAddress
-        }.getOrNull()
-        address != null && isOpen(probe(address, entry))
+        }.getOrNull() ?: return -1
+        return probe(address, entry)
+    }
+
+    /** The status [entry] gives at the address [server] names for it; -2 when the server names none. */
+    fun statusThrough(server: String, entry: String): Int {
+        val address = resolve(server, hostOf(entry))?.firstOrNull { !isUnroutable(it) } ?: return -2
+        return probe(toText(address), entry)
     }
 
     /**
-     * True when every address of [service] opens through the addresses [server] gives for
-     * it: the real certificate is presented there and the service does not refuse.
+     * True when each of [entries] opens through the addresses [server] gives for it: the real
+     * certificate is presented there and the service does not refuse. [entries] are the
+     * addresses of a service that do not open on this connection by themselves.
      */
-    fun carries(server: String, service: Service, cancelled: AtomicBoolean): Boolean = service.names.all { entry ->
-        if (cancelled.get()) return false
-        val address = resolve(server, hostOf(entry))?.firstOrNull { !isUnroutable(it) } ?: return false
-        isOpen(probe(toText(address), entry))
-    }
+    fun carries(server: String, entries: List<String>, cancelled: AtomicBoolean): Boolean =
+        entries.isNotEmpty() && entries.all { entry -> !cancelled.get() && isOpen(statusThrough(server, entry)) }
 
     /** True when [address] presents a valid certificate for [host]. */
     internal fun isGenuine(address: String, host: String): Boolean = try {

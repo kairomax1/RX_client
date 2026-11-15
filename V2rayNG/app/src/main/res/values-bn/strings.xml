@@ -770,4 +770,5 @@
     <string name="dns_scan_none">On this connection no DNS opened what you chose. Try another network (Wi-Fi or another SIM); if it is the same there, a DNS cannot fix it and a VPN is needed.</string>
     <string name="dns_scan_opens">Opens: %1$s</string>
     <string name="dns_scan_other">Test for something else</string>
+    <string name="dns_scan_partial">No DNS opened Xbox and a chosen game together. These open only what is written under them.</string>
 </resources>
