@@ -291,9 +291,15 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** The browser flow learns the account's address from its tokens; show it. */
-    private suspend fun addressOfTokens(tokens: FirefoxVpnAuth.OAuthTokens): String =
-        FirefoxVpnAuth.profileEmail(tokens.accessToken) ?: "Firefox Account"
+    /**
+     * The address the user picked in the browser window is already known, so a
+     * profile lookup that the network refuses no longer leaves a nameless row.
+     */
+    private suspend fun addressOfTokens(
+        tokens: FirefoxVpnAuth.OAuthTokens,
+        known: String
+    ): String = FirefoxVpnAuth.profileEmail(tokens.accessToken)
+        ?: known.ifEmpty { "Firefox Account" }
 
     private fun saveTokens(
         email: String,
@@ -341,7 +347,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         _state.update { it.copy(browserUrl = null, browserState = null) }
     }
 
-    fun completeBrowserSignIn(code: String) {
+    fun completeBrowserSignIn(code: String, address: String = "") {
         val verifier = browserVerifier
         _state.update { it.copy(browserUrl = null, browserState = null) }
         if (verifier == null || code.isEmpty()) return
@@ -350,7 +356,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             when (val result = FirefoxVpnAuth.finishBrowserSignIn(code, verifier)) {
                 is FirefoxVpnAuth.TokenResult.Success -> {
                     browserVerifier = null
-                    saveTokens(addressOfTokens(result.tokens), result.tokens)
+                    saveTokens(addressOfTokens(result.tokens, address), result.tokens)
                 }
                 is FirefoxVpnAuth.TokenResult.Error ->
                     _state.update { it.copy(isLoading = false, error = result.message) }
@@ -455,8 +461,9 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val code = result.data?.getStringExtra(FirefoxVpnWebSignInActivity.EXTRA_CODE).orEmpty()
+        val address = result.data?.getStringExtra(FirefoxVpnWebSignInActivity.EXTRA_EMAIL).orEmpty()
         if (result.resultCode == android.app.Activity.RESULT_OK && code.isNotEmpty()) {
-            viewModel.completeBrowserSignIn(code)
+            viewModel.completeBrowserSignIn(code, address)
         } else {
             viewModel.clearBrowserRequest()
         }

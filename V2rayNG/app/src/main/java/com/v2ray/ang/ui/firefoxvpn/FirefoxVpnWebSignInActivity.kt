@@ -46,6 +46,7 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
 
     private var expectedState: String = ""
     private var startUrl: String = ""
+    private var chosenEmail: String = ""
     private lateinit var webView: WebView
     private lateinit var bar: ProgressBar
 
@@ -260,6 +261,7 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
 
     /** Loads Mozilla's page with that address already in the form. */
     private fun loadWithAddress(email: String) {
+        chosenEmail = email
         val separator = if (startUrl.contains('?')) '&' else '?'
         val url = startUrl + separator + "email=" +
             java.net.URLEncoder.encode(email, "UTF-8").replace("+", "%20")
@@ -294,7 +296,10 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
             return false
         }
         AppLog.info(AppLog.Section.Connection, "FxA: the sign-in page came back with a code")
-        setResult(RESULT_OK, Intent().putExtra(EXTRA_CODE, code))
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(EXTRA_CODE, code).putExtra(EXTRA_EMAIL, chosenEmail)
+        )
         finish()
         return true
     }
@@ -320,6 +325,7 @@ class FirefoxVpnWebSignInActivity : AppCompatActivity() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_STATE = "state"
         const val EXTRA_CODE = "code"
+        const val EXTRA_EMAIL = "email"
         private const val REQUEST_ACCOUNT = 4101
 
         private const val BACKGROUND = 0xFF101014.toInt()

@@ -747,11 +747,13 @@ object FirefoxVpnAuth {
         if (authorization != null) builder.header("Authorization", authorization)
 
         when (method) {
-            "POST" -> builder.post((body ?: "").toRequestBody(JSON))
+            // OkHttp stamps the body's own media type over the header, so the
+            // type must live on the body: a form grant announced as JSON is
+            // what made the token endpoint answer "invalid request payload".
+            "POST" -> builder.post((body ?: "").toRequestBody(contentType.toMediaType()))
             "DELETE" -> builder.delete()
             else -> builder.get()
         }
-        if (body != null) builder.header("Content-Type", contentType)
 
         val path = url.substringAfter("://").substringAfter('/')
         var solveAttempts = 0
