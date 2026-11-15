@@ -1,6 +1,5 @@
 package com.v2ray.ang.handler
 
-import android.util.Base64
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
@@ -628,8 +627,27 @@ object FirefoxVpnAuth {
 
     private fun randomBytes(count: Int): ByteArray = ByteArray(count).also { random.nextBytes(it) }
 
-    private fun base64Url(bytes: ByteArray): String =
-        Base64.encodeToString(bytes, Base64.NO_WRAP or Base64.NO_PADDING or Base64.URL_SAFE)
+    /**
+     * Base64url without padding, written out here so the same code runs on the
+     * phone and in the plain unit tests (the platform's Base64 is a stub off
+     * the device).
+     */
+    private fun base64Url(bytes: ByteArray): String {
+        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        val out = StringBuilder((bytes.size + 2) / 3 * 4)
+        var index = 0
+        while (index < bytes.size) {
+            val b0 = bytes[index].toInt() and 0xFF
+            val b1 = if (index + 1 < bytes.size) bytes[index + 1].toInt() and 0xFF else 0
+            val b2 = if (index + 2 < bytes.size) bytes[index + 2].toInt() and 0xFF else 0
+            out.append(alphabet[b0 shr 2])
+            out.append(alphabet[((b0 and 0x03) shl 4) or (b1 shr 4)])
+            if (index + 1 < bytes.size) out.append(alphabet[((b1 and 0x0F) shl 2) or (b2 shr 6)])
+            if (index + 2 < bytes.size) out.append(alphabet[b2 and 0x3F])
+            index += 3
+        }
+        return out.toString()
+    }
 
     internal fun toHex(bytes: ByteArray): String {
         val hex = "0123456789abcdef"
