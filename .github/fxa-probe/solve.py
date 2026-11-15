@@ -107,6 +107,9 @@ def answer(challenges_data, prefix_url, token, type_):
             "detector_results": {},
             "v": 2,
         }
+    if type_ == "captcha":
+        # Deliberately wrong: a fresh round proves the post-back shape is right.
+        return {"ty": "captcha", "answer": "zzzz"}
     raise RuntimeError("unknown challenge type " + type_)
 
 
@@ -135,6 +138,12 @@ try:
 
     challenges, token = parsed
     note("challenges=" + ",".join(c.get("ty", "?") for c in challenges))
+    first = dict(challenges[0])
+    data = dict(first.get("data") or {})
+    if "image_b64" in data:
+        data["image_b64"] = data["image_b64"][:40] + "..."
+    first["data"] = data
+    note("first=" + json.dumps(first)[:260])
 
     for round_index in range(8):
         answers = [answer(c, prefix_url, token, c.get("ty", "")) for c in challenges]
