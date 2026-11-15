@@ -851,7 +851,7 @@
     <string name="dns_scan_opens">باز می‌کند: %1$s</string>
     <string name="dns_scan_other">تست برای چیز دیگر</string>
     <string name="dns_scan_partial">هیچ DNSی Xbox و بازی انتخابی را با هم باز نکرد. این‌ها فقط همان چیزی را باز می‌کنند که زیرشان نوشته شده.</string>
-    <string name="firefox_vpn_title">فایرفاکس VPN</string>
+    <string name="firefox_vpn_title">موزیلا</string>
     <string name="firefox_vpn_description">از VPN رایگان داخلی فایرفاکس موزیلا (۵۰ گیگ در ماه) با حساب Firefox خود استفاده کن. ترافیک از سرورهای موزیلا عبور می‌کند.</string>
     <string name="firefox_vpn_accounts">حساب‌ها</string>
     <string name="firefox_vpn_no_accounts">هنوز حسابی اضافه نشده.</string>
@@ -914,4 +914,14 @@
     <string name="firefox_vpn_relay_address">آدرس Worker</string>
     <string name="firefox_vpn_relay_save">ذخیره</string>
     <string name="firefox_vpn_relay_active">رله روشن است</string>
+    <string name="firefox_vpn_measure_all">تست همه</string>
+    <string name="firefox_vpn_measuring">در حال تست…</string>
+    <string name="firefox_vpn_unreachable">جواب نمی‌دهد</string>
+    <string name="firefox_vpn_verified">از %1$s وصل شد و تست شد: تونل واقعاً کار می‌کند.</string>
+    <string name="firefox_vpn_silent">%1$s جواب داد ولی ترافیک رد نمی‌کند؛ کشور بعدی امتحان می‌شود.</string>
+    <string name="firefox_vpn_testing">در حال تست %1$s…</string>
+    <string name="firefox_vpn_check_relay">بررسی رله</string>
+    <string name="firefox_vpn_relay_ready">رله ساخته شده و کلید همین گوشی را دارد.</string>
+    <string name="firefox_vpn_relay_wrong_key">این Worker کلید گوشی دیگری را دارد: کد را دوباره از اینجا کپی کن و Deploy بزن.</string>
+    <string name="firefox_vpn_relay_missing">در این آدرس هیچ Worker جواب نمی‌دهد. آدرس را چک کن یا اول Worker را بساز.</string>
 </resources>

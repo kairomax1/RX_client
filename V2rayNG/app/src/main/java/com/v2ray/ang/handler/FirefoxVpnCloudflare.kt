@@ -86,6 +86,35 @@ object FirefoxVpnCloudflare {
      */
     fun workerCode(context: Context): String = WORKER.replace("__KEY__", secret(context))
 
+    /**
+     * Asks the deployed Worker whether it knows this phone's key. Returns a
+     * short verdict for the screen: "ready", "wrong-key", "missing", "error: …".
+     */
+    fun check(address: String, context: Context): String {
+        val trimmed = address.trim().trimEnd('/')
+        if (trimmed.isEmpty()) return "missing"
+        val url = when {
+            trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith("http://") -> trimmed
+            trimmed.startsWith("wss://") -> "https://" + trimmed.removePrefix("wss://")
+            trimmed.startsWith("ws://") -> "http://" + trimmed.removePrefix("ws://")
+            else -> "https://$trimmed"
+        } + (if (trimmed.contains('?')) "&" else "?") + "k=" + secret(context)
+        return try {
+            val request = Request.Builder().url(url).header("User-Agent", UA).get().build()
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.code == 200 -> "ready"
+                    response.code == 401 -> "wrong-key"
+                    response.code == 404 -> "missing"
+                    else -> "error: HTTP ${response.code}"
+                }
+            }
+        } catch (e: Exception) {
+            "error: ${e.message ?: "no answer"}"
+        }
+    }
+
     // ── The pipe ─────────────────────────────────────────────────
 
     /** One WebSocket turned into a pair of streams the relay can copy between. */
@@ -119,10 +148,13 @@ object FirefoxVpnCloudflare {
         proxyHost: String,
         proxyPort: Int,
         target: String,
-        token: String
+        token: String,
+        hostHeader: String,
+        withAgent: Boolean
     ): Tunnel? {
-        val url = webSocketUrl(address, secret(context), proxyHost, proxyPort, target, token)
-            ?: return null
+        val url = webSocketUrl(
+            address, secret(context), proxyHost, proxyPort, target, token, hostHeader, withAgent
+        ) ?: return null
         val room = LinkedBlockingQueue<ByteArray>()
         val opened = CountDownLatch(1)
         val answered = CountDownLatch(1)
@@ -177,7 +209,15 @@ object FirefoxVpnCloudflare {
             return null
         }
         if (failure != null) {
-            AppLog.error(AppLog.Section.Connection, "Cloudflare relay: $failure")
+            val message = failure.orEmpty()
+            AppLog.error(
+                AppLog.Section.Connection,
+                if (message.contains("401")) {
+                    "Cloudflare relay: the Worker holds another phone's key; copy the code again and Deploy"
+                } else {
+                    "Cloudflare relay: $message"
+                }
+            )
             socket.cancel()
             return null
         }
@@ -205,7 +245,9 @@ object FirefoxVpnCloudflare {
         proxyHost: String,
         proxyPort: Int,
         target: String,
-        token: String
+        token: String,
+        hostHeader: String,
+        withAgent: Boolean
     ): String? {
         val trimmed = address.trim().trimEnd('/')
         if (trimmed.isEmpty()) return null
@@ -221,7 +263,9 @@ object FirefoxVpnCloudflare {
             "&h=" + android.net.Uri.encode(proxyHost) +
             "&p=" + proxyPort +
             "&t=" + android.net.Uri.encode(target) +
-            "&a=" + android.net.Uri.encode(token)
+            "&a=" + android.net.Uri.encode(token) +
+            "&hh=" + android.net.Uri.encode(hostHeader) +
+            "&u=" + if (withAgent) "1" else "0"
     }
 
     private val CLOSED = ByteArray(0)
@@ -303,7 +347,7 @@ object FirefoxVpnCloudflare {
           async fetch(request) {
             const url = new URL(request.url);
             if (url.searchParams.get('k') !== KEY) {
-              return new Response('not found', { status: 404 });
+              return new Response('another phone key', { status: 401 });
             }
             if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') {
               return new Response('relay is up', { status: 200 });
@@ -312,6 +356,8 @@ object FirefoxVpnCloudflare {
             const port = parseInt(url.searchParams.get('p') || '0', 10);
             const target = url.searchParams.get('t');
             const token = url.searchParams.get('a');
+            const hostHeader = url.searchParams.get('hh') || target;
+            const withAgent = url.searchParams.get('u') === '1';
             if (!host || !port || !target || !token) {
               return new Response('bad request', { status: 400 });
             }
@@ -329,11 +375,14 @@ object FirefoxVpnCloudflare {
               writer = socket.writable.getWriter();
               reader = socket.readable.getReader();
 
-              const head =
+              let head =
                 'CONNECT ' + target + ' HTTP/1.1\r\n' +
-                'Host: ' + target + '\r\n' +
-                'Proxy-Authorization: Bearer ' + token + '\r\n' +
-                'User-Agent: ' + UA + '\r\n\r\n';
+                'Host: ' + hostHeader + '\r\n' +
+                'Proxy-Authorization: Bearer ' + token + '\r\n';
+              if (withAgent) {
+                head += 'User-Agent: ' + UA + '\r\n';
+              }
+              head += '\r\n';
               await writer.write(new TextEncoder().encode(head));
 
               let buffer = new Uint8Array(0);

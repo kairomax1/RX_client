@@ -64,6 +64,7 @@ import com.v2ray.ang.R
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.FirefoxVpnAuth
 import com.v2ray.ang.handler.FirefoxVpnCaptcha
+import com.v2ray.ang.handler.FirefoxVpnCheck
 import com.v2ray.ang.handler.FirefoxVpnCloudflare
 import com.v2ray.ang.handler.FirefoxVpnManager
 import com.v2ray.ang.handler.FirefoxVpnRelay
@@ -73,10 +74,17 @@ import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.RxFogBackground
 import com.v2ray.ang.ui.compose.RxPromptFont
 import com.v2ray.ang.ui.compose.rxScreenBrush
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 class FirefoxVpnActivity : BaseComponentActivity() {
@@ -120,7 +128,13 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val browserState: String? = null,
         val relayEnabled: Boolean = false,
         val relayAddress: String = "",
-        val relayCode: String? = null
+        val relayCode: String? = null,
+        val relayVerdict: String? = null,
+        /** null while unknown, true when a real page came back, false when it did not. */
+        val tested: Boolean? = null,
+        val tryingCountry: String? = null,
+        val pings: Map<String, Int?> = emptyMap(),
+        val pinging: Boolean = false
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -369,80 +383,182 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         loadState()
     }
 
+    private companion object {
+        /** The profile the core is pointed at; one is enough. */
+        const val TUNNEL_GUID = "firefox-vpn"
+    }
+
+    private var connectJob: Job? = null
+    private var monitor: Job? = null
+    private var reconnects: Int = 0
+
+    /**
+     * Opens a tunnel and refuses to call it connected until a real page has
+     * come back through it. Countries this phone cannot reach are skipped, and
+     * the ones it can reach are tried from the fastest.
+     */
     fun connect() {
         val account = _state.value.accounts.firstOrNull { it.id == _state.value.activeAccountId }
         if (account == null) {
             _state.update { it.copy(error = "Add a Firefox Account first") }
             return
         }
-        val countryCode = _state.value.selectedCountryCode
-        viewModelScope.launch {
-            _state.update { it.copy(isConnecting = true, error = null, success = null) }
-            when (val result = FirefoxVpnManager.connect(getApplication(), account, countryCode)) {
-                is FirefoxVpnManager.ConnectResult.Success -> {
-                    val info = result.info
-                    val profile = com.v2ray.ang.dto.entities.ProfileItem(
-                        configType = com.v2ray.ang.enums.EConfigType.HTTP,
-                        remarks = "Firefox VPN (${info.countryName})",
-                        server = "127.0.0.1",
-                        serverPort = info.localPort.toString()
-                    )
-                    val guid = "firefox-vpn"
-                    com.v2ray.ang.handler.MmkvManager.encodeServerConfig(guid, profile)
-                    com.v2ray.ang.handler.MmkvManager.setSelectServer(guid)
-                    com.v2ray.ang.core.LauncherManager.startService(getApplication(), guid = guid)
-                    _state.update { it.copy(isConnecting = false, connectionInfo = info) }
-                    AppLog.info(
-                        AppLog.Section.Connection,
-                        "Firefox VPN connected via ${info.countryName} " +
-                            "(proxy ${info.proxyHost}, relay ${info.localPort})"
-                    )
+        connectJob?.cancel()
+        connectJob = viewModelScope.launch {
+            _state.update {
+                it.copy(isConnecting = true, error = null, success = null, tested = null)
+            }
+            stopTunnel()
+            if (_state.value.pings.isEmpty()) measureAll()
+            var lastProblem = "no country answered"
+            var connected: FirefoxVpnManager.ConnectionInfo? = null
+            for (code in candidates()) {
+                val name = _state.value.countries.firstOrNull { it.code == code }?.name ?: code
+                _state.update { it.copy(tryingCountry = code) }
+                AppLog.info(AppLog.Section.Connection, "Firefox VPN: trying $name")
+                val info = runTunnel(account, code)
+                if (info != null) {
+                    connected = info
+                    break
                 }
-                is FirefoxVpnManager.ConnectResult.Error -> {
-                    FirefoxVpnRelay.stop()
-                    _state.update { it.copy(isConnecting = false, error = result.message) }
-                }
+                lastProblem = "$name did not carry any traffic"
+            }
+            _state.update {
+                it.copy(
+                    isConnecting = false,
+                    tryingCountry = null,
+                    connectionInfo = connected,
+                    tested = if (connected != null) true else null,
+                    selectedCountryCode = connected?.let { info ->
+                        _state.value.selectedCountryCode
+                    } ?: it.selectedCountryCode,
+                    error = if (connected == null) lastProblem else null
+                )
+            }
+            if (connected != null) {
+                reconnects = 0
+                startMonitor(connected.localPort)
             }
         }
     }
 
-    fun disconnect() {
-        com.v2ray.ang.core.LauncherManager.stopService(getApplication())
-        FirefoxVpnRelay.stop()
-        _state.update { it.copy(connectionInfo = null) }
-        AppLog.info(AppLog.Section.Connection, "Firefox VPN disconnected")
-    }
-
-    // ── The way out through Cloudflare ───────────────────────────
-
-    fun setRelayEnabled(enabled: Boolean) {
-        FirefoxVpnCloudflare.setEnabled(getApplication(), enabled)
-        _state.update { it.copy(relayEnabled = enabled) }
-        AppLog.info(AppLog.Section.Connection, "Cloudflare relay " + if (enabled) "on" else "off")
-    }
-
-    fun setRelayAddress(address: String) {
-        _state.update { it.copy(relayAddress = address) }
-    }
-
-    fun saveRelayAddress() {
-        FirefoxVpnCloudflare.setAddress(getApplication(), _state.value.relayAddress)
-        _state.update {
-            it.copy(
-                relayAddress = FirefoxVpnCloudflare.address(getApplication()),
-                success = null,
-                error = null
+    /** Everything that is worth trying, fastest reachable first. */
+    private fun candidates(): List<String> {
+        val countries = _state.value.countries
+        val pings = _state.value.pings
+        if (countries.isEmpty()) return listOf(_state.value.selectedCountryCode.orEmpty())
+        val ordered = countries.sortedWith(
+            compareBy(
+                { pings[it.code] == null },
+                { pings[it.code] ?: Int.MAX_VALUE },
+                { it.code != FirefoxVpnServers.RECOMMENDED_CODE },
+                { it.name }
             )
+        ).map { it.code }
+        val chosen = _state.value.selectedCountryCode
+        val first = if (chosen != null) listOf(chosen) + ordered.filter { it != chosen } else ordered
+        return first.take(6)
+    }
+
+    /** Builds one tunnel and asks it for a real page; null when it stays silent. */
+    private suspend fun runTunnel(
+        account: FirefoxVpnStore.StoredAccount,
+        countryCode: String
+    ): FirefoxVpnManager.ConnectionInfo? {
+        val result = FirefoxVpnManager.connect(getApplication(), account, countryCode)
+        if (result is FirefoxVpnManager.ConnectResult.Error) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: ${result.message}")
+            return null
+        }
+        val info = (result as FirefoxVpnManager.ConnectResult.Success).info
+        val profile = com.v2ray.ang.dto.entities.ProfileItem(
+            configType = com.v2ray.ang.enums.EConfigType.HTTP,
+            remarks = "Mozilla (${info.countryName})",
+            server = "127.0.0.1",
+            serverPort = info.localPort.toString()
+        )
+        com.v2ray.ang.handler.MmkvManager.encodeServerConfig(TUNNEL_GUID, profile)
+        com.v2ray.ang.handler.MmkvManager.setSelectServer(TUNNEL_GUID)
+        com.v2ray.ang.core.LauncherManager.startService(getApplication(), guid = TUNNEL_GUID)
+
+        if (!FirefoxVpnCheck.waitUntilCarries(info.localPort)) {
+            AppLog.error(
+                AppLog.Section.Connection,
+                "Firefox VPN: ${info.countryName} was announced but carried nothing; moving on"
+            )
+            stopTunnel()
+            return null
+        }
+        AppLog.info(
+            AppLog.Section.Connection,
+            "Firefox VPN: verified through ${info.countryName} (relay ${info.localPort})"
+        )
+        FirefoxVpnStore.saveSelectedCountry(getApplication(), countryCode)
+        return info
+    }
+
+    /** Watches the tunnel while it is up, and opens a new one if it goes quiet. */
+    private fun startMonitor(localPort: Int) {
+        monitor?.cancel()
+        monitor = viewModelScope.launch {
+            var missed = 0
+            while (isActive) {
+                delay(25_000)
+                val ok = withContext(Dispatchers.IO) { FirefoxVpnCheck.through(localPort) }
+                _state.update { it.copy(tested = ok) }
+                if (ok) {
+                    missed = 0
+                    continue
+                }
+                missed++
+                if (missed < 2) continue
+                AppLog.error(
+                    AppLog.Section.Connection,
+                    "Firefox VPN: the tunnel stopped carrying traffic"
+                )
+                stopTunnel()
+                _state.update { it.copy(connectionInfo = null, tested = false) }
+                if (reconnects < 2) {
+                    reconnects++
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: reconnecting on its own")
+                    connect()
+                } else {
+                    _state.update { it.copy(error = "The tunnel kept dropping; try another country") }
+                }
+                return@launch
+            }
         }
     }
 
-    /** The whole Worker text, with this phone's own key already in it. */
-    fun showRelayCode() {
-        _state.update { it.copy(relayCode = FirefoxVpnCloudflare.workerCode(getApplication())) }
+    private fun stopTunnel() {
+        runCatching { com.v2ray.ang.core.LauncherManager.stopService(getApplication()) }
+        FirefoxVpnRelay.stop()
     }
 
-    fun hideRelayCode() {
-        _state.update { it.copy(relayCode = null) }
+    /** Measures every country's endpoint, so the choice is made on real numbers. */
+    fun measureAll() {
+        if (_state.value.countries.isEmpty() || _state.value.pinging) return
+        viewModelScope.launch {
+            _state.update { it.copy(pinging = true) }
+            val countries = _state.value.countries
+            val measured = countries.map { country ->
+                async(Dispatchers.IO) { country.code to FirefoxVpnServers.ping(country) }
+            }.awaitAll().toMap()
+            val reachable = measured.count { it.value != null }
+            AppLog.info(
+                AppLog.Section.Connection,
+                "Firefox VPN: $reachable of ${countries.size} countries answer from this phone"
+            )
+            _state.update { it.copy(pings = measured, pinging = false) }
+        }
+    }
+
+    fun disconnect() {
+        monitor?.cancel()
+        connectJob?.cancel()
+        stopTunnel()
+        _state.update { it.copy(connectionInfo = null, tested = null) }
+        AppLog.info(AppLog.Section.Connection, "Firefox VPN disconnected")
     }
 
     fun clearMessages() {
@@ -499,6 +615,14 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         tint = colors.onSurface
                     )
                 }
+                Image(
+                    painter = painterResource(R.drawable.rx_fox_badge),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                )
+                Spacer(Modifier.width(8.dp))
                 Text(
                     text = stringResource(R.string.firefox_vpn_title),
                     style = androidx.compose.ui.text.TextStyle(fontFamily = RxPromptFont, fontSize = 22.sp),
@@ -526,6 +650,10 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         ),
                         color = colors.onSurfaceVariant
                     )
+                }
+
+                state.connectionInfo?.let { info ->
+                    item { TunnelState(tested = state.tested, country = info.countryName) }
                 }
 
                 state.error?.let { message ->
@@ -615,6 +743,22 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                                 color = colors.onSurfaceVariant
                             )
                         }
+                        Spacer(Modifier.weight(1f))
+                        if (state.countries.isNotEmpty()) {
+                            TextButton(
+                                onClick = { viewModel.measureAll() },
+                                enabled = !state.pinging
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        if (state.pinging) R.string.firefox_vpn_measuring
+                                        else R.string.firefox_vpn_measure_all
+                                    ),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont),
+                                    color = colors.primary
+                                )
+                            }
+                        }
                     }
                 }
                 if (state.accounts.isEmpty()) {
@@ -647,6 +791,8 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         CountryRow(
                             country = country,
                             selected = country.code == state.selectedCountryCode,
+                            ping = state.pings[country.code],
+                            measuring = state.pinging,
                             onSelect = { viewModel.selectCountry(country.code) }
                         )
                     }
@@ -661,7 +807,9 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         onToggle = { viewModel.setRelayEnabled(it) },
                         onAddressChange = { viewModel.setRelayAddress(it) },
                         onSave = { viewModel.saveRelayAddress() },
-                        onShowCode = { viewModel.showRelayCode() }
+                        onShowCode = { viewModel.showRelayCode() },
+                        onCheck = { viewModel.checkRelay() },
+                        verdict = state.relayVerdict
                     )
                 }
 
@@ -841,6 +989,8 @@ private fun AccountRow(
 private fun CountryRow(
     country: FirefoxVpnServers.Country,
     selected: Boolean,
+    ping: Int?,
+    measuring: Boolean,
     onSelect: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -879,6 +1029,21 @@ private fun CountryRow(
                 )
             }
         }
+        Text(
+            text = when {
+                measuring -> "…"
+                ping != null -> "$ping ms"
+                else -> stringResource(R.string.firefox_vpn_unreachable)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = when {
+                ping == null && !measuring -> colors.onSurfaceVariant.copy(alpha = 0.6f)
+                ping != null && ping < 150 -> colors.primary
+                else -> colors.onSurfaceVariant
+            },
+            modifier = Modifier.padding(start = 6.dp)
+        )
+        Spacer(Modifier.width(8.dp))
         if (selected) {
             Box(
                 Modifier
@@ -887,6 +1052,30 @@ private fun CountryRow(
                     .background(colors.primary)
             )
         }
+    }
+}
+
+/** Says plainly whether the tunnel really carries traffic. */
+@Composable
+private fun TunnelState(tested: Boolean?, country: String) {
+    val colors = MaterialTheme.colorScheme
+    val (text, ink) = when (tested) {
+        true -> stringResource(R.string.firefox_vpn_verified, country) to colors.primary
+        false -> stringResource(R.string.firefox_vpn_silent, country) to colors.error
+        null -> stringResource(R.string.firefox_vpn_testing, country) to colors.onSurfaceVariant
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(ink.copy(alpha = 0.14f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
+            color = ink
+        )
     }
 }
 
@@ -942,7 +1131,9 @@ private fun RelayCard(
     onToggle: (Boolean) -> Unit,
     onAddressChange: (String) -> Unit,
     onSave: () -> Unit,
-    onShowCode: () -> Unit
+    onShowCode: () -> Unit,
+    onCheck: () -> Unit,
+    verdict: String?
 ) {
     val colors = MaterialTheme.colorScheme
     Card {
@@ -986,15 +1177,43 @@ private fun RelayCard(
             shape = RoundedCornerShape(12.dp)
         )
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onSave,
-            enabled = address.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = onSave,
+                enabled = address.isNotBlank(),
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    stringResource(R.string.firefox_vpn_relay_save),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
+                )
+            }
+            OutlinedButton(
+                onClick = onCheck,
+                enabled = address.isNotBlank(),
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    stringResource(R.string.firefox_vpn_check_relay),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
+                )
+            }
+        }
+        verdict?.let { value ->
+            Spacer(Modifier.height(8.dp))
+            val text = when {
+                value == "ready" -> stringResource(R.string.firefox_vpn_relay_ready)
+                value == "wrong-key" -> stringResource(R.string.firefox_vpn_relay_wrong_key)
+                value == "missing" -> stringResource(R.string.firefox_vpn_relay_missing)
+                else -> value
+            }
+            val good = value == "ready"
             Text(
-                stringResource(R.string.firefox_vpn_relay_save),
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
+                text = text,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont, lineHeight = 18.sp),
+                color = if (good) colors.primary else colors.error
             )
         }
     }

@@ -878,7 +878,7 @@
     <string name="dns_scan_opens">Opens: %1$s</string>
     <string name="dns_scan_other">Test for something else</string>
     <string name="dns_scan_partial">No DNS opened Xbox and a chosen game together. These open only what is written under them.</string>
-    <string name="firefox_vpn_title">Firefox VPN</string>
+    <string name="firefox_vpn_title">Mozilla</string>
     <string name="firefox_vpn_description">Use Mozilla\'s free built-in VPN (50 GB/month) through your Firefox Account. Traffic is routed through Mozilla\'s servers.</string>
     <string name="firefox_vpn_accounts">Accounts</string>
     <string name="firefox_vpn_no_accounts">No Firefox Account added yet.</string>
@@ -941,4 +941,14 @@
     <string name="firefox_vpn_relay_address">Worker address</string>
     <string name="firefox_vpn_relay_save">Save</string>
     <string name="firefox_vpn_relay_active">The relay is on</string>
+    <string name="firefox_vpn_measure_all">Test all</string>
+    <string name="firefox_vpn_measuring">Testing…</string>
+    <string name="firefox_vpn_unreachable">no answer</string>
+    <string name="firefox_vpn_verified">Connected through %1$s and tested: the tunnel carries traffic.</string>
+    <string name="firefox_vpn_silent">%1$s answered but carries no traffic; another location is being tried.</string>
+    <string name="firefox_vpn_testing">Testing %1$s…</string>
+    <string name="firefox_vpn_check_relay">Check relay</string>
+    <string name="firefox_vpn_relay_ready">The relay is deployed and holds this phone\'s key.</string>
+    <string name="firefox_vpn_relay_wrong_key">This Worker holds another phone\'s key: copy the code from here again and press Deploy.</string>
+    <string name="firefox_vpn_relay_missing">No Worker answers at this address. Check the address, or create the Worker first.</string>
 </resources>

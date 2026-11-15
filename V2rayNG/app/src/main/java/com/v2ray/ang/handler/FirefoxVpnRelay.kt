@@ -54,17 +54,45 @@ object FirefoxVpnRelay {
     private var cloudflareAddress: String? = null
 
     /**
+     * The shape of the CONNECT the proxy accepts. Which one it is can only be
+     * learned by asking, so the shapes are tried once at connect time and the
+     * one that answers 200 is kept.
+     */
+    internal data class Shape(
+        val name: String,
+        val hostIsTarget: Boolean,
+        val withAgent: Boolean
+    )
+
+    internal val SHAPES = listOf(
+        Shape("host-target+ua", true, true),
+        Shape("host-proxy+ua", false, true),
+        Shape("host-target", true, false),
+        Shape("host-proxy", false, false)
+    )
+
+    @Volatile
+    private var shape: Shape = SHAPES[0]
+
+    /**
      * Starts the relay and returns the loopback port the core should use.
      * [cloudflareAddress] is the user's own Worker; without it the proxy is
      * dialled directly.
      */
     @Synchronized
-    fun start(host: String, port: Int, token: String, cloudflareAddress: String? = null): Int {
+    fun start(
+        host: String,
+        port: Int,
+        token: String,
+        cloudflareAddress: String? = null,
+        shapeName: String? = null
+    ): Int {
         stop()
         proxyHost = host
         proxyPort = port
         bearerToken = token
         this.cloudflareAddress = cloudflareAddress
+        shape = SHAPES.firstOrNull { it.name == shapeName } ?: SHAPES[0]
 
         val server = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         serverSocket = server
@@ -176,13 +204,60 @@ object FirefoxVpnRelay {
         fun close()
     }
 
-    /** The CONNECT Firefox itself sends; the proxy answers 400 to anything else. */
-    internal fun connectRequest(target: String, token: String): String = buildString {
-        append("CONNECT $target HTTP/1.1\r\n")
-        append("Host: $target\r\n")
-        append("Proxy-Authorization: Bearer $token\r\n")
-        append("User-Agent: $FIREFOX_UA\r\n")
-        append("\r\n")
+    /** The CONNECT Firefox itself sends; the shape is the one the proxy took. */
+    internal fun connectRequest(target: String, token: String): String =
+        connectRequest(target, token, proxyHost, shape)
+
+    internal fun connectRequest(target: String, token: String, host: String, shape: Shape): String =
+        buildString {
+            append("CONNECT $target HTTP/1.1\r\n")
+            append("Host: ").append(if (shape.hostIsTarget) target else host).append("\r\n")
+            append("Proxy-Authorization: Bearer $token\r\n")
+            if (shape.withAgent) append("User-Agent: $FIREFOX_UA\r\n")
+            append("\r\n")
+        }
+
+    /**
+     * Asks the proxy with each shape once and returns the name of the one it
+     * answers 200 to, together with a short report for the log. Null when
+     * every shape was refused.
+     */
+    internal fun probeShapes(
+        host: String,
+        port: Int,
+        token: String,
+        testTarget: String = "www.gstatic.com:443"
+    ): Pair<String?, String> {
+        val report = StringBuilder()
+        for (candidate in SHAPES) {
+            val status = tryShape(host, port, token, candidate, testTarget)
+            if (report.isNotEmpty()) report.append(", ")
+            report.append(candidate.name).append('=').append(status ?: "no answer")
+            if (status != null && status.contains(" 200")) {
+                return Pair(candidate.name, report.toString())
+            }
+        }
+        return Pair(null, report.toString())
+    }
+
+    private fun tryShape(
+        host: String,
+        port: Int,
+        token: String,
+        candidate: Shape,
+        target: String
+    ): String? = try {
+        val tls = dialTls(host, port) ?: return null
+        tls.use {
+            it.getOutputStream().apply {
+                write(connectRequest(target, token, host, candidate).toByteArray(Charsets.ISO_8859_1))
+                flush()
+            }
+            val statusLine = readHead(BufferedInputStream(it.getInputStream()))?.substringBefore("\r\n")
+            statusLine
+        }
+    } catch (_: Exception) {
+        null
     }
 
     /** Opens the connection to Fastly and asks it for the tunnel. */
@@ -197,7 +272,9 @@ object FirefoxVpnRelay {
                 proxyHost = proxyHost,
                 proxyPort = proxyPort,
                 target = target,
-                token = bearerToken
+                token = bearerToken,
+                hostHeader = if (shape.hostIsTarget) target else proxyHost,
+                withAgent = shape.withAgent
             ) ?: return null
             return object : Tunnel {
                 override val input: InputStream get() = pipe.input
@@ -206,7 +283,7 @@ object FirefoxVpnRelay {
             }
         }
 
-        val tls = dialProxy() ?: return null
+        val tls = dialTls(proxyHost, proxyPort) ?: return null
         val buffered = BufferedInputStream(tls.getInputStream())
         val statusLine = try {
             tls.getOutputStream().apply {
@@ -244,16 +321,19 @@ object FirefoxVpnRelay {
     }
 
     /** The TLS connection to Fastly, dialled straight from the phone. */
-    private fun dialProxy(): SSLSocket? = try {
-        val address = InetSocketAddress(proxyHost, proxyPort)
+    private fun dialTls(host: String, port: Int): SSLSocket? = try {
+        val address = InetSocketAddress(host, port)
         val raw = Socket()
         raw.connect(address, CONNECT_TIMEOUT_MILLIS)
         raw.soTimeout = CONNECT_TIMEOUT_MILLIS
 
         val factory: SSLSocketFactory = SSLContext.getDefault().socketFactory
-        val tls = factory.createSocket(raw, proxyHost, proxyPort, true) as SSLSocket
+        val tls = factory.createSocket(raw, host, port, true) as SSLSocket
         val parameters = tls.sslParameters
-        parameters.serverNames = listOf(SNIHostName(proxyHost))
+        parameters.serverNames = listOf(SNIHostName(host))
+        // Firefox offers both; offering one alone is what makes the proxy take
+        // HTTP/1.1 for a plain CONNECT.
+        parameters.applicationProtocols = arrayOf("http/1.1")
         tls.sslParameters = parameters
         tls.startHandshake()
         tls

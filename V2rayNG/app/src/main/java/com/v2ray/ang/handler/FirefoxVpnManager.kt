@@ -120,7 +120,21 @@ object FirefoxVpnManager {
         // user's own Cloudflare Worker instead.
         FirefoxVpnRelay.attachContext(context)
         val relayAddress = FirefoxVpnCloudflare.relayAddressOrNull(context)
-        val localPort = FirefoxVpnRelay.start(serverHost, serverPort, pass.token, relayAddress)
+
+        // Which CONNECT the proxy takes is not written anywhere; ask it once and
+        // keep the answer, so a future build does not have to guess.
+        if (relayAddress == null && shapeName == null) {
+            val (found, report) = FirefoxVpnRelay.probeShapes(serverHost, serverPort, pass.token)
+            AppLog.info(AppLog.Section.Connection, "Firefox VPN proxy shapes: $report")
+            shapeName = found
+        }
+        val localPort = FirefoxVpnRelay.start(
+            serverHost,
+            serverPort,
+            pass.token,
+            relayAddress,
+            shapeName
+        )
 
         ConnectResult.Success(
             ConnectionInfo(
@@ -134,6 +148,10 @@ object FirefoxVpnManager {
             )
         )
     }
+
+    /** The CONNECT shape the proxy took in this run; learned by asking once. */
+    @Volatile
+    private var shapeName: String? = null
 
     /** Creates a new account ID. */
     fun newAccountId(): String = UUID.randomUUID().toString()

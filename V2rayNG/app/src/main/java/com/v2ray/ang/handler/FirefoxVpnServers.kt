@@ -142,6 +142,28 @@ object FirefoxVpnServers {
         return country.cities.flatMap { it.servers }.filter { !it.quarantined }
     }
 
+    /**
+     * How long a TCP connection to the country's own endpoint takes, in
+     * milliseconds, or null when this phone cannot reach it at all. Nothing is
+     * made up: a country that does not answer shows as unreachable.
+     */
+    suspend fun ping(country: Country, timeoutMillis: Int = 3_000): Int? =
+        withContext(Dispatchers.IO) {
+            val endpoint = connectEndpoint(country) ?: return@withContext null
+            try {
+                val started = System.nanoTime()
+                java.net.Socket().use { socket ->
+                    socket.connect(
+                        java.net.InetSocketAddress(endpoint.connectHost, endpoint.tunnelPort),
+                        timeoutMillis
+                    )
+                }
+                ((System.nanoTime() - started) / 1_000_000L).toInt()
+            } catch (_: Exception) {
+                null
+            }
+        }
+
     /** The first usable CONNECT endpoint of a country. */
     fun connectEndpoint(country: Country?): Server? =
         country?.let { serversFor(it).firstOrNull { server -> server.connectHost.isNotEmpty() } }
