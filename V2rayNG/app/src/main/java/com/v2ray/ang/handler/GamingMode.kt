@@ -267,10 +267,17 @@ object GamingMode {
      * whether the owner is gaming or not.
      */
     fun effectiveRulesets(): MutableList<RulesetItem>? {
-        val base = if (isEnabled()) {
+        val base: List<RulesetItem> = if (isEnabled()) {
             rulesets(extraDomains(), bundledSites, gameExit())
         } else {
-            MmkvManager.decodeRoutingRulesets() ?: return null
+            // No ruleset of their own: the phone that builds the tunnel is not
+            // always the one that was opened, and a null answer here used to
+            // take the adverts and this country's sites with it — nothing was
+            // then written at all, and everything left through the tunnel, which
+            // is how a site at home came to be answered from abroad. The rules
+            // that always apply are applied, and what they do not name leaves as
+            // it always has.
+            MmkvManager.decodeRoutingRulesets().orEmpty()
         }
         val rules = mutableListOf<RulesetItem>()
         if (adDomains.isNotEmpty()) {
