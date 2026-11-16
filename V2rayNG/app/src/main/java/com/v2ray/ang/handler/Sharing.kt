@@ -29,6 +29,7 @@ object Sharing {
     private const val PREF_LIVE = "pref_rx_sharing_live"
     private const val PREF_STOPPED = "pref_rx_sharing_stopped"
     private const val PREF_PORT = "pref_rx_sharing_port"
+    private const val PREF_NEW_DEVICES = "pref_rx_sharing_new_devices"
 
     /** No limit: sharing stays on until it is switched off. */
     const val NO_LIMIT = 0
@@ -71,6 +72,15 @@ object Sharing {
     fun setEnabled(enabled: Boolean) {
         MmkvManager.encodeSettings(AppConfig.PREF_PROXY_SHARING, enabled)
         if (!enabled) setStoppedReason(null)
+    }
+
+    /** A device nobody has decided about is let through, and shown on the screen. */
+    const val LET_NEW_DEVICES_IN = true
+
+    fun letsNewDevicesIn(): Boolean = MmkvManager.decodeSettingsBool(PREF_NEW_DEVICES, LET_NEW_DEVICES_IN)
+
+    fun setLetsNewDevicesIn(allowed: Boolean) {
+        MmkvManager.encodeSettings(PREF_NEW_DEVICES, allowed)
     }
 
     /** How long sharing is allowed to stay on; 0 is "until I switch it off". */

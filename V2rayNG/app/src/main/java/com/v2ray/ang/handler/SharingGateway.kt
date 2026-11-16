@@ -330,6 +330,14 @@ object SharingGateway {
     private fun decide(ip: String, target: String): String {
         val stored = Sharing.verdictOf(ip)
         if (stored != Sharing.ASK) return stored
+        // Sharing that waits to be approved one device at a time is sharing that
+        // does not work: the notice is missed, the question goes unanswered, and
+        // an unanswered question is a refusal. A device is let through and shown
+        // on the screen instead, where the owner can shut it out by hand.
+        if (Sharing.letsNewDevicesIn()) {
+            Sharing.allow(ip, "")
+            return Sharing.ALLOW
+        }
         asking[ip] = System.currentTimeMillis()
         return try {
             try {
@@ -496,6 +504,16 @@ object SharingGateway {
     }
 
     /**
+     * The interfaces a mobile network uses. Their address is the carrier's own,
+     * not one another device can reach this phone on: sharing it produces a
+     * door nobody can knock at, which is worse than saying there is no door.
+     */
+    private val MOBILE_INTERFACES = listOf("rmnet", "ccmni", "wwan", "pdp", "clat")
+
+    /** The tunnel this phone itself is wearing; never a way in for somebody else. */
+    private val TUNNEL_INTERFACES = listOf("tun")
+
+    /**
      * The addresses of this phone other devices can reach it on, and whether
      * the phone is hosting a network of its own (a hotspot, or sharing by
      * cable) rather than only sitting on someone else's Wi-Fi.
@@ -507,16 +525,18 @@ object SharingGateway {
             val interfaces = NetworkInterface.getNetworkInterfaces().toList()
             for (iface in interfaces) {
                 if (!iface.isUp || iface.isLoopback) continue
+                val name = iface.name.lowercase()
+                if (MOBILE_INTERFACES.any { name.startsWith(it) } || TUNNEL_INTERFACES.any { name.startsWith(it) }) continue
                 val local = iface.inetAddresses.toList()
                     .filterIsInstance<Inet4Address>()
                     .filter { it.isSiteLocalAddress }
                     .mapNotNull { it.hostAddress }
                 if (local.isEmpty()) continue
-                val isHosting = iface.name.startsWith("ap") ||
-                    iface.name.startsWith("swlan") ||
-                    iface.name.startsWith("softap") ||
-                    iface.name.startsWith("rndis") ||
-                    iface.name.startsWith("bnep") ||
+                val isHosting = name.startsWith("ap") ||
+                    name.startsWith("swlan") ||
+                    name.startsWith("softap") ||
+                    name.startsWith("rndis") ||
+                    name.startsWith("bnep") ||
                     local.any { it.endsWith(".1") }
                 if (isHosting) hosting = true
                 addresses += local

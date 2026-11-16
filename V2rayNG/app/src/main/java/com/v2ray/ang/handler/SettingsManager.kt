@@ -332,13 +332,15 @@ object SettingsManager {
      */
     fun getDomesticDnsServers(): List<String> {
         val saved = MmkvManager.decodeSettingsString(AppConfig.PREF_DOMESTIC_DNS)
-        // In DNS mode almost every name is resolved here; the stock default is a resolver in
-        // China, whose answers point at servers that are slow from Iran.
-        if (saved.isNullOrBlank() && GamingMode.isEnabled()) return GamingMode.DIRECT_RESOLVERS
-        val domesticDns = saved ?: AppConfig.DNS_DIRECT
+        // In DNS mode almost every name is resolved here. The stock default is a
+        // resolver in China, which from this country answers slowly if it answers
+        // at all, and a name that is not answered is a site that never opens —
+        // so it is never used, whether it was stored or not.
+        val domesticDns = saved?.takeIf { it.isNotBlank() && it != AppConfig.DNS_DIRECT }
+            ?: GamingMode.DIRECT_RESOLVERS.joinToString(",")
         val ret = domesticDns.split(",").filter { Utils.isPureIpAddress(it) || Utils.isCoreDNSAddress(it) }
         if (ret.isEmpty()) {
-            return listOf(AppConfig.DNS_DIRECT)
+            return GamingMode.DIRECT_RESOLVERS
         }
         return ret
     }

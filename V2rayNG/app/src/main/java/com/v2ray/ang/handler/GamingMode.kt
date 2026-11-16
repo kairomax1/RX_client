@@ -62,8 +62,16 @@ object GamingMode {
         MmkvManager.encodeSettings(PREF_GAME_EXIT, exit)
     }
 
-    /** Resolvers reachable directly from Iran, used for everything that is not tunnelled. */
-    val DIRECT_RESOLVERS = listOf("8.8.8.8", "1.1.1.1")
+    /**
+     * Resolvers that answer from inside the country, used for everything that
+     * leaves on the phone's own line.
+     *
+     * Not the two that every phone knows: from here they do not answer at all,
+     * and a name that is not answered is a site that never opens and a game
+     * that never finds its server. These two are public resolvers of this
+     * country, reachable from almost every network in it.
+     */
+    val DIRECT_RESOLVERS = listOf("178.22.122.100", "185.51.200.2")
 
     fun isEnabled(): Boolean = MmkvManager.decodeSettingsBool(PREF_ENABLED, false)
 
