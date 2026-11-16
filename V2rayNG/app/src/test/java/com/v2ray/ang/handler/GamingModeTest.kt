@@ -1,12 +1,41 @@
 package com.v2ray.ang.handler
 
+import com.tencent.mmkv.MMKV
 import com.v2ray.ang.AppConfig
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.mockStatic
+import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.reset
+import org.mockito.kotlin.whenever
 
 class GamingModeTest {
+
+    private val settingsValues = mutableMapOf<String, String>()
+
+    /**
+     * The choice the owner picked is kept in the settings store, which no unit test can open.
+     * A plain map behind the same handle stands in for it, so what [GamingMode.setGameExit]
+     * writes is what [GamingMode.gameExit] reads back.
+     */
+    @AfterEach
+    fun prepareSettingsStorage() {
+        reset(settings)
+        settingsValues.clear()
+        whenever(settings.decodeString(any())).thenAnswer { settingsValues[it.getArgument<String>(0)] }
+        whenever(settings.encode(any<String>(), anyOrNull<String>())).thenAnswer {
+            val key = it.getArgument<String>(0)
+            val value: String? = it.getArgument(1)
+            if (value == null) settingsValues.remove(key) else settingsValues[key] = value
+            true
+        }
+    }
 
     @Test
     fun whatTheUserTypesBecomesAPlainSiteName() {
@@ -97,5 +126,18 @@ class GamingModeTest {
         assertEquals(GamingMode.EXIT_CONFIG, GamingMode.gameExit())
         GamingMode.setGameExit(GamingMode.EXIT_OWN)
         assertEquals(GamingMode.EXIT_OWN, GamingMode.gameExit())
+    }
+
+    companion object {
+        private val settings: MMKV = mock()
+
+        @BeforeAll
+        @JvmStatic
+        fun initializeHandle() {
+            mockStatic(MMKV::class.java).use {
+                it.`when`<MMKV> { MMKV.mmkvWithID("SETTING", MMKV.MULTI_PROCESS_MODE) }.thenReturn(settings)
+                MmkvManager.decodeSettingsString("test-initialize")
+            }
+        }
     }
 }
