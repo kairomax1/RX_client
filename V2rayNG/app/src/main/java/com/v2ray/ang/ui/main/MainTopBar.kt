@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
 import com.v2ray.ang.ui.compose.AppTopBar
+import com.v2ray.ang.ui.compose.RxFanDropdownMenu
 import com.v2ray.ang.ui.compose.RxDropdownMenu
 import com.v2ray.ang.ui.compose.rememberAnimationsEnabled
 
@@ -71,7 +72,8 @@ fun MainTopBar(
     onMenuClick: () -> Unit,
     onPublicConfigs: () -> Unit,
     onAction: (MainAction) -> Unit,
-    onMoreMenuAction: (MainMoreMenuAction) -> Unit
+    onMoreMenuAction: (MainMoreMenuAction) -> Unit,
+    onNavigate: (MainDestination) -> Unit,
 ) {
     if (showSearch) {
         AppTopBar(
@@ -115,12 +117,23 @@ fun MainTopBar(
                                 contentDescription = stringResource(R.string.acc_more),
                             )
                         }
-                        RxDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        // Opens by unfolding out of the button rather than fading in.
+                        RxFanDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             CompositionLocalProvider(LocalLayoutDirection provides localeDirection) {
-                                MoreMenuContent { action ->
-                                    showMenu = false
-                                    onMoreMenuAction(action)
-                                }
+                                MoreMenuContent(
+                                    onAction = { action ->
+                                        showMenu = false
+                                        onAction(action)
+                                    },
+                                    onMoreMenuAction = { action ->
+                                        showMenu = false
+                                        onMoreMenuAction(action)
+                                    },
+                                    onNavigate = { destination ->
+                                        showMenu = false
+                                        onNavigate(destination)
+                                    },
+                                )
                             }
                         }
                     }

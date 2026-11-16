@@ -435,6 +435,9 @@ object XboxDns {
         return Examined(relay, carried, if (cancelled.get()) "" else seenCountry(relayText), answered)
     }
 
+    /** The host of an entry of a service: the name before an optional path. */
+    internal fun hostOf(entry: String): String = entry.substringBefore('/')
+
     /**
      * The HTTP status the service at [entry] gives when reached at [address] with its real
      * name and certificate; -1 when the connection, the certificate or the answer fails.

@@ -243,7 +243,8 @@ fun MainScreen(
                                 MainMoreMenuAction.ExportAll -> onAction(MainAction.ExportAll)
                                 MainMoreMenuAction.CopySelected -> showCopySelected = true
                             }
-                        }
+                        },
+                        onNavigate = { destination -> onNavigate(destination) },
                     )
                 },
                 bottomBar = {

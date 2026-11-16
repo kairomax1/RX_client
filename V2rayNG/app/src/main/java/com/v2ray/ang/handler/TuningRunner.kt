@@ -3,7 +3,7 @@ package com.v2ray.ang.handler
 import android.content.Context
 import com.v2ray.ang.core.LauncherManager
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
@@ -50,7 +50,7 @@ object TuningRunner {
             var bestMillis = Long.MAX_VALUE
 
             for (choice in Tuning.plan(profile)) {
-                ensureActive()
+                coroutineContext.ensureActive()
                 Tuning.apply(choice)
                 val millis = withChoice(context) { Tuning.measure() }
                 AppLog.info(
@@ -74,7 +74,7 @@ object TuningRunner {
 
     /** Raises the tunnel with the settings already applied, measures, and takes it down. */
     private suspend fun withChoice(context: Context, measure: suspend () -> Long?): Long? {
-        ensureActive()
+        coroutineContext.ensureActive()
         if (!LauncherManager.startService(context, quiet = true)) return null
         if (!waitFor(context, wanted = true, UP_TIMEOUT_MS)) {
             LauncherManager.stopService(context)
@@ -83,7 +83,7 @@ object TuningRunner {
         }
         delay(SETTLE_MS)
         val millis = measure()
-        ensureActive()
+        coroutineContext.ensureActive()
         LauncherManager.stopService(context)
         waitFor(context, wanted = false, DOWN_TIMEOUT_MS)
         delay(SETTLE_MS)
