@@ -10,6 +10,7 @@ import com.v2ray.ang.enums.NetworkType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.extension.nullIfBlank
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -58,6 +59,11 @@ object CoreOutboundBuilder {
             } else if (outbound.streamSettings?.network == NetworkType.XHTTP.type) {
                 muxEnabled = false
             }
+            // A game wants the packet it is sending now to leave now. Mux carries
+            // many streams over one connection and every one of them waits behind
+            // the others — which is how a file is fetched quickly and how a game
+            // is made to stutter.
+            if (GamingMode.isEnabled()) muxEnabled = false
 
             if (muxEnabled) {
                 outbound.mux?.enabled = true
