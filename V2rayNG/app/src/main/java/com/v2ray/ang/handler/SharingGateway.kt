@@ -520,6 +520,7 @@ object SharingGateway {
      */
     fun network(): Pair<List<String>, Boolean> {
         val addresses = mutableListOf<String>()
+        val hostingAddresses = mutableListOf<String>()
         var hosting = false
         try {
             val interfaces = NetworkInterface.getNetworkInterfaces().toList()
@@ -538,16 +539,18 @@ object SharingGateway {
                     name.startsWith("rndis") ||
                     name.startsWith("bnep") ||
                     local.any { it.endsWith(".1") }
-                if (isHosting) hosting = true
-                addresses += local
+                if (isHosting) {
+                    hosting = true
+                    hostingAddresses += local
+                } else {
+                    addresses += local
+                }
             }
         } catch (_: Exception) {
         }
-        val ordered = if (hosting) {
-            addresses.sortedByDescending { it.endsWith(".1") }
-        } else {
-            addresses
-        }
-        return Pair(ordered.distinct(), hosting)
+        // The network this phone is giving out is the one another device is on:
+        // its address is named first, before any network the phone merely sits on.
+        val ordered = (hostingAddresses.sortedByDescending { it.endsWith(".1") } + addresses).distinct()
+        return Pair(ordered, hosting)
     }
 }
