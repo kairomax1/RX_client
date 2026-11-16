@@ -7,11 +7,16 @@ package com.v2ray.ang.ui.main
  */
 internal object MainExitAddress {
 
-    /** Time one character takes to appear. Slow enough to be read as typing, not as a flicker. */
-    const val CHAR_MS = 95
+    /**
+     * Time one character takes to appear. The line is read often and changed often
+     * (a config whose exit address moves is measured again on every connection), so
+     * it is quick: slow enough to be read as typing, short enough not to hold up
+     * the number the owner is waiting for.
+     */
+    const val CHAR_MS = 38
 
     /** Pause between the last digit of the address and the first character of the country. */
-    const val COUNTRY_DELAY_MS = 1000L
+    const val COUNTRY_DELAY_MS = 220L
 
     /** Regional-indicator flag for a two-letter country code; empty for anything else. */
     fun flag(code: String): String {

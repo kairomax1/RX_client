@@ -50,11 +50,14 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.PatternSyntaxException
 
+/** A failed measurement is "not measured", never a number that can be read. */
+internal fun cleanTestDelay(millis: Long): Long = if (millis < 0L) 0L else millis
+
 private fun applyTestDelayResults(
     servers: List<ServersCache>,
     updates: Map<String, Long>,
 ): List<ServersCache> = servers.map { server ->
-    val delayMillis = updates[server.guid]
+    val delayMillis = updates[server.guid]?.let(::cleanTestDelay)
     if (delayMillis == null || delayMillis == server.testDelayMillis) {
         server
     } else {
@@ -66,7 +69,7 @@ private fun applyTestDelayResultsToRows(
     rows: List<ServerRowUiModel>,
     updates: Map<String, Long>,
 ): List<ServerRowUiModel> = rows.map { row ->
-    val delayMillis = updates[row.guid]
+    val delayMillis = updates[row.guid]?.let(::cleanTestDelay)
     if (delayMillis == null || delayMillis == row.testDelayMillis) {
         row
     } else {
@@ -382,7 +385,10 @@ class MainViewModel(
         AppLog.info(AppLog.Section.Connection, "Connect requested")
         // A little slack: file times are coarse on some storage.
         connectRequestedAt = System.currentTimeMillis() - 2000
-        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null, exitIp = null, exitCountry = null) }
+        // The address stays on the line while the new one is being found, and is
+        // replaced when it arrives. Wiping it here would leave an empty line for
+        // as long as the connection takes, only to type the same digits again.
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null) }
         connectWatchdog?.cancel()
         connectWatchdog = viewModelScope.launch {
             // Aether first has to find a route that works on this network; that takes far

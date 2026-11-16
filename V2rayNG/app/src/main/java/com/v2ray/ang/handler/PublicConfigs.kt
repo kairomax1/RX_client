@@ -46,7 +46,6 @@ object PublicConfigs {
     private const val KEY_COUNT = "rx_public_count"
     private const val KEY_FRESH = "rx_public_fresh"
     private const val KEY_CHECKED = "rx_public_checked"
-    private const val KEY_GAME = "rx_public_game"
     private const val KEY_TAG = "rx_public_tag_"
     private const val REFRESH_MILLIS = 3 * 60 * 60 * 1000L
     private const val CONNECT_MILLIS = 2500
@@ -448,15 +447,21 @@ object PublicConfigs {
         freshState.value = value
     }
 
+    /**
+     * What the screen starts from. Mux and fragment are not the owner's to set
+     * any more: they are found for each config when it connects, and a switch
+     * here would only be overruled. The game sort follows gaming mode, which is
+     * the one place the owner says whether games are what this phone is for.
+     */
     fun savedOptions(): Options {
         val names = MmkvManager.decodeSettingsString(KEY_KINDS).orEmpty().split(',')
         val kinds = Kind.entries.filter { it.name in names }.toSet().ifEmpty { Kind.entries.toSet() }
         return Options(
             kinds = kinds,
             count = MmkvManager.decodeSettingsInt(KEY_COUNT, 50).coerceIn(10, MAX_COUNT),
-            mux = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false),
-            fragment = MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false),
-            game = MmkvManager.decodeSettingsBool(KEY_GAME, false),
+            mux = false,
+            fragment = false,
+            game = GamingMode.isEnabled(),
         )
     }
 
@@ -532,9 +537,6 @@ object PublicConfigs {
 
         MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
         MmkvManager.encodeSettings(KEY_COUNT, options.count)
-        MmkvManager.encodeSettings(KEY_GAME, options.game)
-        MmkvManager.encodeSettings(AppConfig.PREF_MUX_ENABLED, options.mux)
-        MmkvManager.encodeSettings(AppConfig.PREF_FRAGMENT_ENABLED, options.fragment)
         MmkvManager.removeServerViaSubid(GROUP_ID)
         val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
         group.remarks = context.getString(R.string.public_group_name)

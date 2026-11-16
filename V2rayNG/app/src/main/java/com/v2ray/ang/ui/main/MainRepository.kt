@@ -170,7 +170,7 @@ class MainRepository(
         if (AetherEngine.isAvailable(app)) AetherEngine.ensureProfile() else null
 
     override fun getTestDelayMillis(guid: String): Long =
-        MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L
+        MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis?.let(::cleanTestDelay) ?: 0L
 
     override fun getServerGuidList(groupId: String): List<String> =
         if (groupId.isEmpty()) {

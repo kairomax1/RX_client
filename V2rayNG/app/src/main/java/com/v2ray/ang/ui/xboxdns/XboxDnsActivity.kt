@@ -142,6 +142,14 @@ private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }
+                    item(key = "howto") {
+                        Text(
+                            text = stringResource(R.string.xbox_dns_howto),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
                 } else {
                     item(key = "relaysTitle") {
                         SectionTitle(stringResource(R.string.xbox_dns_relays_title, state.relays.size.toString()), RelayGreen)

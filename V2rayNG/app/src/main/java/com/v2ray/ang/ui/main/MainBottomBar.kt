@@ -50,6 +50,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
@@ -251,10 +253,16 @@ private fun ExitAddressText(ip: String?, country: String?) {
     val countryUnits = remember(countryText) { MainExitAddress.typingUnits(countryText) }
     val ipProgress = remember { Animatable(0f) }
     val countryProgress = remember { Animatable(0f) }
+    // The address is typed out the first time it appears. After that a new address
+    // simply takes the place of the one before it: a config whose exit address
+    // moves would otherwise begin from an empty line again and again, and reading
+    // it would take longer than the connection did.
+    var typedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(ipText, countryText, animate) {
-        if (!animate) {
+        if (!animate || typedOnce) {
             ipProgress.snapTo(ipUnits.size.toFloat())
             countryProgress.snapTo(countryUnits.size.toFloat())
+            typedOnce = true
             return@LaunchedEffect
         }
         ipProgress.snapTo(0f)
@@ -270,6 +278,7 @@ private fun ExitAddressText(ip: String?, country: String?) {
                 tween(MainExitAddress.typingMillis(countryUnits.size), easing = LinearEasing),
             )
         }
+        typedOnce = true
     }
     // Handed on as a State and read only while drawing: the blink does not recompose the line.
     val caret = rememberInfiniteTransition(label = "caret").animateFloat(

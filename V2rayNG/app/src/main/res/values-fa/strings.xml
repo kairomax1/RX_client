@@ -834,7 +834,8 @@
     <string name="log_tag_error">خطا</string>
     <string name="log_back">برگشت</string>
     <string name="xbox_dns_title">اسکنر DNS</string>
-    <string name="xbox_dns_intro">همهٔ DNSهایی که برنامه می‌شناسد روی اینترنت خودت امتحان می‌شوند. سایت Xbox تست نمی‌شود، چون بدون کمک هم باز می‌شود؛ نشانی‌هایی تست می‌شوند که برنامهٔ Xbox و کنسول با آن‌ها کار می‌کنند. فقط DNSی «ضدتحریم» حساب می‌شود که این نشانی‌ها را از سرور خودش رد کند.</string>
+    <string name="xbox_dns_intro">این اسکنر مخصوص کنسول‌های ایکس‌باکس هست؛ برای کاربران ایرانی و کسانی که مشکل ورود به ایکس‌باکس دارن.</string>
+    <string name="xbox_dns_howto">وقتی اسکن تموم شد، DNSای که پیدا شده رو توی تنظیمات شبکه‌ی کنسول بذار (Settings → Network → Advanced settings → DNS) و دوباره وارد شو. DNSای که «ضدتحریم» نشان خورده، یعنی آدرس‌هایی که خود ایکس‌باکس باهاشون حرف می‌زنه رو از مسیر خودش رد می‌کنه.</string>
     <string name="xbox_dns_start">شروع اسکن</string>
     <string name="xbox_dns_again">دوباره اسکن کن</string>
     <string name="xbox_dns_stop">بس است</string>
@@ -872,6 +873,7 @@
     <string name="notification_action_disconnect">کانفیگم رو قطع کن</string>
     <string name="notification_action_reconnect">کانفیگم رو دوباره بروزرسانی کن</string>
     <string name="public_game">حالت بازی</string>
+    <string name="public_auto_note">موکس، فرگمنت و دسته‌ی بازی رو خودِ برنامه برای هر کانفیگ، وقتی وصل می‌شه پیدا می‌کنه.</string>
     <string name="firefox_vpn_title">موزیلا</string>
     <string name="firefox_vpn_description">از VPN رایگان داخلی فایرفاکس موزیلا (۵۰ گیگ در ماه) با حساب Firefox خود استفاده کن. ترافیک از سرورهای موزیلا عبور می‌کند.</string>
     <string name="firefox_vpn_accounts">حساب‌ها</string>

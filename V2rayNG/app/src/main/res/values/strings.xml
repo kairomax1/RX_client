@@ -862,7 +862,8 @@
     <string name="log_tag_error">ERROR</string>
     <string name="log_back">Back</string>
     <string name="xbox_dns_title">DNS scanner</string>
-    <string name="xbox_dns_intro">Every DNS server the app knows is tried on your own connection. The Xbox site is not tested, because it opens without help; the addresses the Xbox app and the console talk to are. Only a DNS that sends those through a relay of its own counts as anti-sanction.</string>
+    <string name="xbox_dns_intro">This scanner is made for Xbox consoles: for players in Iran, and for anyone who cannot sign in to Xbox.</string>
+    <string name="xbox_dns_howto">When a scan finds a DNS, put it in the console's network settings (Settings → Network → Advanced settings → DNS) and sign in again. A DNS shown as anti-sanction is one that sends the addresses the Xbox itself talks to through a relay of its own.</string>
     <string name="xbox_dns_start">Start scan</string>
     <string name="xbox_dns_again">Scan again</string>
     <string name="xbox_dns_stop">Enough</string>
@@ -900,6 +901,7 @@
     <string name="notification_action_disconnect">Disconnect my config</string>
     <string name="notification_action_reconnect">Refresh my config</string>
     <string name="public_game">Game mode</string>
+    <string name="public_auto_note">Mux, fragment and the game sort are found by the app itself, for each config when it connects.</string>
     <string name="firefox_vpn_title">Mozilla</string>
     <string name="firefox_vpn_description">Use Mozilla\'s free built-in VPN (50 GB/month) through your Firefox Account. Traffic is routed through Mozilla\'s servers.</string>
     <string name="firefox_vpn_accounts">Accounts</string>

@@ -11,6 +11,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SpeedtestManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -42,6 +43,9 @@ internal object RealPingExecutionLimiter {
  * Worker that runs a batch of real-ping tests independently.
  * Each batch owns its own CoroutineScope/dispatcher and can be cancelled separately.
  */
+/** How long to wait before measuring a handshake-based tunnel a second time. */
+private const val SECOND_CHANCE_GAP_MS = 400L
+
 class RealPingWorkerService(
     private val context: Context,
     private val guids: List<String>,
@@ -127,10 +131,24 @@ class RealPingWorkerService(
         if (!configResult.status) {
             return retFailure
         }
+        val first = RealPingExecutionLimiter.run(config.configType) {
+            CoreNativeManager.measureOutboundDelay(configResult.content, SettingsManager.getDelayTestUrl())
+        }
+        if (first > 0L || !shakesHands(config.configType)) return first
+        // WireGuard and Hysteria2 raise their tunnel out of UDP and only then
+        // shake hands, all inside the time the measurement allows. The first try
+        // pays for the handshake and gives up just before it would have finished,
+        // which is how a config that carries traffic perfectly came to be shown
+        // as a minus one. They are measured once more before being called dead.
+        delay(SECOND_CHANCE_GAP_MS)
         return RealPingExecutionLimiter.run(config.configType) {
             CoreNativeManager.measureOutboundDelay(configResult.content, SettingsManager.getDelayTestUrl())
         }
     }
+
+    /** Sorts that need a handshake of their own before any byte can be measured. */
+    private fun shakesHands(type: EConfigType): Boolean =
+        type == EConfigType.WIREGUARD || type == EConfigType.HYSTERIA2
 
     private fun startTcping(guid: String): Long {
         val retFailure = -1L
