@@ -2,6 +2,7 @@ package com.v2ray.ang.handler
 
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.util.Utils
 import com.v2ray.ang.dto.entities.RulesetItem
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -220,6 +221,9 @@ object GamingMode {
     /** The core's own list of Iranian names, alongside the ones bundled with the app. */
     private val IRAN_GEOSITE = listOf("geosite:category-ir")
 
+    /** The core's own list of the country's addresses. */
+    private val IRAN_GEOIP_CORE = listOf("geoip:ir")
+
     /**
      * The core's own list of Iranian addresses, and the addresses of the cloud
      * that carries a large part of this country's sites from inside it.
@@ -230,8 +234,7 @@ object GamingMode {
      * only quicker on the phone's own line, it is cheaper as well — so it is
      * named here as well as being covered by the country's addresses.
      */
-    private val IRAN_GEOIP = listOf(
-        "geoip:ir",
+    private val IRAN_ADDRESSES = listOf(
         // Abr Arvan (ArvanCloud), the CDN a great many Iranian sites are served from.
         "185.143.232.0/22",
         "185.220.226.0/24",
@@ -240,6 +243,31 @@ object GamingMode {
         "2a0c:a7c6:1000::/36",
         "2a0c:a7c7::/40",
     )
+
+    /**
+     * The core's own list of this country's names, when the file it is read from
+     * is really on the phone.
+     *
+     * That file is not shipped with the app: it is fetched by hand from the
+     * screen made for it. Asking the core for a list that is not there is worse
+     * than not asking — a rule that names a list nobody can open is a rule that
+     * takes the whole set down with it, and with it the adverts, this country's
+     * sites and the gaming rules together. So it is asked for when it is there,
+     * and the names bundled with the app carry the rest on their own.
+     */
+    private fun coreIranNames(): List<String> =
+        if (hasCoreList(AppConfig.GEOSITE_DAT)) IRAN_GEOSITE else emptyList()
+
+    /** As [coreIranNames], for the country's addresses. */
+    private fun coreIranAddresses(): List<String> =
+        if (hasCoreList(AppConfig.GEOIP_DAT)) IRAN_GEOIP_CORE else emptyList()
+
+    private fun hasCoreList(name: String): Boolean = try {
+        val dir = Utils.userAssetPath(AngApplication.application)
+        dir.isNotEmpty() && java.io.File(dir, name).exists()
+    } catch (_: Exception) {
+        false
+    }
 
     /** Names the cloud serves Iranian sites under, for the ones that keep their own name. */
     private val IRAN_CDN_DOMAINS = listOf("domain:arvancdn.ir", "domain:arvancloud.ir")
@@ -303,8 +331,8 @@ object GamingMode {
                 // Iranian names, which is the wider of the two; and the Iranian
                 // addresses as well, because a site of this country that keeps
                 // its name abroad still lives on an address at home.
-                domain = iranDomains + IRAN_GEOSITE + IRAN_CDN_DOMAINS,
-                ip = IRAN_GEOIP,
+                domain = iranDomains + IRAN_CDN_DOMAINS + coreIranNames(),
+                ip = IRAN_ADDRESSES + coreIranAddresses(),
             )
         }
         rules += base

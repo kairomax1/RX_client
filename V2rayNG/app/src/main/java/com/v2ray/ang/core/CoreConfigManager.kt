@@ -16,6 +16,7 @@ import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
@@ -1184,7 +1185,26 @@ object CoreConfigManager {
         rulesetItems?.forEach { key ->
             appendRoutingUserRule(configContext, key, v2rayConfig, policyGroupBalancerTags)
         }
+        // What was really written, said out loud: a rule that is silently left
+        // out looks exactly like a rule that was never wanted, and guessing
+        // which of the two it is costs a build and a day of the owner's patience.
+        AppLog.info(
+            AppLog.Section.Core,
+            buildString {
+                append("Routing: ${rulesetItems?.size ?: 0} rules")
+                rulesetItems?.forEach { key ->
+                    val names = key.domain?.size ?: 0
+                    val addresses = key.ip?.size ?: 0
+                    append("; ${key.remarks}: $names names, $addresses addresses -> ${key.outboundTag}")
+                }
+                append("; sniffing ${if (CoreConfigManager.sniffingEnabled(v2rayConfig)) "on" else "off"}")
+            }
+        )
     }
+
+    /** Whether the core was told to read the site name out of the connection. */
+    private fun sniffingEnabled(v2rayConfig: V2rayConfig): Boolean =
+        v2rayConfig.inbounds.any { it.sniffing?.enabled == true }
 
     /**
      * Convert one rule item and append it to routing rules.
