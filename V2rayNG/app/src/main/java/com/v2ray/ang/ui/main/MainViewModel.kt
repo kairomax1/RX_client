@@ -409,6 +409,7 @@ class MainViewModel(
      * must not be shown as one.
      */
     private fun tryNextConfig(): Boolean {
+        if (!dataSource.isAutoFailoverEnabled()) return false
         if (!Failover.canMove()) return false
         // The app's own ways of reaching the internet are not configs to fall
         // back on: moving to one of them would change what the phone is doing,
@@ -463,11 +464,12 @@ class MainViewModel(
             if (uiState.value.connectPhase == ConnectPhase.Connecting) {
                 AppLog.error(AppLog.Section.Connection, "No working connection within the time limit")
                 val wasRunning = uiState.value.isRunning
-                // Another config may be taken instead; only when there is none
-                // is the tunnel stopped and the failure shown.
-                if (!onConnectFailed() && wasRunning) {
-                    dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
-                }
+                // Nothing came within the time limit, which means it was slow,
+                // not that the config is dead. Another config is left to the
+                // watcher, which measures the traffic itself; a tunnel that was
+                // only slow is not torn down for being slow.
+                onConnectFailed(canMove = false)
+                if (wasRunning) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
             }
         }
     }
@@ -570,9 +572,9 @@ class MainViewModel(
      * case nothing of that is shown — the move is not a failure until there is
      * nothing left to move to.
      */
-    fun onConnectFailed(): Boolean {
+    fun onConnectFailed(canMove: Boolean = true): Boolean {
         connectWatchdog?.cancel()
-        if (tryNextConfig()) return true
+        if (canMove && tryNextConfig()) return true
         AppLog.error(AppLog.Section.Connection, "Connection attempt failed; the service is being stopped")
         _uiState.update {
             it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, exitIp = null, exitCountry = null, failureTick = it.failureTick + 1)

@@ -122,6 +122,7 @@ fun SettingsScreen(
 
     val context = LocalContext.current
     var dailyMaintenance by rememberMmkvBool(AppConfig.PREF_DAILY_MAINTENANCE, true)
+    var autoFailover by rememberMmkvBool(AppConfig.PREF_AUTO_FAILOVER, true)
     var localDns by rememberMmkvBool(AppConfig.PREF_LOCAL_DNS_ENABLED, false)
     var fakeDns by rememberMmkvBool(AppConfig.PREF_FAKE_DNS_ENABLED, false)
     var appendHttpProxy by rememberMmkvBool(AppConfig.PREF_APPEND_HTTP_PROXY, false)
@@ -294,6 +295,12 @@ fun SettingsScreen(
                 icon = painterResource(R.drawable.ic_routing_24dp),
                 order = 1
             ) {
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_auto_failover),
+                    summary = stringResource(R.string.summary_pref_auto_failover),
+                    checked = autoFailover,
+                    onCheckedChange = { autoFailover = it }
+                )
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_ipv6_enabled),
                     summary = stringResource(R.string.summary_pref_ipv6_enabled),

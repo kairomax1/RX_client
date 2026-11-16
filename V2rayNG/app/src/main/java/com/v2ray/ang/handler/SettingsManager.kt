@@ -421,6 +421,14 @@ object SettingsManager {
      * Check if VPN mode is enabled.
      * @return True if VPN mode is enabled, false otherwise.
      */
+    /**
+     * Whether the app may leave a config that has stopped carrying traffic and
+     * take another one of the same group. On by default; the switch is there for
+     * a phone or a network where a config is better left alone.
+     */
+    fun isAutoFailoverEnabled(): Boolean =
+        MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_FAILOVER, true)
+
     fun isVpnMode(): Boolean {
         val mode = MmkvManager.decodeSettingsString(AppConfig.PREF_MODE)
         return mode == null || mode == VPN

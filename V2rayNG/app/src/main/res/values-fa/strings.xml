@@ -967,4 +967,6 @@
     <string name="firefox_vpn_err_429">سهم این حساب فعلاً تمام شده (۴۲۹)</string>
     <string name="rx_tuning_searching">داری فرگمنت و موکس رو به بهترین حالتش پیدا می‌کنم</string>
     <string name="rx_tuning_done">پیداشون کردم، دارم وصل می‌شم</string>
+    <string name="title_pref_auto_failover">رفتنِ خودکار به کانفیگِ بعدی</string>
+    <string name="summary_pref_auto_failover">وقتی کانفیگی که وصل است از کار می‌افتد، برنامه بی‌صدا کانفیگِ دیگری از همان گروه را وصل می‌کند.</string>
 </resources>

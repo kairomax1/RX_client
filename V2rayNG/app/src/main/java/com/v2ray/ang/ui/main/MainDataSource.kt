@@ -86,6 +86,9 @@ interface MainDataSource : Closeable {
     fun share2QRCode(guid: String): android.graphics.Bitmap?
     fun share2Clipboard(guid: String): Boolean
 
+    /** Whether the app may leave a config that stopped carrying traffic and take another one. */
+    fun isAutoFailoverEnabled(): Boolean = true
+
     /**
      * Raises the tunnel again on the config that is now selected: restarted when
      * a daemon answers, started when there is none standing.

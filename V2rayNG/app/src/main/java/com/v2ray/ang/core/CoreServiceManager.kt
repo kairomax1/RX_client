@@ -52,10 +52,17 @@ import java.net.InetSocketAddress
 object CoreServiceManager {
 
     /** How often the tunnel is asked, quietly, whether it still carries anything. */
-    private const val WATCH_EVERY_MILLIS = 30_000L
+    private const val WATCH_EVERY_MILLIS = 60_000L
 
-    /** How many empty answers in a row are answered by taking another config. */
-    private const val WATCH_MISSES_BEFORE_MOVING = 2
+    /**
+     * How many empty answers in a row are answered by taking another config.
+     *
+     * Three, not two: a phone that loses its signal for a moment, or a network
+     * that is merely slow, must not be answered by tearing the tunnel down. A
+     * whole minute between questions and three of them unanswered is a config
+     * that is gone, not one that is catching its breath.
+     */
+    private const val WATCH_MISSES_BEFORE_MOVING = 3
 
     /** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
     private const val FIREFOX_VPN_GUID = "firefox-vpn"
@@ -233,6 +240,12 @@ object CoreServiceManager {
         // away from one of them would change what the phone is doing, not only
         // where it does it.
         if (guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))) return
+        // Asked for, this is; imposed, it is not. The switch in the settings is
+        // there for a phone or a network where a config is better left alone.
+        if (!SettingsManager.isAutoFailoverEnabled()) {
+            Failover.reset()
+            return
+        }
         // A start the owner asked for opens a new round; a start that came out of
         // a move continues the one that is running.
         if (guid != autoMovedTo) Failover.reset()

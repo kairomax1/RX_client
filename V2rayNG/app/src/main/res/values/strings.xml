@@ -995,4 +995,6 @@
     <string name="firefox_vpn_err_429">the account has used its share for now (429)</string>
     <string name="rx_tuning_searching">I am looking for the best mux and fragment settings for this config</string>
     <string name="rx_tuning_done">Found them, connecting now</string>
+    <string name="title_pref_auto_failover">Keep the connection when a config dies</string>
+    <string name="summary_pref_auto_failover">When the config in use stops carrying traffic, another one of the same group is taken quietly.</string>
 </resources>

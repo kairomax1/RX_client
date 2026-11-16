@@ -247,6 +247,8 @@ class MainRepository(
     override fun share2Clipboard(guid: String): Boolean =
         AngConfigManager.share2Clipboard(app, guid) == 0
 
+    override fun isAutoFailoverEnabled(): Boolean = SettingsManager.isAutoFailoverEnabled()
+
     override fun startService() {
         LauncherManager.restartServiceOrStart(app) {
             LauncherManager.startService(app, quiet = true)
