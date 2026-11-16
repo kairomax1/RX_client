@@ -5,6 +5,7 @@ import com.v2ray.ang.core.LauncherManager
 import kotlinx.coroutines.Dispatchers
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
