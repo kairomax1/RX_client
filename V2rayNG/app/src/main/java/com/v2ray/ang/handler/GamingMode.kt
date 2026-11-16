@@ -196,8 +196,15 @@ object GamingMode {
      */
     private val bundledSites: List<String> by lazy { readList(SITES_ASSET) }
 
-    /** Names adverts, ad measurement and trackers are fetched from. */
-    private val adDomains: List<String> by lazy { readList(AD_ASSET) }
+    /**
+     * Names adverts, ad measurement and trackers are fetched from: the ones that
+     * travel with the app, and the ones fetched for the day (see [SiteLists]).
+     * The second half is read every time rather than remembered for the life of
+     * the process, so a list renewed while the tunnel is up is used as it is.
+     */
+    private val adDomains: List<String> get() = bundledAdDomains + SiteLists.adDomains()
+
+    private val bundledAdDomains: List<String> by lazy { readList(AD_ASSET) }
 
     /** Iranian sites: banks, shops, government, universities, news, everyday services. */
     private val iranDomains: List<String> by lazy { readList(IRAN_ASSET) }
