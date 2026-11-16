@@ -97,7 +97,7 @@ private fun sectionLabel(section: AppLog.Section?): String = stringResource(
         AppLog.Section.Connection -> R.string.log_section_connection
         AppLog.Section.Core -> R.string.log_section_core
         AppLog.Section.Aether -> R.string.log_section_aether
-        AppLog.Section.DnsMode -> R.string.log_section_dns_mode
+        AppLog.Section.GamingMode -> R.string.log_section_gaming_mode
         AppLog.Section.Test -> R.string.log_section_test
         AppLog.Section.Subscription -> R.string.log_section_subscription
         AppLog.Section.Update -> R.string.log_section_update

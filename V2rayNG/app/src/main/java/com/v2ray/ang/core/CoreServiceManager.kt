@@ -1,6 +1,6 @@
 package com.v2ray.ang.core
 
-import com.v2ray.ang.handler.DnsMode
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.AppLog
 import android.app.Activity
 import android.app.Service
@@ -142,7 +142,7 @@ object CoreServiceManager {
             AppLog.Section.Connection,
             "Starting with config '${config.remarks}' (${config.configType.name})" +
                 (if (isReload) ", reload after a network change" else "") +
-                (if (DnsMode.isEnabled()) ", DNS mode on" else ""),
+                (if (GamingMode.isEnabled()) ", DNS mode on" else ""),
         )
         // The Aether profile is only a pointer to the engine's local port; the engine itself
         // has to be running behind it.

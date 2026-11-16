@@ -26,6 +26,7 @@ import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.UpdateNotifier
+import com.v2ray.ang.handler.TuningRunner
 import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
@@ -77,7 +78,7 @@ class MainActivity : HelperBaseComponentActivity() {
         MainViewModel.Factory(application, MainRepository(application as AngApplication))
     }
 
-    private val dnsModeViewModel: DnsModeViewModel by viewModels()
+    private val gamingModeViewModel: GamingModeViewModel by viewModels()
 
     private val requestVpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -193,7 +194,7 @@ class MainActivity : HelperBaseComponentActivity() {
         BackHandler { moveTaskToBack(false) }
         MainScreen(
             mainViewModel = mainViewModel,
-            dnsModeViewModel = dnsModeViewModel,
+            gamingModeViewModel = gamingModeViewModel,
             onAction = { action ->
                 when (action) {
                     MainAction.ToggleService -> handleFabAction()
@@ -245,7 +246,7 @@ class MainActivity : HelperBaseComponentActivity() {
             MainDestination.PerAppProxy -> Intent(this, PerAppProxyActivity::class.java)
             MainDestination.Routing -> Intent(this, RoutingSettingActivity::class.java)
             // Shown as a card by the main screen; there is no activity to open.
-            MainDestination.DnsMode -> return
+            MainDestination.GamingMode -> return
             MainDestination.Cloudflare -> Intent(this, CloudflareActivity::class.java)
             MainDestination.SpeedTest -> Intent(this, SpeedTestActivity::class.java)
             MainDestination.Settings -> Intent(this, SettingsActivity::class.java)
@@ -265,6 +266,10 @@ class MainActivity : HelperBaseComponentActivity() {
             state.isRunning -> LauncherManager.stopService(this)
             // A tap while still connecting cancels the attempt.
             state.connectPhase == ConnectPhase.Connecting -> {
+                // Cancelling also stops the search for the best settings, if one is running.
+                tuningJob?.cancel()
+                tuningJob = null
+                mainViewModel.setTuning(TuningRunner.Phase.Idle)
                 mainViewModel.onConnectCancelled()
                 LauncherManager.stopService(this)
             }
@@ -304,11 +309,43 @@ class MainActivity : HelperBaseComponentActivity() {
         ) {
             checkAndRequestPermission(PermissionType.ACCESS_LOCAL_NETWORK) {}
         }
+        // A config that has never been measured on this line is measured first:
+        // which mux and fragment settings are fastest depends on the network.
+        if (mainViewModel.needsTuning(state.selectedGuid)) {
+            tuneThenConnect(state.selectedGuid.orEmpty())
+            return
+        }
+        connectNow()
+    }
+
+    private fun connectNow() {
         mainViewModel.onConnectRequested()
         if (!LauncherManager.startService(this, quiet = true)) {
             mainViewModel.onConnectFailed()
         }
     }
+
+    /**
+     * Looks for the fastest mux and fragment settings, then connects. The screen
+     * says what is happening the whole time, because this takes longer than a
+     * plain connect and the user asked to be told.
+     */
+    private fun tuneThenConnect(guid: String) {
+        tuningJob?.cancel()
+        tuningJob = lifecycleScope.launch {
+            val chosen = TuningRunner.tune(this@MainActivity, guid) { phase ->
+                mainViewModel.setTuning(phase)
+            }
+            // The search left the tunnel down and the best setting applied.
+            mainViewModel.onConnectRequested()
+            if (!LauncherManager.startService(this@MainActivity, quiet = true)) {
+                mainViewModel.onConnectFailed()
+            }
+            AppLog.info(AppLog.Section.Connection, "Tuning: connecting with ${chosen.key}")
+        }
+    }
+
+    private var tuningJob: kotlinx.coroutines.Job? = null
 
     private fun importManually(createConfigType: Int) {
         val intent = when (createConfigType) {

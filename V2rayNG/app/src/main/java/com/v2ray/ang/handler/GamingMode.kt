@@ -7,26 +7,54 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
- * "DNS mode": the tunnel carries only what needs it.
+ * Gaming mode: the tunnel carries only what needs it, and games go where the owner says.
  *
- * Sites that are filtered or that refuse Iranian addresses go through the selected config; every
- * other connection (games, local sites, downloads) leaves the phone directly, with the line's own
- * speed and ping. Names of tunnelled sites are resolved through the tunnel as well, so a poisoned
- * answer from the provider's resolver cannot break them.
+ * Everything a game talks to leaves by the exit the owner chose: the phone's own line (lowest
+ * ping, the game sees the owner's own address) or the config's exit address (for a game that is
+ * filtered, or that refuses an Iranian address). Sites that are filtered or sanctioned always go
+ * through the config; everything else leaves the phone directly, with the line's own speed.
+ *
+ * Two things are not a mode and are always on: adverts and trackers are blocked, and Iranian
+ * sites go out on the phone's own line. An Iranian bank that sees a foreign address refuses the
+ * connection outright, and an advert that is never fetched costs nobody anything.
  *
  * It is not a DNS server address that turns a config into something a console can type in: an
  * app cannot listen on port 53. Other devices use the phone's proxy address instead, see
  * [shareAddresses].
  *
- * The mode replaces the routing rules only while it is on; the user's own rules stay stored and
+ * The mode replaces the routing rules only while it is on; the owner's own rules stay stored and
  * come back untouched when it is switched off. Lists are plain `domain:` entries on purpose: they
  * do not depend on which geosite file happens to be installed.
  */
-object DnsMode {
+object GamingMode {
 
     const val PREF_ENABLED = "pref_rx_dns_mode"
     private const val SITES_ASSET = "rx_dns_mode_sites.txt"
+    private const val AD_ASSET = "rx_ad_domains.txt"
+    private const val IRAN_ASSET = "rx_iran_domains.txt"
+    private const val GAME_ASSET = "rx_game_domains.txt"
     const val PREF_EXTRA_DOMAINS = "pref_rx_dns_mode_extra"
+
+    /** Where game traffic leaves from, chosen by the owner when the mode is switched on. */
+    const val PREF_GAME_EXIT = "pref_rx_gaming_exit"
+
+    /** Games use the phone's own line: the lowest ping, and the game sees the owner's address. */
+    const val EXIT_OWN = "own"
+
+    /** Games use the config's exit address: for games that are filtered, or region locked. */
+    const val EXIT_CONFIG = "config"
+
+    /** Where games leave from right now; [EXIT_OWN] until the owner chooses otherwise. */
+    fun gameExit(): String = MmkvManager.decodeSettingsString(PREF_GAME_EXIT) ?: EXIT_OWN
+
+    fun setGameExit(exit: String) {
+        AppLog.info(
+            AppLog.Section.GamingMode,
+            if (exit == EXIT_CONFIG) "Gaming: games leave through the config's exit address"
+            else "Gaming: games leave on the phone's own line"
+        )
+        MmkvManager.encodeSettings(PREF_GAME_EXIT, exit)
+    }
 
     /** Resolvers reachable directly from Iran, used for everything that is not tunnelled. */
     val DIRECT_RESOLVERS = listOf("8.8.8.8", "1.1.1.1")
@@ -34,7 +62,7 @@ object DnsMode {
     fun isEnabled(): Boolean = MmkvManager.decodeSettingsBool(PREF_ENABLED, false)
 
     fun setEnabled(enabled: Boolean) {
-        AppLog.info(AppLog.Section.DnsMode, if (enabled) "DNS mode switched on" else "DNS mode switched off")
+        AppLog.info(AppLog.Section.GamingMode, if (enabled) "Gaming mode switched on" else "Gaming mode switched off")
         MmkvManager.encodeSettings(PREF_ENABLED, enabled)
     }
 
@@ -71,45 +99,84 @@ object DnsMode {
         return text
     }
 
-    /** The routing rules of the mode, in matching order. */
+    /**
+     * The routing rules of the mode, in matching order.
+     *
+     * With [EXIT_OWN] the phone's own line carries everything that does not need the tunnel,
+     * which is what keeps a game's ping at the line's own figure: only filtered and sanctioned
+     * sites are tunnelled. With [EXIT_CONFIG] the whole connection goes through the config and
+     * only what an Iranian site needs is left outside, so a game sees the config's exit address.
+     */
     fun rulesets(
         extra: List<String> = emptyList(),
         bundled: List<String> = emptyList(),
+        gameExit: String = EXIT_OWN,
     ): MutableList<RulesetItem> {
         val tunnelled = ((FILTERED + SANCTIONED + VPN_SERVICES + WHOLE_ENDINGS + extra).map { "domain:$it" } + bundled)
             .distinct()
-        return mutableListOf(
-            // First on purpose: inside Iran the names of filtered sites are answered with a
-            // private address (10.10.34.x). Matching the name before the local-network rule
-            // keeps such a connection in the tunnel instead of sending it out directly.
-            RulesetItem(
-                remarks = "DNS mode: filtered and restricted sites",
-                outboundTag = AppConfig.TAG_PROXY,
-                domain = tunnelled,
-            ),
-            // Telegram talks to bare addresses, so no site name is ever seen for it.
-            RulesetItem(
-                remarks = "DNS mode: Telegram addresses",
-                outboundTag = AppConfig.TAG_PROXY,
-                ip = TELEGRAM_NETWORKS,
-            ),
-            RulesetItem(
-                remarks = "DNS mode: local network",
-                outboundTag = AppConfig.TAG_DIRECT,
-                ip = listOf(AppConfig.GEOIP_PRIVATE),
-            ),
-            // Named explicitly so that their names are also resolved outside the tunnel.
-            RulesetItem(
-                remarks = "DNS mode: every other site",
-                outboundTag = AppConfig.TAG_DIRECT,
-                domain = listOf("regexp:.+"),
-            ),
-            RulesetItem(
-                remarks = "DNS mode: everything else",
-                outboundTag = AppConfig.TAG_DIRECT,
-                port = "0-65535",
-            ),
+        val localNetwork = RulesetItem(
+            remarks = "Gaming: local network",
+            outboundTag = AppConfig.TAG_DIRECT,
+            ip = listOf(AppConfig.GEOIP_PRIVATE),
         )
+        // A rule with no names in it matches nothing, so it is left out rather than added empty.
+        val games = gameDomains.takeIf { it.isNotEmpty() }?.let { names ->
+            RulesetItem(
+                remarks = if (gameExit == EXIT_CONFIG) {
+                    "Gaming: games through the config's exit address"
+                } else {
+                    "Gaming: games on the phone's own line"
+                },
+                outboundTag = if (gameExit == EXIT_CONFIG) AppConfig.TAG_PROXY else AppConfig.TAG_DIRECT,
+                domain = names,
+            )
+        }
+
+        if (gameExit == EXIT_CONFIG) {
+            val rules = mutableListOf(localNetwork)
+            games?.let { rules += it }
+            // A game's own servers are reached by address, not by name, so with this choice
+            // every address that is not Iranian or local goes through the config too: that is
+            // what gives the game the config's exit address.
+            rules += RulesetItem(
+                remarks = "Gaming: everything else through the config",
+                outboundTag = AppConfig.TAG_PROXY,
+                port = "0-65535",
+            )
+            return rules
+        }
+
+        val rules = mutableListOf<RulesetItem>()
+        // Games first, so a game host that also looks like a filtered one is still left on the
+        // phone's own line: that is the choice the owner made for them.
+        games?.let { rules += it }
+        // After the games on purpose: inside Iran the names of filtered sites are answered with
+        // a private address (10.10.34.x). Matching the name before the local-network rule keeps
+        // such a connection in the tunnel instead of sending it out directly.
+        rules += RulesetItem(
+            remarks = "Gaming: filtered and restricted sites",
+            outboundTag = AppConfig.TAG_PROXY,
+            domain = tunnelled,
+        )
+        // Telegram talks to bare addresses, so no site name is ever seen for it.
+        rules += RulesetItem(
+            remarks = "Gaming: Telegram addresses",
+            outboundTag = AppConfig.TAG_PROXY,
+            ip = TELEGRAM_NETWORKS,
+        )
+        rules += localNetwork
+        // Named explicitly so that their names are also resolved outside the tunnel.
+        rules += RulesetItem(
+            remarks = "Gaming: every other site",
+            outboundTag = AppConfig.TAG_DIRECT,
+            domain = listOf("regexp:.+"),
+        )
+        rules += RulesetItem(
+            remarks = "Gaming: everything else",
+            outboundTag = AppConfig.TAG_DIRECT,
+            port = "0-65535",
+        )
+        return rules
     }
 
     /**
@@ -117,12 +184,25 @@ object DnsMode {
      * names of filtered and restricted services and game publishers. Empty if it cannot be read;
      * the short lists in this file then still cover the best known services.
      */
-    private val bundledSites: List<String> by lazy {
-        try {
-            AngApplication.application.assets.open(SITES_ASSET).bufferedReader().use { parseSiteList(it.readText()) }
-        } catch (e: Throwable) {
-            emptyList()
-        }
+    private val bundledSites: List<String> by lazy { readList(SITES_ASSET) }
+
+    /** Names adverts, ad measurement and trackers are fetched from. */
+    private val adDomains: List<String> by lazy { readList(AD_ASSET) }
+
+    /** Iranian sites: banks, shops, government, universities, news, everyday services. */
+    private val iranDomains: List<String> by lazy { readList(IRAN_ASSET) }
+
+    /**
+     * Sign-in, store, matchmaking and content hosts of the big games. A game's own servers are
+     * usually reached by address rather than by name, so these rules carry the parts that can be
+     * named and the owner's choice carries the rest.
+     */
+    private val gameDomains: List<String> by lazy { readList(GAME_ASSET) }
+
+    private fun readList(asset: String): List<String> = try {
+        AngApplication.application.assets.open(asset).bufferedReader().use { parseSiteList(it.readText()) }
+    } catch (e: Throwable) {
+        emptyList()
     }
 
     /** Keeps the "domain:name" and "full:name" lines of a site list file; drops everything else. */
@@ -135,9 +215,37 @@ object DnsMode {
         }
         .toList()
 
-    /** The rules the core must use right now: the mode's when it is on, the user's otherwise. */
-    fun effectiveRulesets(): MutableList<RulesetItem>? =
-        if (isEnabled()) rulesets(extraDomains(), bundledSites) else MmkvManager.decodeRoutingRulesets()
+    /**
+     * The rules the core must use right now: the mode's when it is on, the user's otherwise.
+     *
+     * Adverts and Iranian sites are added in front of either set, because they are not a mode:
+     * an advert is never wanted, and an Iranian site must not arrive from a foreign address
+     * whether the owner is gaming or not.
+     */
+    fun effectiveRulesets(): MutableList<RulesetItem>? {
+        val base = if (isEnabled()) {
+            rulesets(extraDomains(), bundledSites, gameExit())
+        } else {
+            MmkvManager.decodeRoutingRulesets() ?: return null
+        }
+        val rules = mutableListOf<RulesetItem>()
+        if (adDomains.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "Adverts and trackers",
+                outboundTag = AppConfig.TAG_BLOCKED,
+                domain = adDomains,
+            )
+        }
+        if (iranDomains.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "Iranian sites on the phone's own line",
+                outboundTag = AppConfig.TAG_DIRECT,
+                domain = iranDomains,
+            )
+        }
+        rules += base
+        return rules
+    }
 
     /**
      * Addresses of this phone on its Wi-Fi or hotspot network. Another device on the same network

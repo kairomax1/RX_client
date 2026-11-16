@@ -179,6 +179,33 @@ class MainViewModel(
         }
     }
 
+    /** What the screen shows while the best mux and fragment settings are looked for. */
+    fun setTuning(phase: TuningRunner.Phase) {
+        // The attempt is already under way while the settings are looked for, so
+        // the button offers to cancel it and nothing announces a connection that
+        // is not there yet.
+        _uiState.update {
+            it.copy(
+                tuning = phase,
+                connectPhase = if (phase == TuningRunner.Phase.Searching) ConnectPhase.Connecting
+                else it.connectPhase,
+            )
+        }
+        if (phase == TuningRunner.Phase.Done || phase == TuningRunner.Phase.Unsupported) {
+            tuningNoticeJob?.cancel()
+            tuningNoticeJob = viewModelScope.launch {
+                delay(3_000)
+                _uiState.update { it.copy(tuning = TuningRunner.Phase.Idle) }
+            }
+        }
+    }
+
+    private var tuningNoticeJob: Job? = null
+
+    /** True when this config has never had its mux and fragment settings measured here. */
+    fun needsTuning(guid: String?): Boolean =
+        guid != null && Tuning.best(guid) == null
+
     /** Selects the built-in Aether profile and connects through it. */
     fun connectAether() {
         viewModelScope.launch {

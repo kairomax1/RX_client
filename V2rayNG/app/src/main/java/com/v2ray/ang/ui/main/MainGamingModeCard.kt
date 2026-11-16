@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.v2ray.ang.R
 import com.v2ray.ang.extension.toTrafficString
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.Sharing
 import com.v2ray.ang.ui.compose.RxPromptButton
 import com.v2ray.ang.ui.compose.RxPromptButtons
@@ -39,20 +40,21 @@ import com.v2ray.ang.ui.compose.RxPromptSubject
 import com.v2ray.ang.ui.compose.RxPromptTone
 import com.v2ray.ang.ui.compose.RxRisingNote
 
-private enum class DnsPage { Main, Sharing }
+private enum class GamingPage { Main, AskExit, Sharing }
 
 /** How long sharing may run, in minutes; 0 is "until it is switched off". */
 private val SHARING_TIMES = listOf(0, 30, 120, 480)
 
 /**
- * The DNS mode card: switch it, or share the phone's connection with another
- * device. [onChanged] is called after every change the running tunnel has to
- * pick up.
+ * The gaming mode card: switch the mode on (which asks where games should leave
+ * from), or share the phone's connection with another device. [onChanged] is
+ * called after every change the running tunnel has to pick up.
  */
 @Composable
-fun MainDnsModeCard(
-    state: DnsModeUiState,
+fun MainGamingModeCard(
+    state: GamingModeUiState,
     onSetEnabled: (Boolean) -> Unit,
+    onSetGameExit: (String) -> Unit,
     onUseAether: () -> Unit,
     onSetSharing: (Boolean) -> Unit,
     onSetMinutes: (Int) -> Unit,
@@ -62,7 +64,7 @@ fun MainDnsModeCard(
     onChanged: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var page by remember { mutableStateOf(DnsPage.Main) }
+    var page by remember { mutableStateOf(GamingPage.Main) }
     var noteTick by remember { mutableIntStateOf(0) }
     var noteText by remember { mutableStateOf("") }
     val fullWidth = Modifier.fillMaxWidth()
@@ -73,28 +75,46 @@ fun MainDnsModeCard(
         overlay = { RxRisingNote(text = noteText, tick = noteTick, calm = true) },
     ) {
         when (page) {
-            DnsPage.Main -> {
-                val aetherNote = stringResource(R.string.dns_mode_aether_note)
-                RxPromptMessage(stringResource(R.string.dns_mode_title))
+            GamingPage.Main -> {
+                val aetherNote = stringResource(R.string.gaming_aether_note)
+                RxPromptMessage(stringResource(R.string.gaming_title))
                 Spacer(Modifier.height(10.dp))
-                CardNote(stringResource(R.string.dns_mode_about))
+                CardNote(stringResource(R.string.gaming_about))
                 Spacer(Modifier.height(14.dp))
                 RxPromptSubject(
-                    stringResource(if (state.enabled) R.string.dns_mode_state_on else R.string.dns_mode_state_off)
+                    stringResource(if (state.enabled) R.string.gaming_state_on else R.string.gaming_state_off)
                 )
+                if (state.enabled) {
+                    Spacer(Modifier.height(8.dp))
+                    CardNote(
+                        stringResource(
+                            R.string.gaming_ip_current,
+                            stringResource(
+                                if (state.gameExit == GamingMode.EXIT_CONFIG) R.string.gaming_ip_config_short
+                                else R.string.gaming_ip_own_short
+                            )
+                        )
+                    )
+                }
                 RxPromptButtons {
                     RxPromptButton(
-                        text = stringResource(if (state.enabled) R.string.dns_mode_turn_off else R.string.dns_mode_turn_on),
+                        text = stringResource(if (state.enabled) R.string.gaming_turn_off else R.string.gaming_turn_on),
                         tone = if (state.enabled) RxPromptTone.Ghost else RxPromptTone.Silver,
                         onClick = {
-                            onSetEnabled(!state.enabled)
-                            onChanged()
+                            if (state.enabled) {
+                                onSetEnabled(false)
+                                onChanged()
+                            } else {
+                                // The right answer depends on which game is about
+                                // to be played, so it is asked every time.
+                                page = GamingPage.AskExit
+                            }
                         },
                         modifier = fullWidth,
                     )
                     if (state.aetherAvailable) {
                         RxPromptButton(
-                            text = stringResource(R.string.dns_mode_use_aether),
+                            text = stringResource(R.string.gaming_use_aether),
                             tone = RxPromptTone.Ghost,
                             onClick = {
                                 if (!state.enabled) onSetEnabled(true)
@@ -109,14 +129,24 @@ fun MainDnsModeCard(
                     RxPromptButton(
                         text = stringResource(R.string.sharing_title),
                         tone = RxPromptTone.Ghost,
-                        onClick = { page = DnsPage.Sharing },
+                        onClick = { page = GamingPage.Sharing },
                         modifier = fullWidth,
                         order = 2,
                     )
                 }
             }
 
-            DnsPage.Sharing -> SharingPage(
+            GamingPage.AskExit -> AskExitPage(
+                onPick = { exit ->
+                    onSetGameExit(exit)
+                    onSetEnabled(true)
+                    onChanged()
+                    page = GamingPage.Main
+                },
+                onBack = { page = GamingPage.Main },
+            )
+
+            GamingPage.Sharing -> SharingPage(
                 state = state,
                 note = { text ->
                     noteText = text
@@ -127,9 +157,50 @@ fun MainDnsModeCard(
                 onAllow = onAllow,
                 onBlock = onBlock,
                 onForget = onForget,
-                onBack = { page = DnsPage.Main },
+                onBack = { page = GamingPage.Main },
             )
         }
+    }
+}
+
+/**
+ * The question asked each time the mode is switched on: where the games leave
+ * from. Both answers are written out, because the difference is not obvious
+ * from the two names alone.
+ */
+@Composable
+private fun AskExitPage(
+    onPick: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    val fullWidth = Modifier.fillMaxWidth()
+    RxPromptMessage(stringResource(R.string.gaming_ip_ask), fontSize = 20)
+    Spacer(Modifier.height(14.dp))
+    RxPromptButtons {
+        RxPromptButton(
+            text = stringResource(R.string.gaming_ip_own),
+            tone = RxPromptTone.Silver,
+            onClick = { onPick(GamingMode.EXIT_OWN) },
+            modifier = fullWidth,
+        )
+        CardNote(stringResource(R.string.gaming_ip_own_note))
+        Spacer(Modifier.height(14.dp))
+        RxPromptButton(
+            text = stringResource(R.string.gaming_ip_config),
+            tone = RxPromptTone.Silver,
+            onClick = { onPick(GamingMode.EXIT_CONFIG) },
+            modifier = fullWidth,
+            order = 1,
+        )
+        CardNote(stringResource(R.string.gaming_ip_config_note))
+        Spacer(Modifier.height(10.dp))
+        RxPromptButton(
+            text = stringResource(R.string.gaming_back),
+            tone = RxPromptTone.Ghost,
+            onClick = onBack,
+            modifier = fullWidth,
+            order = 2,
+        )
     }
 }
 
@@ -139,7 +210,7 @@ fun MainDnsModeCard(
  */
 @Composable
 private fun SharingPage(
-    state: DnsModeUiState,
+    state: GamingModeUiState,
     note: (String) -> Unit,
     onSetSharing: (Boolean) -> Unit,
     onSetMinutes: (Int) -> Unit,
@@ -273,7 +344,7 @@ private fun SharingPage(
             )
         }
         RxPromptButton(
-            text = stringResource(R.string.dns_mode_back),
+            text = stringResource(R.string.gaming_back),
             tone = RxPromptTone.Ghost,
             onClick = onBack,
             modifier = fullWidth,

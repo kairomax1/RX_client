@@ -5,7 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.core.AetherEngine
-import com.v2ray.ang.handler.DnsMode
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.SettingsManager
@@ -23,7 +23,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class DnsModeUiState(
+data class GamingModeUiState(
     val enabled: Boolean = false,
     /** Sites the user added to the tunnelled list. */
     val extraDomains: List<String> = emptyList(),
@@ -46,15 +46,17 @@ data class DnsModeUiState(
     val vpnUp: Boolean = false,
     /** A proxy password is set; consoles cannot enter one. */
     val needsPassword: Boolean = false,
+    /** Where games leave from: the phone's own line, or the config's exit address. */
+    val gameExit: String = GamingMode.EXIT_OWN,
     /** This build carries the Aether engine, so connecting without a config is possible. */
     val aetherAvailable: Boolean = false,
 )
 
 /** State of the DNS mode card. Every change that the running tunnel must pick up returns true. */
-class DnsModeViewModel(application: Application) : AndroidViewModel(application) {
+class GamingModeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _state = MutableStateFlow(DnsModeUiState())
-    val state: StateFlow<DnsModeUiState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(GamingModeUiState())
+    val state: StateFlow<GamingModeUiState> = _state.asStateFlow()
 
     /** Reads everything again; called each time the card opens. */
     fun refresh() {
@@ -62,9 +64,10 @@ class DnsModeViewModel(application: Application) : AndroidViewModel(application)
             val fresh = withContext(Dispatchers.IO) {
                 val (addresses, hosting) = SharingGateway.network()
                 val live = Sharing.live()
-                DnsModeUiState(
-                    enabled = DnsMode.isEnabled(),
-                    extraDomains = DnsMode.extraDomains(),
+                GamingModeUiState(
+                    enabled = GamingMode.isEnabled(),
+                    extraDomains = GamingMode.extraDomains(),
+                    gameExit = GamingMode.gameExit(),
                     sharing = live.running,
                     addresses = addresses,
                     hosting = hosting,
@@ -147,19 +150,29 @@ class DnsModeViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setEnabled(enabled: Boolean) {
-        DnsMode.setEnabled(enabled)
+        GamingMode.setEnabled(enabled)
         _state.update { it.copy(enabled = enabled) }
+    }
+
+    /**
+     * Switches the mode on with the exit the owner chose for games. Asked every
+     * time the mode is switched on, because the right answer depends on which
+     * game is about to be played.
+     */
+    fun setGameExit(exit: String) {
+        GamingMode.setGameExit(exit)
+        _state.update { it.copy(gameExit = exit) }
     }
 
     /** False when the text is not a site name; nothing is stored then. */
     fun addDomain(text: String): Boolean {
-        if (!DnsMode.addExtraDomain(text)) return false
-        _state.update { it.copy(extraDomains = DnsMode.extraDomains()) }
+        if (!GamingMode.addExtraDomain(text)) return false
+        _state.update { it.copy(extraDomains = GamingMode.extraDomains()) }
         return true
     }
 
     fun clearDomains() {
-        DnsMode.clearExtraDomains()
+        GamingMode.clearExtraDomains()
         _state.update { it.copy(extraDomains = emptyList()) }
     }
 

@@ -14,7 +14,7 @@ import com.v2ray.ang.enums.BalancerStrategyType
 import com.v2ray.ang.enums.CoreResolvedType
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
-import com.v2ray.ang.handler.DnsMode
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.HttpUtil
@@ -550,13 +550,13 @@ object CoreConfigManager {
         }
         val fakedns = MmkvManager.decodeSettingsBool(AppConfig.PREF_FAKE_DNS_ENABLED) == true
         // DNS mode decides by site name, so the name has to be read from the connection.
-        val sniffAllTlsAndHttp = DnsMode.isEnabled() ||
+        val sniffAllTlsAndHttp = GamingMode.isEnabled() ||
             MmkvManager.decodeSettingsBool(AppConfig.PREF_SNIFFING_ENABLED, true) != false
         inbound1.sniffing?.enabled = fakedns || sniffAllTlsAndHttp
         // In DNS mode the site name must also replace the address the app was given: for a
         // filtered site that address is a fake one, and only the name leads to the real site.
         inbound1.sniffing?.routeOnly =
-            !DnsMode.isEnabled() && MmkvManager.decodeSettingsBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
+            !GamingMode.isEnabled() && MmkvManager.decodeSettingsBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
         if (!sniffAllTlsAndHttp) {
             inbound1.sniffing?.destOverride?.clear()
         }
@@ -603,7 +603,7 @@ object CoreConfigManager {
     private fun collectUserRuleDomainsByTag(tag: String): ArrayList<String> {
         val domain = ArrayList<String>()
 
-        val rulesetItems = DnsMode.effectiveRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             if (key.enabled && key.outboundTag == tag && !key.domain.isNullOrEmpty()) {
                 key.domain?.forEach {
@@ -621,7 +621,7 @@ object CoreConfigManager {
     private fun collectCustomOutboundDomains(): ArrayList<String> {
         val domain = ArrayList<String>()
 
-        val rulesetItems = DnsMode.effectiveRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             if (key.enabled && !AppConfig.BUILTIN_OUTBOUND_TAGS.contains(key.outboundTag)
                 && !key.domain.isNullOrEmpty()
@@ -1180,7 +1180,7 @@ object CoreConfigManager {
             MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY)
                 ?: "AsIs"
 
-        val rulesetItems = DnsMode.effectiveRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             appendRoutingUserRule(configContext, key, v2rayConfig, policyGroupBalancerTags)
         }

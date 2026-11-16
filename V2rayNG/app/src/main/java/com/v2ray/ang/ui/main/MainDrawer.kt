@@ -46,7 +46,7 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     PerAppProxy(R.drawable.ic_per_apps_24dp, R.string.per_app_proxy_settings),
     Routing(R.drawable.ic_routing_24dp, R.string.routing_settings_title),
     /** Not a screen: opens the DNS mode card on the main screen. */
-    DnsMode(R.drawable.ic_dns_mode_24dp, R.string.dns_mode_title),
+    GamingMode(R.drawable.ic_dns_mode_24dp, R.string.gaming_title),
     Cloudflare(R.drawable.ic_cloud_download_24dp, R.string.cloudflare_title),
     SpeedTest(R.drawable.ic_flash_on_24dp, R.string.speedtest_title),
     Settings(R.drawable.ic_settings_24dp, R.string.title_settings),
@@ -65,7 +65,7 @@ internal val quickSheetItems = listOf(
     MainDestination.PerAppProxy,
     MainDestination.Routing,
     MainDestination.Settings,
-    MainDestination.DnsMode,
+    MainDestination.GamingMode,
 )
 
 private val drawerItems = listOf(

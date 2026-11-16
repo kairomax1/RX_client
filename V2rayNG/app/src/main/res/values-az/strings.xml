@@ -671,16 +671,7 @@
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
-    <string name="dns_mode_title">DNS mode</string>
-    <string name="dns_mode_about">Only filtered and restricted sites go through the config; games and everything else go directly, with their speed and ping untouched.</string>
-    <string name="dns_mode_state_on">On</string>
-    <string name="dns_mode_state_off">Off</string>
-    <string name="dns_mode_turn_on">Turn it on</string>
-    <string name="dns_mode_turn_off">Turn it off</string>
-    <string name="dns_mode_back">Back</string>
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
-    <string name="dns_mode_use_aether">I have no config; connect with Aether</string>
-    <string name="dns_mode_aether_note">Aether is finding a route; this can take up to a minute</string>
     <string name="drawer_app_log">App log</string>
     <string name="aether_searching">Aether: route %1$s of %2$s (%3$s)</string>
     <string name="aether_starting">Aether is starting…</string>
@@ -688,7 +679,6 @@
     <string name="log_section_connection">Connection</string>
     <string name="log_section_core">Core</string>
     <string name="log_section_aether">Aether</string>
-    <string name="log_section_dns_mode">DNS mode</string>
     <string name="log_section_test">Tests</string>
     <string name="log_section_subscription">Subscriptions</string>
     <string name="log_section_update">Updates</string>

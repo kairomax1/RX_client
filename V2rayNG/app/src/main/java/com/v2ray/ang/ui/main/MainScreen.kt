@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.TuningRunner
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
 import com.v2ray.ang.ui.compose.rxScreenBrush
@@ -51,7 +53,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MainScreen(
     mainViewModel: MainViewModel,
-    dnsModeViewModel: DnsModeViewModel,
+    gamingModeViewModel: GamingModeViewModel,
     onAction: (MainAction) -> Unit,
     onNavigate: (MainDestination) -> Unit,
 ) {
@@ -86,7 +88,7 @@ fun MainScreen(
     var showDelDuplicateConfirm by remember { mutableStateOf(false) }
     var showDelInvalidConfirm by remember { mutableStateOf(false) }
     var showQuickSheet by remember { mutableStateOf(false) }
-    var showDnsMode by remember { mutableStateOf(false) }
+    var showGamingMode by remember { mutableStateOf(false) }
     val connectBestTick by mainViewModel.connectBestTick.collectAsStateWithLifecycle()
     LaunchedEffect(connectBestTick) {
         if (connectBestTick > 0) onAction(MainAction.RestartService)
@@ -348,6 +350,22 @@ fun MainScreen(
         }
         }
 
+        // While the best mux and fragment settings are being looked for, the
+        // connection cannot come up yet, so the screen says why.
+        val tuningPhase = uiState.tuning
+        TuningNotice(
+            text = stringResource(
+                if (tuningPhase == TuningRunner.Phase.Done) R.string.rx_tuning_done
+                else R.string.rx_tuning_searching
+            ),
+            visible = tuningPhase == TuningRunner.Phase.Searching ||
+                    tuningPhase == TuningRunner.Phase.Done,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 150.dp),
+        )
+
         // Rises out of the connect button; the only message shown around connecting.
         ConnectFailureMessage(
             visible = uiState.connectPhase == ConnectPhase.Failed,
@@ -362,9 +380,9 @@ fun MainScreen(
                 onDismiss = { showQuickSheet = false },
                 onNavigate = { destination ->
                     showQuickSheet = false
-                    if (destination == MainDestination.DnsMode) {
-                        dnsModeViewModel.refresh()
-                        showDnsMode = true
+                    if (destination == MainDestination.GamingMode) {
+                        gamingModeViewModel.refresh()
+                        showGamingMode = true
                     } else {
                         onNavigate(destination)
                     }
@@ -372,31 +390,32 @@ fun MainScreen(
             )
         }
 
-        if (showDnsMode) {
-            val dnsState by dnsModeViewModel.state.collectAsStateWithLifecycle()
+        if (showGamingMode) {
+            val dnsState by gamingModeViewModel.state.collectAsStateWithLifecycle()
             // Sharing is read every second while the card is open: another
             // device can arrive or leave while the owner is looking at it.
             LaunchedEffect(Unit) {
-                dnsModeViewModel.watchSharing()
+                gamingModeViewModel.watchSharing()
             }
             DisposableEffect(Unit) {
-                onDispose { dnsModeViewModel.stopWatchingSharing() }
+                onDispose { gamingModeViewModel.stopWatchingSharing() }
             }
-            MainDnsModeCard(
+            MainGamingModeCard(
                 state = dnsState,
                 // Switching the mode only switches it: no config is tested and
                 // none is connected. Whatever is connected stays connected, and
                 // if nothing is, nothing is started.
-                onSetEnabled = dnsModeViewModel::setEnabled,
+                onSetEnabled = gamingModeViewModel::setEnabled,
+                onSetGameExit = gamingModeViewModel::setGameExit,
                 onUseAether = mainViewModel::connectAether,
-                onSetSharing = dnsModeViewModel::setSharing,
-                onSetMinutes = dnsModeViewModel::setMinutes,
-                onAllow = dnsModeViewModel::allowDevice,
-                onBlock = dnsModeViewModel::blockDevice,
-                onForget = dnsModeViewModel::forgetDevice,
+                onSetSharing = gamingModeViewModel::setSharing,
+                onSetMinutes = gamingModeViewModel::setMinutes,
+                onAllow = gamingModeViewModel::allowDevice,
+                onBlock = gamingModeViewModel::blockDevice,
+                onForget = gamingModeViewModel::forgetDevice,
                 // A running tunnel is rebuilt with the new rules; a stopped one is left alone.
                 onChanged = { if (isRunning) onAction(MainAction.RestartService) },
-                onDismiss = { showDnsMode = false },
+                onDismiss = { showGamingMode = false },
             )
         }
     }

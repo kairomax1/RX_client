@@ -17,7 +17,7 @@ import java.util.Locale
 object AppLog {
 
     /** The part of the app a line belongs to; the log screen has one tab per section. */
-    enum class Section { Connection, Core, Aether, DnsMode, Test, Subscription, Update, Other }
+    enum class Section { Connection, Core, Aether, GamingMode, Test, Subscription, Update, Other }
 
     enum class Level { Debug, Info, Error }
 
@@ -154,7 +154,7 @@ object AppLog {
             text.contains("subscription", ignoreCase = true) -> Section.Subscription
             text.contains("test", ignoreCase = true) || text.contains("delay", ignoreCase = true) ||
                 text.contains("ping", ignoreCase = true) -> Section.Test
-            text.startsWith("DNS mode", ignoreCase = true) -> Section.DnsMode
+            text.startsWith("Gaming mode", ignoreCase = true) || text.startsWith("DNS mode", ignoreCase = true) -> Section.GamingMode
             else -> Section.Other
         }
     }

@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.TuningRunner
+
 import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.GroupMapItem
@@ -49,6 +51,11 @@ data class MainUiState(
     val subNameRequest: String? = null,
     /** Set while the Aether engine is still looking for a route during a connection attempt. */
     val aetherSearch: AetherEngine.Status? = null,
+    /**
+     * Set while the app is looking for the mux and fragment settings this line is
+     * fastest with, so the screen can say why the connection is not up yet.
+     */
+    val tuning: TuningRunner.Phase = TuningRunner.Phase.Idle,
 )
 
 /**
