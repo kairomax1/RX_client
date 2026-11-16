@@ -1,6 +1,8 @@
 package com.v2ray.ang.ui.main
 
 import com.v2ray.ang.handler.PublicConfigs
+import com.v2ray.ang.handler.Tuning
+import com.v2ray.ang.handler.TuningRunner
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
@@ -563,7 +565,8 @@ class MainViewModel(
             MainAction.Initialize -> initialize()
             MainAction.RefreshGroups -> setupGroupTab(forceRefresh = true)
             MainAction.TestAllServers -> testAllRealPing(true)
-            MainAction.PingAndSortAll -> startAutoTest(emptySet())
+            // The thunder pings the tab the user is looking at, not every list they own.
+            MainAction.PingAndSortAll -> startAutoTest(emptySet(), uiState.value.selectedGroupId)
             MainAction.TestRealAllServers -> testAllRealPing()
             is MainAction.TestGroupRealPing -> testAllRealPing(groupId = action.groupId)
             MainAction.PingThenRemoveInvalid -> pingThenRemoveInvalid()
@@ -892,17 +895,20 @@ class MainViewModel(
     }
 
     /**
-     * Tests every config that was not there [before]. The ping runs through the same test
-     * service as "test all", so the list fills in live; when it finishes, [finishAutoTest]
-     * measures speed, hands out the badges and sorts the list.
+     * Tests every config that was not there [before], in [groupId] when one is given and in
+     * every list otherwise. The ping runs through the same test service as "test all", so the
+     * list fills in live; when it finishes, [finishAutoTest] measures speed, hands out the
+     * badges and sorts the list.
      */
-    private fun startAutoTest(before: Set<String>) {
+    private fun startAutoTest(before: Set<String>, groupId: String? = null) {
         viewModelScope.launch {
             try {
                 val freshByGroup = withContext(ioDispatcher) {
-                    dataSource.getSubscriptions().associate { sub ->
-                        sub.guid to dataSource.getServerGuidList(sub.guid).filter { it !in before }
-                    }.filterValues { it.isNotEmpty() }
+                    dataSource.getSubscriptions()
+                        .filter { groupId.isNullOrBlank() || it.guid == groupId }
+                        .associate { sub ->
+                            sub.guid to dataSource.getServerGuidList(sub.guid).filter { it !in before }
+                        }.filterValues { it.isNotEmpty() }
                 }
                 if (freshByGroup.isEmpty()) {
                     connectBestAfterTest = false

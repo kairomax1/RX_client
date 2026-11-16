@@ -150,29 +150,6 @@ class XboxDnsTest {
     }
 
     @Test
-    fun servicesNameHostsOfTheAppNotBareSites() {
-        assertEquals("discord.com", XboxDns.hostOf("discord.com/api/v9/gateway"))
-        assertEquals("gateway.discord.gg", XboxDns.hostOf("gateway.discord.gg"))
-        val all = XboxDns.GAMES + XboxDns.DISCORD
-        assertEquals(all.size, all.map { it.id }.toSet().size)
-        for (service in all) {
-            assertTrue(service.names.isNotEmpty(), service.id)
-            for (entry in service.names) {
-                assertFalse(entry.startsWith("www.") && service.id != "bungie", "$entry is a web site")
-                assertFalse("://" in entry, entry)
-            }
-        }
-    }
-
-    @Test
-    fun cloudflareIsDiscordsOwnGround() {
-        assertTrue(XboxDns.isCloudflare(ip("162.159.137.232")))
-        assertFalse(XboxDns.isCloudflare(ip("178.22.122.110")))
-        assertTrue(XboxDns.isUnusual(ip("178.22.122.110"), emptySet(), XboxDns::isCloudflare))
-        assertFalse(XboxDns.isUnusual(ip("162.159.137.232"), emptySet(), XboxDns::isCloudflare))
-    }
-
-    @Test
     fun questionIsAWellFormedDnsPacket() {
         val expected = byteArrayOf(
             0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -41,10 +41,6 @@ data class XboxDnsUiState(
     val ordinary: List<XboxDns.Proven> = emptyList(),
     val stopped: Boolean = false,
     val purpose: XboxDns.Purpose = XboxDns.Purpose.Xbox,
-    /** Services that open on this connection with no special DNS at all. */
-    val openAlready: List<String> = emptyList(),
-    /** Games: servers were found, but none opens Xbox and a chosen game together. */
-    val partialOnly: Boolean = false,
 )
 
 class XboxDnsViewModel(application: Application) : AndroidViewModel(application) {
@@ -55,15 +51,14 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
     private var job: Job? = null
     private var cancelled = AtomicBoolean(false)
 
-    /** [games]: ids of the chosen [XboxDns.GAMES]; only read for [XboxDns.Purpose.Games]. */
-    fun start(purpose: XboxDns.Purpose, games: Set<String>) {
+    fun start(purpose: XboxDns.Purpose) {
         if (job?.isActive == true) return
         val flag = AtomicBoolean(false)
         cancelled = flag
         _state.value = XboxDnsUiState(phase = ScanPhase.Sweeping, purpose = purpose)
         job = viewModelScope.launch(Dispatchers.IO) {
             try {
-                scan(flag, purpose, XboxDns.GAMES.filter { it.id in games })
+                scan(flag, purpose)
             } catch (e: Exception) {
                 AppLog.error(AppLog.Section.Other, "DNS scan stopped by an error: ${e.javaClass.simpleName}: ${e.message}")
             }
@@ -75,38 +70,17 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
         cancelled.set(true)
     }
 
-    /** Back to the question "what for?"; only when no scan runs. */
-    fun reset() {
-        if (job?.isActive != true) _state.value = XboxDnsUiState()
-    }
-
-    private suspend fun scan(flag: AtomicBoolean, purpose: XboxDns.Purpose, games: List<XboxDns.Service>) {
+    private suspend fun scan(flag: AtomicBoolean, purpose: XboxDns.Purpose) {
         val context = getApplication<Application>()
         runCatching { XboxDns.updateList(context) }
         val named = XboxDns.loadNamed(context)
         val addresses = XboxDns.loadAll(context, named)
         _state.update { it.copy(total = addresses.size) }
-        val discord = purpose == XboxDns.Purpose.Discord
-        // What is wanted besides Xbox, and which of it this connection opens with no help:
-        // a DNS server gets no credit for a service that was never blocked.
-        val wanted = if (discord) listOf(XboxDns.DISCORD) else games
-        // Every address on its own: only the ones that do not open here have to open through a DNS.
-        val direct = coroutineScope {
-            wanted.flatMap { it.names }.distinct()
-                .map { entry -> async(Dispatchers.IO) { entry to if (flag.get()) -1 else XboxDns.statusWithout(entry) } }
-                .awaitAll().toMap()
-        }
-        val closed = wanted.associateWith { service -> service.names.filter { !XboxDns.isOpen(direct[it] ?: -1) } }
-        val openAlready = wanted.filter { closed[it].isNullOrEmpty() }
-        val blocked = wanted - openAlready.toSet()
-        _state.update { it.copy(openAlready = openAlready.map { service -> service.label }) }
         AppLog.info(
             AppLog.Section.Other,
-            "DNS scan for ${purpose.name}: asking ${addresses.size} servers; with no help: " +
-                direct.entries.joinToString { "${it.key}=${it.value}" } +
-                "; blocked: ${blocked.joinToString { it.id }.ifEmpty { "none" }}",
+            "DNS scan for ${purpose.name}: asking ${addresses.size} servers",
         )
-        val own: (Int) -> Boolean = if (discord) XboxDns::isCloudflare else XboxDns::isMicrosoft
+        val own: (Int) -> Boolean = XboxDns::isMicrosoft
 
         val heard = ConcurrentLinkedQueue<XboxDns.Heard>()
         val answered = AtomicInteger(0)
@@ -120,7 +94,7 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
                     answered.incrementAndGet()
                 }
             },
-            names = if (discord) XboxDns.DISCORD.names.map { XboxDns.hostOf(it) } else XboxDns.APP_NAMES,
+            names = XboxDns.APP_NAMES,
         )
         val all = heard.toList()
         val asked = _state.value.asked
@@ -147,61 +121,8 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
                 candidates.map { address ->
                     async(Dispatchers.IO) {
                         gate.withPermit {
-                            if (discord) {
-                                // Discord: the server counts when Discord is blocked here and opens through it.
-                                if (!flag.get() && blocked.isNotEmpty() && XboxDns.carries(address, closed[XboxDns.DISCORD].orEmpty(), flag)) {
-                                    relayAddresses.add(address)
-                                    val result = XboxDns.Proven(
-                                        address = address,
-                                        name = named.firstOrNull { it.primary == address || it.secondary == address }?.name.orEmpty(),
-                                        partner = "",
-                                        redirects = true,
-                                        passed = 0,
-                                        millis = byAddress[address]?.millis ?: 0L,
-                                        services = listOf(XboxDns.DISCORD.label),
-                                    )
-                                    AppLog.info(AppLog.Section.Other, "DNS scan: $address opens Discord")
-                                    _state.update { it.copy(proven = it.proven + 1, relays = it.relays + result) }
-                                } else {
-                                    _state.update { it.copy(proven = it.proven + 1) }
-                                }
-                                return@withPermit
-                            }
                             val found = if (flag.get()) null else XboxDns.examine(address, common, flag)
                             val relay = found?.relay
-                            if (purpose == XboxDns.Purpose.Games) {
-                                // Xbox and every blocked chosen game are judged on their own, so a server
-                                // that manages only one of them is still shown, with what it opens.
-                                val opened = blocked.filter { game -> !flag.get() && XboxDns.carries(address, closed[game].orEmpty(), flag) }
-                                if (relay == null && opened.isEmpty()) {
-                                    if (address in known) {
-                                        AppLog.info(
-                                            AppLog.Section.Other,
-                                            "DNS scan: $address no Xbox; " + blocked.flatMap { closed[it].orEmpty() }.take(4)
-                                                .joinToString { "$it=${XboxDns.statusThrough(address, it)}" },
-                                        )
-                                    }
-                                    _state.update { it.copy(proven = it.proven + 1) }
-                                    return@withPermit
-                                }
-                                relayAddresses.add(address)
-                                val result = XboxDns.Proven(
-                                    address = address,
-                                    name = named.firstOrNull { it.primary == address || it.secondary == address }?.name.orEmpty(),
-                                    partner = "",
-                                    redirects = true,
-                                    passed = found?.carried?.takeIf { relay != null } ?: 0,
-                                    millis = byAddress[address]?.millis ?: 0L,
-                                    country = found?.country.orEmpty(),
-                                    services = (if (relay != null) listOf("Xbox") else emptyList()) + opened.map { it.label },
-                                )
-                                AppLog.info(
-                                    AppLog.Section.Other,
-                                    "DNS scan: $address Xbox ${if (relay != null) "yes" else "no"}, opens: ${opened.joinToString { it.id }.ifEmpty { "no chosen game" }}",
-                                )
-                                _state.update { it.copy(proven = it.proven + 1, relays = it.relays + result) }
-                                return@withPermit
-                            }
                             if (found != null && relay != null) {
                                 relayAddresses.add(address)
                                 val result = XboxDns.Proven(
@@ -246,8 +167,7 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
         }
         val relays = merge(_state.value.relays, named)
         AppLog.info(AppLog.Section.Other, "DNS scan finished: ${relays.size} servers that help, ${plain.size} ordinary resolvers")
-        val wantedCount = if (purpose == XboxDns.Purpose.Games && blocked.isNotEmpty()) 2 else 0
-        _state.update { it.copy(relays = relays, ordinary = merge(ordinary, named), partialOnly = wantedCount > 0 && relays.isNotEmpty() && relays.none { r -> r.services.size >= wantedCount }) }
+        _state.update { it.copy(relays = relays, ordinary = merge(ordinary, named)) }
     }
 
     /**

@@ -45,7 +45,8 @@ object GamingMode {
     const val EXIT_CONFIG = "config"
 
     /** Where games leave from right now; [EXIT_OWN] until the owner chooses otherwise. */
-    fun gameExit(): String = MmkvManager.decodeSettingsString(PREF_GAME_EXIT) ?: EXIT_OWN
+    fun gameExit(): String =
+        MmkvManager.decodeSettingsString(PREF_GAME_EXIT).takeUnless { it.isNullOrBlank() } ?: EXIT_OWN
 
     fun setGameExit(exit: String) {
         AppLog.info(
@@ -64,6 +65,10 @@ object GamingMode {
     fun setEnabled(enabled: Boolean) {
         AppLog.info(AppLog.Section.GamingMode, if (enabled) "Gaming mode switched on" else "Gaming mode switched off")
         MmkvManager.encodeSettings(PREF_ENABLED, enabled)
+        // Switching the mode off also forgets where games were leaving from: the
+        // question is asked again the next time it is switched on, and no answer
+        // is carried over into another session.
+        if (!enabled) MmkvManager.encodeSettings(PREF_GAME_EXIT, "")
     }
 
     fun extraDomains(): List<String> =

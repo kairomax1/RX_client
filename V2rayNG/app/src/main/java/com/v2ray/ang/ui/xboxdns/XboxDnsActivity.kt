@@ -90,11 +90,8 @@ private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
     var noteTick by remember { mutableIntStateOf(0) }
     var noteText by remember { mutableStateOf("") }
     var showOrdinary by rememberSaveable { mutableStateOf(false) }
-    var purposeName by rememberSaveable { mutableStateOf("") }
-    val purpose = XboxDns.Purpose.entries.firstOrNull { it.name == purposeName }
-    // The five the scanner was asked for first are chosen from the start.
-    var games by rememberSaveable { mutableStateOf("cod,ea,warthunder,roblox") }
-    val chosenGames = games.split(',').filter { it.isNotEmpty() }.toSet()
+    // Only one thing is looked for here: a server that carries the Xbox app.
+    val purpose = XboxDns.Purpose.Xbox
     val copiedNote = stringResource(R.string.xbox_dns_copied)
     val copy: (String) -> Unit = { text ->
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -137,81 +134,25 @@ private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (state.phase == ScanPhase.Idle) {
-                    item(key = "ask") {
-                        Text(
-                            text = stringResource(R.string.dns_scan_ask),
-                            style = TextStyle(fontFamily = RxPromptFont, fontSize = 20.sp),
-                            color = colors.onSurface,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
-                        )
-                    }
-                    item(key = "purposes") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Choice(stringResource(R.string.dns_scan_xbox), purpose == XboxDns.Purpose.Xbox) { purposeName = XboxDns.Purpose.Xbox.name }
-                            Choice(stringResource(R.string.dns_scan_discord), purpose == XboxDns.Purpose.Discord) { purposeName = XboxDns.Purpose.Discord.name }
-                            Choice(stringResource(R.string.dns_scan_games), purpose == XboxDns.Purpose.Games) { purposeName = XboxDns.Purpose.Games.name }
-                        }
-                    }
-                    if (purpose == XboxDns.Purpose.Games) {
-                        item(key = "gamesTitle") {
-                            Text(
-                                text = stringResource(R.string.dns_scan_pick_games),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = colors.onSurface,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                            )
-                        }
-                        items(XboxDns.GAMES, key = { "game-" + it.id }) { game ->
-                            Choice(game.label, game.id in chosenGames) {
-                                games = (if (game.id in chosenGames) chosenGames - game.id else chosenGames + game.id).joinToString(",")
-                            }
-                        }
-                    }
                     item(key = "intro") {
                         Text(
-                            text = stringResource(
-                                when (purpose) {
-                                    XboxDns.Purpose.Discord -> R.string.dns_scan_intro_discord
-                                    XboxDns.Purpose.Games -> R.string.dns_scan_intro_games
-                                    else -> R.string.xbox_dns_intro
-                                }
-                            ),
+                            text = stringResource(R.string.xbox_dns_intro),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }
                 } else {
-                    if (state.openAlready.isNotEmpty()) {
-                        item(key = "openAlready") {
-                            Text(
-                                text = stringResource(R.string.dns_scan_open_already, state.openAlready.joinToString("، ")),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = RelayGreen,
-                                modifier = Modifier.padding(horizontal = 4.dp),
-                            )
-                        }
-                    }
                     item(key = "relaysTitle") {
                         SectionTitle(stringResource(R.string.xbox_dns_relays_title, state.relays.size.toString()), RelayGreen)
-                    }
-                    if (state.partialOnly) {
-                        item(key = "partial") {
-                            Text(
-                                text = stringResource(R.string.dns_scan_partial),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.onSurface,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
-                            )
-                        }
                     }
                     items(state.relays, key = { "relay-" + it.address }) { result ->
                         ResultRow(result = result, onCopy = copy)
                     }
-                    if (state.phase == ScanPhase.Done && state.relays.isEmpty() && (state.purpose == XboxDns.Purpose.Xbox || state.openAlready.isEmpty())) {
+                    if (state.phase == ScanPhase.Done && state.relays.isEmpty()) {
                         item(key = "none") {
                             Text(
-                                text = stringResource(if (state.purpose == XboxDns.Purpose.Xbox) R.string.xbox_dns_none else R.string.dns_scan_none),
+                                text = stringResource(R.string.xbox_dns_none),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.onSurface,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
@@ -264,26 +205,14 @@ private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        RxPromptButton(
-                            text = stringResource(if (state.phase == ScanPhase.Done) R.string.xbox_dns_again else R.string.xbox_dns_start),
-                            tone = RxPromptTone.Silver,
-                            onClick = {
-                                val wanted = if (state.phase == ScanPhase.Done) state.purpose else purpose
-                                if (wanted != null) viewModel.start(wanted, chosenGames)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = state.phase == ScanPhase.Done || (purpose != null && (purpose != XboxDns.Purpose.Games || chosenGames.isNotEmpty())),
-                        )
-                        if (state.phase == ScanPhase.Done) {
-                            RxPromptButton(
-                                text = stringResource(R.string.dns_scan_other),
-                                tone = RxPromptTone.Silver,
-                                onClick = { viewModel.reset() },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
+                    RxPromptButton(
+                        text = stringResource(
+                            if (state.phase == ScanPhase.Done) R.string.xbox_dns_again else R.string.xbox_dns_start
+                        ),
+                        tone = RxPromptTone.Silver,
+                        onClick = { viewModel.start(purpose) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -440,13 +369,6 @@ private fun ResultRow(result: XboxDns.Proven, onCopy: (String) -> Unit) {
                 text = if (inIran) stringResource(R.string.xbox_dns_country_bad) else stringResource(R.string.xbox_dns_country, result.country),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (inIran) WarnAmber else RelayGreen,
-            )
-        }
-        if (result.services.isNotEmpty()) {
-            Text(
-                text = stringResource(R.string.dns_scan_opens, result.services.joinToString("، ")),
-                style = MaterialTheme.typography.labelMedium,
-                color = RelayGreen,
             )
         }
         AddressLine(result.address, onCopy)

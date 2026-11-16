@@ -13,8 +13,7 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /**
- * Finds DNS servers that get an app past a sanction or filter block: the Xbox app (below),
- * Discord, or a game together with Xbox ([carries], [statusWithout]).
+ * Finds DNS servers that get the Xbox app past a sanction block.
  *
  * Xbox: finds DNS servers that get an Xbox, or the Xbox app, past the sanction block. The console
  * accepts nothing but a DNS address, so only a server that sends the Xbox Live names to a
@@ -60,8 +59,6 @@ object XboxDns {
         val millis: Long,
         /** Two-letter country Microsoft sees through the relay; empty when unknown. */
         val country: String = "",
-        /** Labels of the services other than Xbox this server opens. */
-        val services: List<String> = emptyList(),
     )
 
     /** What the examination of one server found. */
@@ -86,47 +83,7 @@ object XboxDns {
     internal const val SWEEP_NAMES = 2
 
     /** What the user wants a DNS server for. */
-    enum class Purpose { Xbox, Discord, Games }
-
-    /**
-     * A service and the addresses its own app talks to (not its web site). An entry may carry
-     * a path, for a host whose bare address answers "forbidden" to everyone.
-     */
-    data class Service(val id: String, val label: String, val names: List<String>)
-
-    /** The Discord app: its API and the gateway every client keeps open. */
-    val DISCORD = Service("discord", "Discord", listOf("discord.com/api/v9/gateway", "gateway.discord.gg"))
-
-    /**
-     * Games that are filtered in Iran or refuse Iranian addresses, each with the sign-in and
-     * service hosts its client uses. Games of one publisher share the publisher's hosts.
-     */
-    // Every address below answers a plain GET from outside Iran with something other than 403
-    // (checked by .github/workflows/probe.yml), so a 403 here means a refusal of this caller.
-    // Addresses that refuse everyone (403 to all) cannot tell anything and are not listed.
-    val GAMES = listOf(
-        Service("cod", "Warzone / Call of Duty", listOf("auth3.prod.demonware.net", "oauth.battle.net", "my.callofduty.com")),
-        Service("ea", "Battlefield / EA FC / Apex", listOf("accounts.ea.com", "gateway.ea.com", "service-aggregation-layer.juno.ea.com/graphql")),
-        Service("warthunder", "War Thunder", listOf("login.gaijin.net", "auth.gaijinent.com", "yupmaster.gaijinent.com")),
-        Service("roblox", "Roblox", listOf("auth.roblox.com", "apis.roblox.com", "clientsettings.roblox.com", "gamejoin.roblox.com")),
-        Service("epic", "Fortnite / Rocket League", listOf("account-public-service-prod.ol.epicgames.com/account/api/version", "fortnite-public-service-prod11.ol.epicgames.com", "launcher-public-service-prod06.ol.epicgames.com")),
-        Service("riot", "Valorant / League of Legends", listOf("auth.riotgames.com", "clientconfig.rpg.riotgames.com")),
-        Service("blizzard", "Overwatch / Battle.net", listOf("oauth.battle.net", "account.battle.net")),
-        Service("rockstar", "GTA Online / Rockstar", listOf("signin.rockstargames.com", "prod.ros.rockstargames.com", "auth-prod.ros.rockstargames.com")),
-        Service("ubisoft", "Rainbow Six / Ubisoft", listOf("public-ubiservices.ubi.com")),
-        Service("steam", "Steam / CS2 / Dota 2", listOf("api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/", "login.steampowered.com")),
-        Service("playstation", "PlayStation Network", listOf("auth.api.sonyentertainmentnetwork.com/2.0/oauth/token", "ca.account.sony.com/api/v1/ssocookie")),
-        Service("minecraft", "Minecraft", listOf("api.minecraftservices.com/minecraft/profile", "sessionserver.mojang.com/session/minecraft/profile/069a79f444e94726a5befca90e38aaf5")),
-        Service("bungie", "Destiny 2", listOf("www.bungie.net")),
-        Service("hoyo", "Genshin Impact", listOf("hk4e-sdk-os.hoyoverse.com")),
-        Service("supercell", "Clash of Clans / Brawl Stars", listOf("id.supercell.com")),
-        Service("pubg", "PUBG", listOf("api.pubg.com/status", "accounts.pubg.com")),
-        Service("nintendo", "Nintendo", listOf("accounts.nintendo.com")),
-        Service("wargaming", "World of Tanks", listOf("api.worldoftanks.eu", "wgcps-eu.wargaming.net")),
-    )
-
-    /** The host of an entry of [Service.names]. */
-    internal fun hostOf(entry: String): String = entry.substringBefore('/')
+    enum class Purpose { Xbox }
 
     /** Lists of open DNS servers, renewed by their makers every day; read by [updateList]. */
     private val LIST_SOURCES = listOf(
@@ -329,11 +286,6 @@ object XboxDns {
     internal fun isUnusual(address: Int, common: Set<Int>, own: (Int) -> Boolean = ::isMicrosoft): Boolean =
         !isUnroutable(address) && address !in common && !own(address)
 
-    /** True for an address in Cloudflare's ranges, where Discord's own names live. */
-    fun isCloudflare(address: Int): Boolean = PublicConfigs.isCloudflare(
-        byteArrayOf((address ushr 24).toByte(), (address ushr 16).toByte(), (address ushr 8).toByte(), address.toByte())
-    )
-
     /** True when a sweep reply holds an address worth examining. */
     fun isSuspect(heard: Heard, common: Set<Int>, own: (Int) -> Boolean = ::isMicrosoft): Boolean =
         heard.answers.any { list -> list.any { isUnusual(it, common, own) } }
@@ -518,28 +470,6 @@ object XboxDns {
      */
     internal fun isOpen(status: Int): Boolean = status > 0 && status != 403 && status != 451
 
-    /** The status [entry] gives with the phone's own DNS, with no help; -1 when it cannot be reached. */
-    fun statusWithout(entry: String): Int {
-        val address = runCatching {
-            InetAddress.getAllByName(hostOf(entry)).firstOrNull { it.address.size == 4 }?.hostAddress
-        }.getOrNull() ?: return -1
-        return probe(address, entry)
-    }
-
-    /** The status [entry] gives at the address [server] names for it; -2 when the server names none. */
-    fun statusThrough(server: String, entry: String): Int {
-        val address = resolve(server, hostOf(entry))?.firstOrNull { !isUnroutable(it) } ?: return -2
-        return probe(toText(address), entry)
-    }
-
-    /**
-     * True when each of [entries] opens through the addresses [server] gives for it: the real
-     * certificate is presented there and the service does not refuse. [entries] are the
-     * addresses of a service that do not open on this connection by themselves.
-     */
-    fun carries(server: String, entries: List<String>, cancelled: AtomicBoolean): Boolean =
-        entries.isNotEmpty() && entries.all { entry -> !cancelled.get() && isOpen(statusThrough(server, entry)) }
-
     /** True when [address] presents a valid certificate for [host]. */
     internal fun isGenuine(address: String, host: String): Boolean = try {
         secure(address, host) { true }
@@ -593,7 +523,6 @@ object XboxDns {
      */
     internal fun rank(results: List<Proven>): List<Proven> = results.sortedWith(
         compareByDescending<Proven> { it.redirects }
-            .thenByDescending { it.services.size }
             .thenBy { it.country == "IR" }
             .thenByDescending { it.passed }
             .thenByDescending { it.name.isNotEmpty() }
