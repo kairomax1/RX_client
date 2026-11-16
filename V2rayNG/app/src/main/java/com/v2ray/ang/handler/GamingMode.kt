@@ -45,8 +45,13 @@ object GamingMode {
     const val EXIT_CONFIG = "config"
 
     /** Where games leave from right now; [EXIT_OWN] until the owner chooses otherwise. */
-    fun gameExit(): String =
-        MmkvManager.decodeSettingsString(PREF_GAME_EXIT).takeUnless { it.isNullOrBlank() } ?: EXIT_OWN
+    fun gameExit(): String = chosenExit(MmkvManager.decodeSettingsString(PREF_GAME_EXIT))
+
+    /**
+     * The exit a stored answer means. A missing answer, and the empty text written when the mode
+     * is switched off, both fall back to [EXIT_OWN]; anything else is kept as stored.
+     */
+    internal fun chosenExit(stored: String?): String = stored.takeUnless { it.isNullOrBlank() } ?: EXIT_OWN
 
     fun setGameExit(exit: String) {
         AppLog.info(

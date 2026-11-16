@@ -93,9 +93,16 @@ class GamingModeTest {
 
     @Test
     fun theChoiceRemembersWhatTheOwnerPicked() {
-        GamingMode.setGameExit(GamingMode.EXIT_CONFIG)
-        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.gameExit())
-        GamingMode.setGameExit(GamingMode.EXIT_OWN)
-        assertEquals(GamingMode.EXIT_OWN, GamingMode.gameExit())
+        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit(GamingMode.EXIT_CONFIG))
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(GamingMode.EXIT_OWN))
+    }
+
+    @Test
+    fun switchingTheModeOffForgetsTheChoice() {
+        // Switching the mode off stores empty text, so the question is asked again.
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(""))
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit("   "))
+        // A phone that has never answered the question has nothing stored at all.
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(null))
     }
 }
