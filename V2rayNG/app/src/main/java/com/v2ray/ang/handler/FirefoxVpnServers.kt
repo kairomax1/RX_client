@@ -2,6 +2,9 @@ package com.v2ray.ang.handler
 
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -160,6 +163,38 @@ object FirefoxVpnServers {
                 timeoutMillis
             )
         }
+
+    /**
+     * Puts [endpoints] in the order they answer this phone, the quickest first.
+     *
+     * A location names several endpoints and nothing says which of them is near,
+     * so the one that happens to be first in the list is the one that was used,
+     * and a phone in Iran could be handed a server on the other side of the
+     * world while a closer one sat two lines below it. Measuring is cheaper than
+     * the tunnel being slow for as long as it is up.
+     *
+     * Nothing is added and nothing is left out: an endpoint that stays silent
+     * keeps its place at the end, so the tunnel can still fall back to it.
+     */
+    suspend fun nearestFirst(
+        endpoints: List<FirefoxVpnRelay.Endpoint>,
+        timeoutMillis: Int = 2_500,
+    ): List<FirefoxVpnRelay.Endpoint> = withContext(Dispatchers.IO) {
+        if (endpoints.size < 2) return@withContext endpoints
+        coroutineScope {
+            endpoints
+                .map { endpoint -> async { endpoint to reachMillis(endpoint, timeoutMillis) } }
+                .awaitAll()
+                .sortedBy { (_, millis) -> millis }
+                .map { (endpoint, _) -> endpoint }
+        }
+    }
+
+    /** How long a connection to [endpoint] takes to be made; [Long.MAX_VALUE] when it never is. */
+    private fun reachMillis(endpoint: FirefoxVpnRelay.Endpoint, timeoutMillis: Int): Long {
+        val millis = SpeedtestManager.socketConnectTime(endpoint.host, endpoint.port, timeoutMillis)
+        return if (millis < 0L) Long.MAX_VALUE else millis
+    }
 
     /** The first usable CONNECT endpoint of a country. */
     fun connectEndpoint(country: Country?): Server? =

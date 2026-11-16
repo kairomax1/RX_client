@@ -115,7 +115,10 @@ object FirefoxVpnManager {
             ?: FirefoxVpnServers.pickRecommended(countries)
         val countryName = country?.name ?: "Recommended"
 
-        val endpoints = endpointsOf(countries, country, pass)
+        // Nearest first: the list names several addresses for one location and
+        // does not say which of them is close, so the tunnel used to be given
+        // whichever came first. The relay still falls back down the list.
+        val endpoints = FirefoxVpnServers.nearestFirst(endpointsOf(countries, country, pass))
         if (endpoints.isEmpty()) {
             return@withContext ConnectResult.Error("no-address")
         }

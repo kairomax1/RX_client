@@ -36,6 +36,7 @@ import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
@@ -312,7 +313,10 @@ class MainActivity : HelperBaseComponentActivity() {
         }
         // A config that has never been measured on this line is measured first:
         // which mux and fragment settings are fastest depends on the network.
-        if (mainViewModel.needsTuning(state.selectedGuid)) {
+        // Not while gaming: a search raises and drops the tunnel once for each
+        // setting it tries, and a game is not improved by a phone that cannot
+        // settle. The last setting found for the config is what it gets.
+        if (!GamingMode.isEnabled() && mainViewModel.needsTuning(state.selectedGuid)) {
             tuneThenConnect(state.selectedGuid.orEmpty())
             return
         }
