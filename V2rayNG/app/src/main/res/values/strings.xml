@@ -799,7 +799,12 @@
     <string name="notification_channel_sharing">Sharing</string>
     <string name="notification_channel_sharing_ask">A device asks to connect</string>
     <string name="sharing_title">Sharing</string>
-    <string name="sharing_about">A console, a TV or another phone can use the connection of this phone. Turn the hotspot on, connect the device to it, and give it this address and port in its network settings.</string>
+    <string name="sharing_what">What a device gets is exactly what this phone has: the config that is connected, the way the app itself reaches the internet when one of those is being used, and gaming mode when it is on.</string>
+    <string name="sharing_settings_desc">Let a console, a television or another phone use the connection of this phone.</string>
+    <string name="sharing_open">Share the connection</string>
+    <string name="sharing_state_off">Sharing is off</string>
+    <string name="sharing_at">On: %1$s, port %2$s</string>
+<string name="sharing_about">A console, a TV or another phone can use the connection of this phone. Turn the hotspot on, connect the device to it, and give it this address and port in its network settings.</string>
     <string name="sharing_how">Connect the device to the hotspot or Wi-Fi of this phone, then enter this address and port as its proxy server (HTTP). The phone must be connected itself.</string>
     <string name="sharing_turn_on">Turn sharing on</string>
     <string name="sharing_turn_off">Turn it off</string>

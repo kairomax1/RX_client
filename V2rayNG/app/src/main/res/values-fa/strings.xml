@@ -771,7 +771,12 @@
     <string name="notification_channel_sharing">شیرینگ</string>
     <string name="notification_channel_sharing_ask">دستگاهی می‌خواهد وصل شود</string>
     <string name="sharing_title">شیرینگ</string>
-    <string name="sharing_about">کنسول، تلویزیون یا یک گوشی دیگر می‌تواند از اینترنت همین گوشی استفاده کند. هات‌اسپات را روشن کن، دستگاه را به آن وصل کن و این آدرس و پورت را در تنظیمات شبکه‌اش وارد کن.</string>
+    <string name="sharing_what">دستگاهی که وصل می‌شه، دقیقاً همون چیزی رو می‌گیره که خود گوشی داره: کانفیگی که وصله، راه خودِ برنامه برای رسیدن به اینترنت اگه داره استفاده می‌شه، و حالت گیمینگ اگه روشن باشه.</string>
+    <string name="sharing_settings_desc">اجازه بده کنسول، تلویزیون یا یک گوشی دیگر از اینترنت همین گوشی استفاده کنه.</string>
+    <string name="sharing_open">اشتراک اینترنت</string>
+    <string name="sharing_state_off">شیرینگ خاموشه</string>
+    <string name="sharing_at">روشنه: %1$s، پورت %2$s</string>
+<string name="sharing_about">کنسول، تلویزیون یا یک گوشی دیگر می‌تواند از اینترنت همین گوشی استفاده کند. هات‌اسپات را روشن کن، دستگاه را به آن وصل کن و این آدرس و پورت را در تنظیمات شبکه‌اش وارد کن.</string>
     <string name="sharing_how">دستگاه رو به هات‌اسپات یا وای‌فای همین گوشی وصل کن و بعد این آدرس و پورت رو توی تنظیمات شبکه‌اش به‌عنوان Proxy Server (HTTP) وارد کن. خودِ گوشی هم باید وصل باشه.</string>
     <string name="sharing_turn_on">شیرینگ را روشن کن</string>
     <string name="sharing_turn_off">خاموشش کن</string>

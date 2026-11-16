@@ -43,7 +43,46 @@ import com.v2ray.ang.ui.compose.RxRisingNote
 private enum class GamingPage { Main, AskExit, Sharing }
 
 /** How long sharing may run, in minutes; 0 is "until it is switched off". */
-private val SHARING_TIMES = listOf(0, 30, 120, 480)
+val SHARING_TIMES = listOf(0, 30, 120, 480)
+
+/**
+ * Everything the sharing screen needs, whichever door it was opened from. The
+ * card in the main screen has a state of its own that carries far more than
+ * this, and the settings have one of their own that carries less; both are
+ * folded into this before the screen is drawn.
+ */
+data class SharingCardState(
+    /** Whether other devices may use the phone's connection. */
+    val sharing: Boolean = false,
+    /** This phone's addresses on Wi-Fi / hotspot; empty when it is on neither. */
+    val addresses: List<String> = emptyList(),
+    /** True when the phone is hosting the network (a hotspot, or sharing by cable). */
+    val hosting: Boolean = false,
+    val port: Int = 0,
+    /** The moment sharing ends by itself; 0 when nothing ends it. */
+    val until: Long = 0,
+    /** How long sharing is allowed to run; 0 is "until it is switched off". */
+    val minutes: Int = 0,
+    /** What every device that has reached the phone is doing. */
+    val devices: List<Sharing.Device> = emptyList(),
+    /** Why sharing stopped on its own; empty while it did not. */
+    val stopped: String = "",
+    /** The phone's own tunnel: sharing carries what the phone itself has. */
+    val vpnUp: Boolean = false,
+)
+
+/** The card's own state, in the shape the sharing screen reads. */
+fun GamingModeUiState.sharingCardState(): SharingCardState = SharingCardState(
+    sharing = sharing,
+    addresses = addresses,
+    hosting = hosting,
+    port = port,
+    until = until,
+    minutes = minutes,
+    devices = devices,
+    stopped = stopped,
+    vpnUp = vpnUp,
+)
 
 /**
  * The gaming mode card: switch the mode on (which asks where games should leave
@@ -147,7 +186,7 @@ fun MainGamingModeCard(
             )
 
             GamingPage.Sharing -> SharingPage(
-                state = state,
+                state = state.sharingCardState(),
                 note = { text ->
                     noteText = text
                     noteTick++
@@ -209,8 +248,8 @@ private fun AskExitPage(
  * every device that has reached the phone is doing this moment.
  */
 @Composable
-private fun SharingPage(
-    state: GamingModeUiState,
+fun SharingPage(
+    state: SharingCardState,
     note: (String) -> Unit,
     onSetSharing: (Boolean) -> Unit,
     onSetMinutes: (Int) -> Unit,
@@ -476,7 +515,7 @@ private fun DeviceCard(
 }
 
 /** How long sharing has left, in the plainest words. */
-private fun timeLeft(until: Long): String {
+fun timeLeft(until: Long): String {
     val millis = (until - System.currentTimeMillis()).coerceAtLeast(0)
     val minutes = millis / 60_000
     val hours = minutes / 60

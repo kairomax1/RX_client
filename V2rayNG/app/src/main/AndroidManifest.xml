@@ -135,6 +135,9 @@
             android:name=".ui.perappproxy.PerAppProxyActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.sharing.SharingActivity"
+            android:exported="false" />
+        <activity
             android:name=".ui.apppicker.AppPickerActivity"
             android:exported="false" />
         <activity

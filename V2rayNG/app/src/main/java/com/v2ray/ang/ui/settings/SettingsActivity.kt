@@ -39,6 +39,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.VPN
 import com.v2ray.ang.R
+import com.v2ray.ang.ui.sharing.SharingActivity
 import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
@@ -46,6 +47,8 @@ import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvBool
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvString
 import com.v2ray.ang.handler.SettingsChangeManager
+import com.v2ray.ang.handler.Sharing
+import com.v2ray.ang.handler.SharingGateway
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -379,8 +382,36 @@ fun SettingsScreen(
                 )
             }
 
+            SettingsSection(
+                title = stringResource(R.string.sharing_title),
+                description = stringResource(R.string.sharing_settings_desc),
+                icon = painterResource(R.drawable.ic_share_24dp),
+                order = 4
+            ) {
+                SettingsMenuItem(
+                    title = stringResource(R.string.sharing_open),
+                    subtitle = sharingSummary(),
+                    onClick = { context.startActivity(Intent(context, SharingActivity::class.java)) },
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
             NavigationBarsSpacer()
         }
     }
+}
+
+/**
+ * One line saying what sharing is doing at this moment, so the settings can be
+ * read without opening the screen: whether the door is open, and on which
+ * address the other device has to be pointed.
+ */
+@Composable
+private fun sharingSummary(): String {
+    val on = Sharing.isEnabled() && Sharing.stoppedReason().isEmpty()
+    if (!on) return stringResource(R.string.sharing_state_off)
+    val address = remember { SharingGateway.network().first.firstOrNull() }
+    val port = remember { Sharing.port() }
+    return if (address == null) stringResource(R.string.sharing_no_network)
+    else stringResource(R.string.sharing_at, address, port.toString())
 }
