@@ -265,9 +265,14 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun handleFabAction() {
         val state = mainViewModel.uiState.value
         when {
-            state.isRunning -> LauncherManager.stopService(this)
+            state.isRunning -> {
+                // Said out loud, so nothing is taken in its place: this stop was asked for.
+                mainViewModel.onStopRequested()
+                LauncherManager.stopService(this)
+            }
             // A tap while still connecting cancels the attempt.
             state.connectPhase == ConnectPhase.Connecting -> {
+                mainViewModel.onStopRequested()
                 // Cancelling also stops the search for the best settings, if one is running.
                 tuningJob?.cancel()
                 tuningJob = null

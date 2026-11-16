@@ -4,6 +4,7 @@ import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.handler.TuningRunner
 import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.Failover
 import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
 import android.app.Application
@@ -52,6 +53,9 @@ import java.util.regex.PatternSyntaxException
 
 /** A failed measurement is "not measured", never a number that can be read. */
 internal fun cleanTestDelay(millis: Long): Long = if (millis < 0L) 0L else millis
+
+/** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
+private const val FIREFOX_TUNNEL_GUID = "firefox-vpn"
 
 private fun applyTestDelayResults(
     servers: List<ServersCache>,
@@ -270,6 +274,9 @@ class MainViewModel(
             // No toast on connect or disconnect: the connect button itself carries the state.
             MainServiceEvent.StateStartSuccess -> {
                 updateRunningState(true)
+                // The service may have moved to another config on its own; the
+                // list follows it, so what is shown is what is carrying the traffic.
+                if (dataSource.getSelectServer() != uiState.value.selectedGuid) refreshSelectedGuid()
                 beginConnectionVerification()
                 // With the tunnel up GitHub is reachable: the best moment to look for an update.
                 viewModelScope.launch {
@@ -378,8 +385,66 @@ class MainViewModel(
     private var connectWatchdog: Job? = null
     private var failureResetJob: Job? = null
 
-    /** The user asked to connect; the button shows "connecting" until the tunnel is proven. */
+    /** Set while the owner is the one who asked for the tunnel to come down. */
+    private var stopRequested = false
+
+    /** Ends the round of automatic moves once the connection has carried traffic long enough. */
+    private var settleJob: Job? = null
+
+    /**
+     * The owner asked to connect: a fresh round starts, so a config that failed
+     * before is offered again. The button shows "connecting" until the tunnel
+     * is proven.
+     */
     fun onConnectRequested() {
+        Failover.reset()
+        settleJob?.cancel()
+        beginConnectAttempt()
+    }
+
+    /**
+     * The tunnel went down and another config is worth trying: the next one of
+     * the group is taken, quietly, and the tunnel is raised on it. True when it
+     * moved, so the caller knows the failure is already being dealt with and
+     * must not be shown as one.
+     */
+    private fun tryNextConfig(): Boolean {
+        if (!Failover.canMove()) return false
+        // The app's own ways of reaching the internet are not configs to fall
+        // back on: moving to one of them would change what the phone is doing,
+        // not only where it does it. Reading every config is only worth it when
+        // the engine that has to be told apart from the rest is even there.
+        val aetherPossible = AetherEngine.isAvailable(getApplication())
+        val guids = dataSource.getServerGuidList(uiState.value.selectedGroupId).filter { guid ->
+            guid != FIREFOX_TUNNEL_GUID &&
+                !(aetherPossible && AetherEngine.isAetherProfile(dataSource.decodeServerConfig(guid)))
+        }
+        val next = Failover.next(
+            current = uiState.value.selectedGuid,
+            guids = guids,
+            pingOf = { guid -> dataSource.getTestDelayMillis(guid) },
+        ) ?: return false
+        AppLog.info(AppLog.Section.Connection, "Failover: another config of this group is taken instead")
+        Failover.moved(next)
+        dataSource.setSelectServer(next)
+        _uiState.update { it.copy(selectedGuid = next) }
+        beginConnectAttempt()
+        // A tunnel that is standing is restarted so that the new config is read;
+        // one that is not is simply started.
+        dataSource.startService()
+        return true
+    }
+
+    /** The owner asked for the tunnel to come down; nothing is taken in its place. */
+    fun onStopRequested() {
+        stopRequested = true
+        connectWatchdog?.cancel()
+        settleJob?.cancel()
+        Failover.reset()
+    }
+
+    private fun beginConnectAttempt() {
+        stopRequested = false
         failureResetJob?.cancel()
         verifyAttempts = 0
         AppLog.info(AppLog.Section.Connection, "Connect requested")
@@ -398,8 +463,11 @@ class MainViewModel(
             if (uiState.value.connectPhase == ConnectPhase.Connecting) {
                 AppLog.error(AppLog.Section.Connection, "No working connection within the time limit")
                 val wasRunning = uiState.value.isRunning
-                onConnectFailed()
-                if (wasRunning) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+                // Another config may be taken instead; only when there is none
+                // is the tunnel stopped and the failure shown.
+                if (!onConnectFailed() && wasRunning) {
+                    dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+                }
             }
         }
     }
@@ -440,8 +508,7 @@ class MainViewModel(
                 delay(AETHER_POLL_MS)
             }
             if (uiState.value.connectPhase == ConnectPhase.Connecting) {
-                onConnectFailed()
-                dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+                if (!onConnectFailed()) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
             }
             return false
         } finally {
@@ -459,6 +526,7 @@ class MainViewModel(
             AppLog.info(AppLog.Section.Connection, "Connected; traffic flows ($delayMillis ms)")
             connectWatchdog?.cancel()
             _uiState.update { it.copy(connectPhase = ConnectPhase.Connected, pingMillis = delayMillis) }
+            rememberIfItLasts()
             return
         }
         // One failed probe can be a hiccup of the test address; a second one means no traffic flows.
@@ -472,8 +540,7 @@ class MainViewModel(
             }
         } else {
             AppLog.error(AppLog.Section.Connection, "Two connection tests in a row failed")
-            onConnectFailed()
-            dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            if (!onConnectFailed()) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
         }
     }
 
@@ -483,10 +550,30 @@ class MainViewModel(
         _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
     }
 
-    /** Red button, shake, vibration and the floating message; then back to the idle button. */
-    fun onConnectFailed() {
-        AppLog.error(AppLog.Section.Connection, "Connection attempt failed; the service is being stopped")
+    /**
+     * Forgets the round of automatic moves once this connection has carried
+     * traffic for a while. A config that only came up and fell over again does
+     * not earn that: the next move then continues where the round left off
+     * instead of starting from the same config again.
+     */
+    private fun rememberIfItLasts() {
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch {
+            delay(Failover.SETTLE_MILLIS)
+            if (uiState.value.isRunning) Failover.reset()
+        }
+    }
+
+    /**
+     * Red button, shake, vibration and the floating message; then back to the
+     * idle button. Returns true when another config was taken instead, in which
+     * case nothing of that is shown — the move is not a failure until there is
+     * nothing left to move to.
+     */
+    fun onConnectFailed(): Boolean {
         connectWatchdog?.cancel()
+        if (tryNextConfig()) return true
+        AppLog.error(AppLog.Section.Connection, "Connection attempt failed; the service is being stopped")
         _uiState.update {
             it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, exitIp = null, exitCountry = null, failureTick = it.failureTick + 1)
         }
@@ -497,19 +584,28 @@ class MainViewModel(
                 if (it.connectPhase == ConnectPhase.Failed) it.copy(connectPhase = ConnectPhase.Idle) else it
             }
         }
+        return false
     }
 
     private fun onServiceStopped() {
+        val stoppedByHand = stopRequested
+        stopRequested = false
         when (uiState.value.connectPhase) {
             // A stop that follows a failed attempt must not wipe the failure feedback early.
             ConnectPhase.Failed -> Unit
-            // The service died before the connection was ever proven.
-            ConnectPhase.Connecting -> if (verifyAttempts > 0) onConnectFailed()
-            else -> {
-                connectWatchdog?.cancel()
-                _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
-            }
+            // The service died before the connection was ever proven. A stop the
+            // owner asked for is not answered by another config.
+            ConnectPhase.Connecting -> if (!stoppedByHand && verifyAttempts > 0) onConnectFailed()
+            // A stop while it was carrying traffic is taken as asked for: whether
+            // it came from the button or from the notification cannot be told
+            // apart here, and taking another config would fight the owner.
+            else -> markStopped()
         }
+    }
+
+    private fun markStopped() {
+        connectWatchdog?.cancel()
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
     }
 
     internal fun formatStatus(status: MainStatus): String = when (status) {

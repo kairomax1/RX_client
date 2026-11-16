@@ -1,5 +1,6 @@
 package com.v2ray.ang.core
 
+import com.v2ray.ang.handler.Failover
 import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.AppLog
 import android.app.Activity
@@ -23,7 +24,6 @@ import com.v2ray.ang.enums.BrowserDialerMode
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.MmkvManager
-import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
@@ -51,6 +51,15 @@ import java.net.InetSocketAddress
 
 object CoreServiceManager {
 
+    /** How often the tunnel is asked, quietly, whether it still carries anything. */
+    private const val WATCH_EVERY_MILLIS = 30_000L
+
+    /** How many empty answers in a row are answered by taking another config. */
+    private const val WATCH_MISSES_BEFORE_MOVING = 2
+
+    /** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
+    private const val FIREFOX_VPN_GUID = "firefox-vpn"
+
     private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
     private val mMsgReceive = ReceiveMessageHandler()
     private var currentConfig: ProfileItem? = null
@@ -59,6 +68,10 @@ object CoreServiceManager {
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val failoverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** The config the watcher moved to on its own, so the next start is not taken for a new round. */
+    @Volatile
+    private var autoMovedTo: String? = null
 
     @Volatile
     private var isReloading = false
@@ -200,32 +213,52 @@ object CoreServiceManager {
         ServiceRuntimeState.markRunning(true)
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
-        watchPublicConfig(service, guid)
+        watchConfig(service, guid)
     }
 
     /**
-     * Free public servers die often. While one of them is the running config, a request goes
-     * through the tunnel every minute; after three failures in a row the next config of the
-     * public group is selected and the service starts again with it.
+     * Configs die, whichever group they belong to: a free public server often,
+     * a private one often enough. While one of them is the running config, a
+     * request is sent through the tunnel now and then; when nothing comes back a
+     * few times in a row another config of the same group is taken and the
+     * service starts again with it, without asking and without a word.
+     *
+     * Nothing is said on the way because a move is not a failure: it is the
+     * connection being kept. Only when there is nothing left to take is the
+     * tunnel left alone, which is what the owner then sees.
      */
-    private fun watchPublicConfig(service: Service, guid: String) {
+    private fun watchConfig(service: Service, guid: String) {
         failoverScope.coroutineContext.cancelChildren()
-        if (currentConfig?.subscriptionId != PublicConfigs.GROUP_ID) return
+        // The app's own ways of reaching the internet are not watched: moving
+        // away from one of them would change what the phone is doing, not only
+        // where it does it.
+        if (guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))) return
+        // A start the owner asked for opens a new round; a start that came out of
+        // a move continues the one that is running.
+        if (guid != autoMovedTo) Failover.reset()
+        autoMovedTo = null
         failoverScope.launch {
-            var failures = 0
+            var misses = 0
             while (isActive) {
-                kotlinx.coroutines.delay(60_000L)
+                kotlinx.coroutines.delay(WATCH_EVERY_MILLIS)
                 if (!isRunning() || isReloading) continue
                 val answered = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl()) >= 0 }.getOrDefault(false) ||
                     runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl(true)) >= 0 }.getOrDefault(false)
-                failures = if (answered) 0 else failures + 1
-                if (failures < 3) continue
-                val next = PublicConfigs.nextAfter(guid)
+                if (answered) {
+                    misses = 0
+                    continue
+                }
+                misses++
+                if (misses < WATCH_MISSES_BEFORE_MOVING) continue
+                val next = nextConfigAfter(guid)
                 if (next == null) {
-                    AppLog.error(AppLog.Section.Connection, "Public config stopped answering and there is no other one left in the group")
+                    AppLog.error(AppLog.Section.Connection, "The config stopped answering and there is no other one left in its group")
                     return@launch
                 }
-                AppLog.info(AppLog.Section.Connection, "Public config stopped answering; moving to the next one in the group")
+                AppLog.info(AppLog.Section.Connection, "The config stopped answering; another one of its group is taken")
+                misses = 0
+                Failover.moved(next)
+                autoMovedTo = next
                 MmkvManager.setSelectServer(next)
                 val control = serviceControl?.get() ?: return@launch
                 // Stopping cancels this watcher, so the restart runs on its own.
@@ -237,6 +270,19 @@ object CoreServiceManager {
                 return@launch
             }
         }
+    }
+
+    /**
+     * Another config of the group the running one belongs to: the quickest of
+     * those whose latency is known, and none that was already taken in this
+     * round. The app's own ways of reaching the internet are left out, since
+     * taking one of them would change what the phone is doing, not only where.
+     */
+    private fun nextConfigAfter(guid: String): String? {
+        val group = currentConfig?.subscriptionId.orEmpty()
+        val guids = (if (group.isEmpty()) MmkvManager.decodeAllServerList() else MmkvManager.decodeServerList(group))
+            .filter { it != FIREFOX_VPN_GUID && !AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(it)) }
+        return Failover.next(guid, guids) { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }
     }
 
     /**

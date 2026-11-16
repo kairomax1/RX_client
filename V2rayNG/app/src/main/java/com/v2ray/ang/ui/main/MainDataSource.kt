@@ -86,6 +86,12 @@ interface MainDataSource : Closeable {
     fun share2QRCode(guid: String): android.graphics.Bitmap?
     fun share2Clipboard(guid: String): Boolean
 
+    /**
+     * Raises the tunnel again on the config that is now selected: restarted when
+     * a daemon answers, started when there is none standing.
+     */
+    fun startService() {}
+
     fun sendMsg2Service(msgId: Int, content: String)
     fun sendMsg2TestService(msg: TestServiceMessage, requestId: String? = null)
     fun cancelAllPing()

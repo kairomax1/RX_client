@@ -24,6 +24,7 @@ import com.v2ray.ang.extension.serializable
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.core.AetherEngine
+import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
@@ -245,6 +246,12 @@ class MainRepository(
 
     override fun share2Clipboard(guid: String): Boolean =
         AngConfigManager.share2Clipboard(app, guid) == 0
+
+    override fun startService() {
+        LauncherManager.restartServiceOrStart(app) {
+            LauncherManager.startService(app, quiet = true)
+        }
+    }
 
     override fun sendMsg2Service(msgId: Int, content: String) =
         MessageHelper.sendMsg2Service(app, msgId, content)
