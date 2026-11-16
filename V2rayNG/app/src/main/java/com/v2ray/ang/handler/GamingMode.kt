@@ -212,8 +212,29 @@ object GamingMode {
     /** The core's own list of Iranian names, alongside the ones bundled with the app. */
     private val IRAN_GEOSITE = listOf("geosite:category-ir")
 
-    /** The core's own list of Iranian addresses. */
-    private val IRAN_GEOIP = listOf("geoip:ir")
+    /**
+     * The core's own list of Iranian addresses, and the addresses of the cloud
+     * that carries a large part of this country's sites from inside it.
+     *
+     * Half of what a phone pays for its traffic goes to the address it reaches:
+     * traffic that stays in the country is billed at half of what traffic
+     * abroad costs. A site served from one of these addresses is therefore not
+     * only quicker on the phone's own line, it is cheaper as well — so it is
+     * named here as well as being covered by the country's addresses.
+     */
+    private val IRAN_GEOIP = listOf(
+        "geoip:ir",
+        // Abr Arvan (ArvanCloud), the CDN a great many Iranian sites are served from.
+        "185.143.232.0/22",
+        "185.220.226.0/24",
+        "2a0c:a7c6:4::/48",
+        "2a0c:a7c6:2b::/48",
+        "2a0c:a7c6:1000::/36",
+        "2a0c:a7c7::/40",
+    )
+
+    /** Names the cloud serves Iranian sites under, for the ones that keep their own name. */
+    private val IRAN_CDN_DOMAINS = listOf("domain:arvancdn.ir", "domain:arvancloud.ir")
 
     /**
      * Sign-in, store, matchmaking and content hosts of the big games. A game's own servers are
@@ -267,7 +288,7 @@ object GamingMode {
                 // Iranian names, which is the wider of the two; and the Iranian
                 // addresses as well, because a site of this country that keeps
                 // its name abroad still lives on an address at home.
-                domain = iranDomains + IRAN_GEOSITE,
+                domain = iranDomains + IRAN_GEOSITE + IRAN_CDN_DOMAINS,
                 ip = IRAN_GEOIP,
             )
         }

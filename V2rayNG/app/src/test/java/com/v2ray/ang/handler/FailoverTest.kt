@@ -31,6 +31,7 @@ class FailoverTest {
         val second = next("a")!!
         Failover.moved(second)
         val third = next("a")!!
+        Failover.moved(third)
         assertEquals(listOf("b", "c", "d"), listOf(first, second, third))
         // The one that failed and the three that were taken: nothing is left.
         assertNull(next("a"))
