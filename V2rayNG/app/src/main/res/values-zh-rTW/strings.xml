@@ -249,7 +249,6 @@
 
     <string name="title_pref_proxy_sharing_enabled">允許來自區域網路的連線</string>
     <string name="summary_pref_proxy_sharing_enabled">其他裝置可以透過您的 IP 位址連線到本機代理。請只在受信任的網路中啟用，以避免未經授權的連線。</string>
-    <string name="toast_warning_pref_proxysharing_short">已允許來自區域網路的連線。請確認目前使用的是受信任的網路。</string>
 
     <string name="title_pref_socks_port">本機代理埠</string>
     <string name="title_pref_enable_local_proxy">啟用本機代理</string>
@@ -675,23 +674,7 @@
     <string name="dns_mode_state_off">Off</string>
     <string name="dns_mode_turn_on">Turn it on</string>
     <string name="dns_mode_turn_off">Turn it off</string>
-    <string name="dns_mode_add_site">A site did not open? Add it</string>
-    <string name="dns_mode_devices">Console and other devices</string>
-    <string name="dns_mode_add_site_ask">Write the name of the site that did not open</string>
-    <string name="dns_mode_site_add">Add</string>
-    <string name="dns_mode_site_added">Added</string>
-    <string name="dns_mode_site_clear">Clear my list</string>
     <string name="dns_mode_back">Back</string>
-    <string name="dns_mode_copy">Copy address</string>
-    <string name="dns_mode_copied">Copied</string>
-    <string name="dns_mode_devices_about">A console or TV can go through the connection of this phone. First allow other devices to connect to the phone.</string>
-    <string name="dns_mode_devices_on">Allow</string>
-    <string name="dns_mode_devices_off">Stop allowing</string>
-    <string name="dns_mode_devices_how">Connect the device to the hotspot or Wi-Fi of this phone and enter these two under Proxy Server in its network settings. The VPN on the phone must stay on.</string>
-    <string name="dns_mode_devices_address">Address: %s</string>
-    <string name="dns_mode_devices_port">Port: %s</string>
-    <string name="dns_mode_devices_no_network">The phone is not on Wi-Fi and its hotspot is off. Turn one on and open this card again.</string>
-    <string name="dns_mode_devices_password">A password is set for the proxy of the app, and consoles have nowhere to enter one. Remove it in settings.</string>
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
     <string name="dns_mode_use_aether">I have no config; connect with Aether</string>
     <string name="dns_mode_aether_note">Aether is finding a route; this can take up to a minute</string>

@@ -251,7 +251,6 @@
 
     <string name="title_pref_proxy_sharing_enabled">اشتراک‌گذاری پروکسی در شبکه محلی (LAN)</string>
     <string name="summary_pref_proxy_sharing_enabled">دستگاه‌های دیگر می‌توانند با وارد کردن IP شما، از پروکسی‌تان استفاده کنند. برای جلوگیری از سوءاستفاده، فقط در شبکه‌های امن و قابل اعتماد این گزینه را روشن کنید.</string>
-    <string name="toast_warning_pref_proxysharing_short">اشتراک‌گذاری در شبکه محلی فعال شد؛ مطمئن شوید در یک شبکه امن هستید.</string>
 
     <string name="title_pref_socks_port">پورت پروکسی محلی</string>
     <string name="title_pref_enable_local_proxy">فعال‌سازی پروکسی محلی</string>
