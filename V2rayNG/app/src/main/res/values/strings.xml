@@ -863,7 +863,7 @@
     <string name="log_back">Back</string>
     <string name="xbox_dns_title">DNS scanner</string>
     <string name="xbox_dns_intro">This scanner is made for Xbox consoles: for players in Iran, and for anyone who cannot sign in to Xbox.</string>
-    <string name="xbox_dns_howto">When a scan finds a DNS, put it in the console's network settings (Settings → Network → Advanced settings → DNS) and sign in again. A DNS shown as anti-sanction is one that sends the addresses the Xbox itself talks to through a relay of its own.</string>
+    <string name="xbox_dns_howto">When a scan finds a DNS, put it in the network settings of the console (Settings → Network → Advanced settings → DNS) and sign in again. A DNS shown as anti-sanction is one that sends the addresses the Xbox itself talks to through a relay of its own.</string>
     <string name="xbox_dns_start">Start scan</string>
     <string name="xbox_dns_again">Scan again</string>
     <string name="xbox_dns_stop">Enough</string>

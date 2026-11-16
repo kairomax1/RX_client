@@ -202,6 +202,12 @@ object GamingMode {
     /** Iranian sites: banks, shops, government, universities, news, everyday services. */
     private val iranDomains: List<String> by lazy { readList(IRAN_ASSET) }
 
+    /** The core's own list of Iranian names, alongside the ones bundled with the app. */
+    private val IRAN_GEOSITE = listOf("geosite:category-ir")
+
+    /** The core's own list of Iranian addresses. */
+    private val IRAN_GEOIP = listOf("geoip:ir")
+
     /**
      * Sign-in, store, matchmaking and content hosts of the big games. A game's own servers are
      * usually reached by address rather than by name, so these rules carry the parts that can be
@@ -250,7 +256,12 @@ object GamingMode {
             rules += RulesetItem(
                 remarks = "Iranian sites on the phone's own line",
                 outboundTag = AppConfig.TAG_DIRECT,
-                domain = iranDomains,
+                // The names bundled with the app, then the core's own list of
+                // Iranian names, which is the wider of the two; and the Iranian
+                // addresses as well, because a site of this country that keeps
+                // its name abroad still lives on an address at home.
+                domain = iranDomains + IRAN_GEOSITE,
+                ip = IRAN_GEOIP,
             )
         }
         rules += base

@@ -434,3 +434,182 @@ domain:seo.ir
 domain:cod.ir
 domain:iran-seda.ir
 
+# ── Iranian sites that do not carry an .ir name ──────────────────
+# Every .ir name is already covered by the rule above; these are the
+# services of this country that keep a .com, .net, .org or another
+# name, and would otherwise be sent out through the tunnel and come
+# back as a visitor from somewhere else.
+
+# Shops and markets
+domain:digikala.com
+domain:digistyle.com
+domain:digipay.com
+domain:digikalajet.com
+domain:sheypoor.com
+domain:basalam.com
+domain:torob.com
+domain:bonbast.com
+domain:emalls.ir
+domain:technolife.ir
+domain:zoodfood.com
+domain:okala.com
+domain:modiseh.com
+
+# Travel and transport
+domain:jabama.com
+domain:mrbilit.com
+domain:flytoday.ir
+domain:ghasedak24.com
+domain:safarmarket.com
+domain:iranair.com
+domain:mahan.aero
+domain:asa.aero
+domain:airport.ir
+domain:raja.ir
+domain:tehranmetro.ir
+domain:bus.ir
+
+# Film, music and reading
+domain:aparat.com
+domain:filimo.com
+domain:telewebion.com
+domain:filmnet.ir
+domain:navaar.ir
+domain:tamasha.ir
+domain:avazak.com
+domain:ketab.ir
+domain:ganjineh.ir
+domain:ketabrah.ir
+domain:taaghche.com
+
+# News and sport
+domain:varzesh3.com
+domain:tarafdari.com
+domain:digiato.com
+domain:zoomg.ir
+domain:asriran.com
+domain:fararu.com
+domain:aftabnews.ir
+domain:iranpress.com
+domain:mehrnews.com
+domain:farsnews.com
+domain:yjc.ir
+domain:iribnews.ir
+domain:irib.ir
+domain:hamshahrionline.ir
+domain:donya-e-eqtesad.com
+domain:eghtesadonline.com
+domain:eghtesadnews.ir
+domain:khabarban.ir
+domain:sharghdaily.ir
+domain:etemadonline.com
+domain:shahraranews.ir
+domain:zoomit.ir
+
+# Messengers and social
+domain:bale.ai
+domain:eitaa.com
+domain:igap.net
+domain:gap.im
+domain:rubika.ir
+domain:soroush-app.ir
+domain:virgool.io
+domain:cloob.com
+domain:facenama.com
+domain:persianblog.ir
+domain:blogfa.com
+domain:blogsky.com
+domain:mihanblog.com
+
+# Paying and banking
+domain:zarinpal.com
+domain:zarin.link
+domain:payping.ir
+domain:jibit.ir
+domain:idpay.ir
+domain:vandar.io
+domain:nextpay.ir
+domain:pay.ir
+domain:shaparak.ir
+domain:tooman.ir
+domain:sizpay.ir
+domain:behpardakht.com
+
+# Crypto
+domain:nobitex.ir
+domain:nobitex.com
+domain:wallex.ir
+domain:ramzinex.com
+domain:exir.io
+domain:tabdeal.ir
+domain:bitpin.ir
+domain:arz.digital
+domain:arzdigital.com
+domain:tetherland.com
+
+# Telecoms and internet providers
+domain:parsonline.com
+domain:respina.net
+domain:asiatech.net
+domain:pishgaman.net
+domain:shatel.net
+domain:iranet.ir
+domain:datanet.ir
+domain:datak.ir
+domain:afranet.ir
+domain:padidar.net
+domain:tosegar.ir
+domain:hostiran.net
+domain:iranserver.com
+domain:iranhost.com
+domain:server.ir
+
+# Iranian cloud and delivery
+domain:arvancloud.ir
+domain:arvancloud.com
+domain:arvanstorage.com
+domain:arvanedge.com
+domain:parspack.com
+domain:liara.ir
+domain:irancdn.ir
+domain:irancloud.ir
+
+# Government, health and education
+domain:sanjesh.org
+domain:azmoon.org
+domain:medu.ir
+domain:behdasht.gov.ir
+domain:salamat.gov.ir
+domain:tax.gov.ir
+domain:epolice.ir
+domain:justice.ir
+domain:adliran.ir
+domain:post.ir
+domain:rahvar120.ir
+domain:my.gov.ir
+domain:irangov.ir
+domain:tamin.ir
+domain:sso.ir
+domain:bimeh.ir
+domain:iraninsurance.ir
+domain:bimehyar.com
+domain:paziresh24.com
+domain:nobat.ir
+
+# Work and trade
+domain:irantalent.com
+domain:jobvision.ir
+domain:jobinja.ir
+domain:karijoo.com
+domain:tsetmc.com
+domain:codal.ir
+domain:irbourse.com
+
+# Everyday services
+domain:reyhoon.com
+domain:cheef.ir
+domain:snappfood.ir
+domain:snapp.cab
+domain:tapsi.ir
+domain:alopeyk.com
+domain:miare.com
