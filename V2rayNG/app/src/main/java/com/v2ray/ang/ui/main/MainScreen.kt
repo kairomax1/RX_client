@@ -19,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -373,6 +374,14 @@ fun MainScreen(
 
         if (showDnsMode) {
             val dnsState by dnsModeViewModel.state.collectAsStateWithLifecycle()
+            // Sharing is read every second while the card is open: another
+            // device can arrive or leave while the owner is looking at it.
+            LaunchedEffect(Unit) {
+                dnsModeViewModel.watchSharing()
+            }
+            DisposableEffect(Unit) {
+                onDispose { dnsModeViewModel.stopWatchingSharing() }
+            }
             MainDnsModeCard(
                 state = dnsState,
                 // Switching the mode only switches it: no config is tested and
@@ -380,9 +389,11 @@ fun MainScreen(
                 // if nothing is, nothing is started.
                 onSetEnabled = dnsModeViewModel::setEnabled,
                 onUseAether = mainViewModel::connectAether,
-                onAddDomain = dnsModeViewModel::addDomain,
-                onClearDomains = dnsModeViewModel::clearDomains,
                 onSetSharing = dnsModeViewModel::setSharing,
+                onSetMinutes = dnsModeViewModel::setMinutes,
+                onAllow = dnsModeViewModel::allowDevice,
+                onBlock = dnsModeViewModel::blockDevice,
+                onForget = dnsModeViewModel::forgetDevice,
                 // A running tunnel is rebuilt with the new rules; a stopped one is left alone.
                 onChanged = { if (isRunning) onAction(MainAction.RestartService) },
                 onDismiss = { showDnsMode = false },
