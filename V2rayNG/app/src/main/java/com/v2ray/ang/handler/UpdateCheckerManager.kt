@@ -15,7 +15,13 @@ import kotlinx.coroutines.withContext
 
 object UpdateCheckerManager {
     suspend fun checkForUpdate(includePreRelease: Boolean = false): CheckUpdateResult = withContext(Dispatchers.IO) {
-        val url = if (includePreRelease) {
+        // A key the owner made once lets this phone read what nobody else can: a release
+        // kept as a draft. Without it the newest thing the phone can see is the last
+        // release that was published, which is why a tester's build never arrived.
+        val token = MmkvManager.decodeSettingsString(AppConfig.PREF_GITHUB_TOKEN).orEmpty().trim()
+        val headers = if (token.isEmpty()) null else githubHeaders(token)
+
+        val url = if (includePreRelease || token.isNotEmpty()) {
             AppConfig.APP_API_URL
         } else {
             AppConfig.APP_API_URL.concatUrl("latest")
@@ -27,7 +33,8 @@ object UpdateCheckerManager {
         var response = HttpUtil.getUrlContent(
             UrlContentRequest(
                 url = url,
-                timeout = 5000
+                timeout = 5000,
+                requestHeaders = headers
             )
         )
         if (response.isNullOrEmpty()) {
@@ -38,15 +45,17 @@ object UpdateCheckerManager {
                     timeout = 5000,
                     httpPort = httpPort,
                     proxyUsername = proxyUsername,
-                    proxyPassword = proxyPassword
+                    proxyPassword = proxyPassword,
+                    requestHeaders = headers
                 )
             )
                 ?: throw IllegalStateException("Failed to get response")
         }
 
-        val latestRelease = if (includePreRelease) {
+        val latestRelease = if (includePreRelease || token.isNotEmpty()) {
             JsonUtil.fromJsonSafe(response, Array<GitHubRelease>::class.java)
-                ?.firstOrNull()
+                ?.firstOrNull { it.targetCommitish != BuildConfig.BUILD_COMMIT || !includePreRelease }
+                ?: JsonUtil.fromJsonSafe(response, Array<GitHubRelease>::class.java)?.firstOrNull()
                 ?: throw IllegalStateException("No pre-release found")
         } else {
             JsonUtil.fromJsonSafe(response, GitHubRelease::class.java)
@@ -61,22 +70,40 @@ object UpdateCheckerManager {
             "Update check: latest release is $latestVersion, installed is ${BuildConfig.VERSION_NAME}"
         )
 
-        return@withContext if (compareVersions(latestVersion, BuildConfig.VERSION_NAME) > 0) {
+        // With a key in hand the phone can be told about a build that carries the same
+        // version and is still a different build, which a version number alone cannot say.
+        val differentBuild = token.isNotEmpty() &&
+            latestRelease.targetCommitish.isNotBlank() &&
+            !latestRelease.targetCommitish.equals(BuildConfig.BUILD_COMMIT, ignoreCase = true)
+
+        return@withContext if (differentBuild || compareVersions(latestVersion, BuildConfig.VERSION_NAME) > 0) {
             val asset = pickAsset(latestRelease)
             CheckUpdateResult(
                 hasUpdate = true,
                 latestVersion = latestVersion,
                 // Only the part of the description written for the app.
                 releaseNotes = UpdateRelease.appNotes(latestRelease.body),
-                downloadUrl = asset.browserDownloadUrl,
+                downloadUrl = if (token.isNotEmpty() && asset.id > 0) {
+                    AppConfig.GITHUB_ASSET_URL.format(asset.id)
+                } else {
+                    asset.browserDownloadUrl
+                },
                 isPreRelease = latestRelease.prerelease,
                 downloadSize = asset.size,
                 sha256 = UpdateRelease.sha256Of(asset.digest),
+                downloadHeaders = if (token.isEmpty()) emptyMap() else mapOf(
+                    "Authorization" to "Bearer $token",
+                    "Accept" to "application/octet-stream",
+                ),
             )
         } else {
             CheckUpdateResult(hasUpdate = false)
         }
     }
+
+    /** What GitHub asks for: who is asking, and in which shape the answer is wanted. */
+    private fun githubHeaders(token: String): String =
+        JsonUtil.toJson(mapOf("Authorization" to "Bearer $token", "Accept" to "application/vnd.github+json"))
 
     /** Numeric comparison of dotted versions; a suffix such as "-test" on a part is ignored. */
     fun compareVersions(version1: String, version2: String): Int {

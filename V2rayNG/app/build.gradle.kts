@@ -5,6 +5,23 @@ plugins {
     id("com.jaredsburrows.license")
 }
 
+/**
+ * The commit this build was made from, so that a build can tell which build it is.
+ * Two builds can carry the same version and still be different — a tester's build
+ * and the published one both say 1.0.1 — and without this there is no way for the
+ * phone to know whether the release it is looking at is the one it is running.
+ */
+fun commitOf(dir: File): String = runCatching {
+    val process = ProcessBuilder("git", "rev-parse", "HEAD")
+        .directory(dir)
+        .redirectErrorStream(false)
+        .start()
+    val out = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() == 0) out else ""
+}.getOrDefault("")
+
+val buildCommit = commitOf(rootDir).ifEmpty { commitOf(rootDir.parentFile) }
+
 android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
@@ -15,6 +32,8 @@ android {
         targetSdk = 37
         versionCode = 4
         versionName = "1.0.1"
+
+        buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {

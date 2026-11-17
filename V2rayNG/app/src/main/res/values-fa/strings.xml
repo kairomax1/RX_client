@@ -750,6 +750,8 @@
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
     <string name="update_install_from_file">نصب آپدیت از یک فایل</string>
+    <string name="update_github_key">کلید گیت‌هاب (برای نسخه‌های آزمایشی)</string>
+    <string name="update_github_key_help">یک بار در گیت‌هاب ساخته می‌شود: Settings → Developer settings → Personal access tokens، فقط با تیک public_repo. با این کلید برنامه می‌تواند نسخه‌هایی که پیش‌نویس‌اند را ببیند.</string>
     <string name="update_not_an_apk">این فایل برنامه نیست (%1$s). وقتی وارد حساب گیت‌هاب هستی دوباره دانلودش کن.</string>
     <string name="update_install_permission">اجازه بده RX VPN برنامه نصب کنه، بعد دوباره امتحان کن</string>
     <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>

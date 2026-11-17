@@ -46,6 +46,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,6 +76,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
@@ -240,6 +242,24 @@ fun CheckUpdateScreen(
                     icon = painterResource(R.drawable.ic_source_code_24dp),
                     title = stringResource(R.string.update_install_from_file),
                     onClick = { pickApk.launch("application/vnd.android.package-archive") }
+                )
+                // A release kept as a draft is invisible to an app: GitHub shows it only to
+                // somebody who is signed in. This is how the phone signs in, once.
+                var githubKey by remember {
+                    mutableStateOf(MmkvManager.decodeSettingsString(AppConfig.PREF_GITHUB_TOKEN).orEmpty())
+                }
+                OutlinedTextField(
+                    value = githubKey,
+                    onValueChange = { typed ->
+                        githubKey = typed
+                        MmkvManager.encodeSettings(AppConfig.PREF_GITHUB_TOKEN, typed.trim())
+                    },
+                    label = { Text(stringResource(R.string.update_github_key)) },
+                    supportingText = { Text(stringResource(R.string.update_github_key_help)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
                 )
                 if (result != null) {
                     UpdateCard(
