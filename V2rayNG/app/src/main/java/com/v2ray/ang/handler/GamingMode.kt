@@ -34,6 +34,15 @@ object GamingMode {
     private const val AD_ASSET = "rx_ad_domains.txt"
     private const val IRAN_ASSET = "rx_iran_domains.txt"
     private const val GAME_ASSET = "rx_game_domains.txt"
+
+    /** Games that are filtered, sanctioned or shut inside the country (assets/…). */
+    private const val GAME_BLOCKED_ASSET = "rx_game_blocked_domains.txt"
+
+    /** Marks the rule that carries the games which must leave from outside. */
+    private const val BLOCKED_GAMES_RULE = "Gaming: blocked games leave from outside"
+
+    /** Marks the rule that carries every service which can only be answered from outside. */
+    private const val TUNNELLED_RULE = "Gaming: filtered and restricted sites"
     const val PREF_EXTRA_DOMAINS = "pref_rx_dns_mode_extra"
 
     /** Where game traffic leaves from, chosen by the owner when the mode is switched on. */
@@ -166,6 +175,15 @@ object GamingMode {
         }
 
         val rules = mutableListOf<RulesetItem>()
+        // A game that is shut here goes out before the rest of the games: it is the one choice
+        // that is not the owner's to make, because on the phone's own line it never connects.
+        blockedGameDomains.takeIf { it.isNotEmpty() }?.let { names ->
+            rules += RulesetItem(
+                remarks = BLOCKED_GAMES_RULE,
+                outboundTag = AppConfig.TAG_PROXY,
+                domain = names,
+            )
+        }
         // Games first, so a game host that also looks like a filtered one is still left on the
         // phone's own line: that is the choice the owner made for them.
         games?.let { rules += it }
@@ -173,7 +191,7 @@ object GamingMode {
         // a private address (10.10.34.x). Matching the name before the local-network rule keeps
         // such a connection in the tunnel instead of sending it out directly.
         rules += RulesetItem(
-            remarks = "Gaming: filtered and restricted sites",
+            remarks = TUNNELLED_RULE,
             outboundTag = AppConfig.TAG_PROXY,
             domain = tunnelled,
         )
@@ -279,6 +297,13 @@ object GamingMode {
      */
     private val gameDomains: List<String> by lazy { readList(GAME_ASSET) }
 
+    /**
+     * Games that do not answer from inside the country: filtered, sanctioned, or shut to an
+     * address from here. They are played from outside even when the owner chose the phone's own
+     * line for everything else, because a game that never connects has no ping to protect.
+     */
+    private val blockedGameDomains: List<String> by lazy { readList(GAME_BLOCKED_ASSET) }
+
     private fun readList(asset: String): List<String> = try {
         AngApplication.application.assets.open(asset).bufferedReader().use { parseSiteList(it.readText()) }
     } catch (e: Throwable) {
@@ -315,16 +340,9 @@ object GamingMode {
             // it always has.
             MmkvManager.decodeRoutingRulesets().orEmpty()
         }
-        val rules = mutableListOf<RulesetItem>()
-        if (adDomains.isNotEmpty()) {
-            rules += RulesetItem(
-                remarks = "Adverts and trackers",
-                outboundTag = AppConfig.TAG_BLOCKED,
-                domain = adDomains,
-            )
-        }
-        if (iranDomains.isNotEmpty()) {
-            rules += RulesetItem(
+        // The names of this country, on the phone's own line.
+        val iranian = if (iranDomains.isNotEmpty()) {
+            RulesetItem(
                 remarks = "Iranian sites on the phone's own line",
                 outboundTag = AppConfig.TAG_DIRECT,
                 // The names bundled with the app, then the core's own list of
@@ -336,8 +354,40 @@ object GamingMode {
                 ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses())
                     .distinct(),
             )
+        } else {
+            null
         }
-        rules += base
+
+        if (!isEnabled()) {
+            val plain = mutableListOf<RulesetItem>()
+            iranian?.let { plain += it }
+            plain += base
+            return plain
+        }
+
+        val rules = mutableListOf<RulesetItem>()
+        if (adDomains.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "Adverts and trackers",
+                outboundTag = AppConfig.TAG_BLOCKED,
+                domain = adDomains,
+            )
+        }
+        // The order is what keeps a service open. The lists of this country hold several
+        // thousand names and the lists of filtered and restricted services hold several
+        // thousand more; a name can sit on both. Whichever is matched first wins, and the
+        // one that shuts a service is the one that sends it out on the home line, where it
+        // is answered with a dead address. So what can only be answered from outside is
+        // matched before the names of this country — behind an advert, which is never
+        // wanted at all, and behind the games whose line the owner chose.
+        val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
+        val games = base.firstOrNull { it.remarks.startsWith("Gaming: games") }
+        val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
+        blockedGames?.let { rules += it }
+        games?.let { rules += it }
+        tunnelled?.let { rules += it }
+        iranian?.let { rules += it }
+        rules += base.filterNot { it === blockedGames || it === games || it === tunnelled }
         return rules
     }
 

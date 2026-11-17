@@ -75,6 +75,9 @@ class DailyMaintenanceWorker(
         runCatching { repairCloudflareConfig() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Cloudflare repair failed", it) }
 
+        runCatching { tuneGamingExit() }
+            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: gaming exit failed", it) }
+
         runCatching { tidyLocalData() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: local tidy-up failed", it) }
 
@@ -122,6 +125,21 @@ class DailyMaintenanceWorker(
             SubscriptionUpdateMessage(AppConfig.MSG_SUB_UPDATE_START, true, subIds)
         )
         LogUtil.i(AppConfig.TAG, "Daily maintenance: refreshing ${subIds.size} subscription(s)")
+    }
+
+    /**
+     * Points the selected config at the exit that answers soonest, so a game is played through
+     * the fastest address the config can reach rather than whichever one it happened to keep.
+     * Only runs while gaming mode is on, and only moves the config when the new exit is clearly
+     * sooner — a daily nudge that measures the same twice changes nothing.
+     */
+    private suspend fun tuneGamingExit() {
+        if (!com.v2ray.ang.handler.GamingMode.isEnabled()) return
+        com.v2ray.ang.handler.GamingExitTuner.tune(
+            context = applicationContext,
+            groupName = applicationContext.getString(R.string.cloudflare_group_name),
+            remarksSuffix = applicationContext.getString(R.string.cloudflare_copy_suffix),
+        )
     }
 
     // -------------------------------------------------------------------------

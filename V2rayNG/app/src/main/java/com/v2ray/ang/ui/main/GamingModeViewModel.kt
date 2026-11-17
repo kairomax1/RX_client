@@ -4,9 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.R
 import com.v2ray.ang.core.AetherEngine
+import com.v2ray.ang.handler.GamingExitTuner
 import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.Sharing
@@ -152,6 +155,24 @@ class GamingModeViewModel(application: Application) : AndroidViewModel(applicati
     fun setEnabled(enabled: Boolean) {
         GamingMode.setEnabled(enabled)
         _state.update { it.copy(enabled = enabled) }
+        if (enabled) tuneExit()
+    }
+
+    /**
+     * Measures the addresses the selected config can leave from and keeps the one that answers
+     * first. It runs beside the interface rather than in front of it: a game is judged on its
+     * round trip, and the owner should not wait on a measurement to start playing.
+     */
+    private fun tuneExit() {
+        viewModelScope.launch {
+            runCatching {
+                GamingExitTuner.tune(
+                    context = getApplication(),
+                    groupName = getApplication<Application>().getString(R.string.cloudflare_group_name),
+                    remarksSuffix = getApplication<Application>().getString(R.string.cloudflare_copy_suffix),
+                )
+            }.onFailure { LogUtil.w(AppConfig.TAG, "Gaming: measuring the exits failed", it) }
+        }
     }
 
     /**
@@ -162,6 +183,8 @@ class GamingModeViewModel(application: Application) : AndroidViewModel(applicati
     fun setGameExit(exit: String) {
         GamingMode.setGameExit(exit)
         _state.update { it.copy(gameExit = exit) }
+        // The line the games use was just chosen, so the fastest address on it is worth finding.
+        tuneExit()
     }
 
     /** False when the text is not a site name; nothing is stored then. */
