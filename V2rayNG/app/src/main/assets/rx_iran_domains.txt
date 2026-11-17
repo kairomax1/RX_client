@@ -23,6 +23,29 @@ domain:sch.ir
 
 # ── Banks and payment ──────────────────────────────────────────────
 domain:bmi.ir
+domain:bankmellat.ir
+domain:mellat.ir
+domain:bank-day.ir
+domain:daybank.ir
+domain:bank-dey.ir
+domain:deybank.ir
+domain:hekmatbank.ir
+domain:bank-hekmat.ir
+domain:shaparak.ir
+domain:pec.ir
+domain:sep.ir
+domain:zarinpal.ir
+domain:idpay.ir
+domain:payping.ir
+domain:nextpay.ir
+domain:zibal.ir
+domain:vandar.io
+domain:paystar.ir
+domain:fanavacard.ir
+domain:pasargad-epayment.ir
+domain:behpardakht.ir
+domain:mabna.ir
+domain:pna.ir
 domain:bankmelli-ir.com
 domain:saderat.ir
 domain:bsi.ir
