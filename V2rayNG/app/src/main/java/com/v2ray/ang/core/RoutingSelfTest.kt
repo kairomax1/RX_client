@@ -9,6 +9,8 @@ import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
 import java.net.SocketTimeoutException
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * Asks the tunnel what it really does, and says the answer out loud.
@@ -16,15 +18,16 @@ import java.net.SocketTimeoutException
  * The rules the core is given can be counted, but counting them is not the same
  * as knowing they work: an advert can still be fetched and a site at home can
  * still be answered from abroad while every rule is written where it should be.
- * So the tunnel is tried, the way a browser tries it — a name, not an address,
- * so that the core has to answer the name itself and then decide where it goes.
+ * So the tunnel is tried the way a browser tries it — a name, not an address,
+ * over a TLS handshake that carries the name in the clear — so the core has to
+ * answer the name itself and then decide where the request goes.
  *
- * Three names are enough to tell the whole story: one that must be refused,
- * one that must stay in the country, and one that everyone knows answers.
+ * Three names tell the whole story: one that must be refused, one that must be
+ * answered from the phone's own line, and one that answers for everyone.
  */
 object RoutingSelfTest {
 
-    private const val TIMEOUT_MS = 6000
+    private const val TIMEOUT_MS = 10_000
 
     /** An advert. Every rule in the book says this one is not fetched. */
     private const val ADVERT_HOST = "pagead2.googlesyndication.com"
@@ -49,44 +52,52 @@ object RoutingSelfTest {
             AppLog.Section.Core,
             buildString {
                 append("Routing test on the tunnel's own port $port:")
-                append(" adverts: ${advert.refusedOrAnswered("refused", "ANSWERED")}")
-                append("; a site at home: ${home.refusedOrAnswered("no answer", "answered")}")
-                append("; a site abroad: ${control.refusedOrAnswered("no answer", "answered")}")
+                append(" adverts: ${advert.said("refused", "ANSWERED")}")
+                append("; a site at home: ${home.said("no answer", "answered")}")
+                append("; a site abroad: ${control.said("no answer", "answered")}")
                 append(". [$advert] [$home] [$control]")
             }
         )
     }
 
-    private fun Answer.refusedOrAnswered(refused: String, answered: String): String =
-        if (code == null) refused else "$answered ${code!!}"
+    private fun Answer.said(nothing: String, something: String): String =
+        if (code == null) nothing else "$something ${code!!}"
 
     private data class Answer(val host: String, val code: String?, val note: String, val ms: Long) {
         override fun toString(): String = "$host ${code ?: note} in ${ms}ms"
     }
 
     /**
-     * One plain request for [host] over the tunnel, given as a name so that the core
-     * answers the name itself. Returns what came back, or why nothing did.
+     * One HTTPS request for [host] over the tunnel, given as a name so that the
+     * core answers the name itself. Returns what came back, or why nothing did.
      */
     private fun ask(port: Int, host: String, path: String): Answer {
         val started = SystemClock.elapsedRealtime()
         return try {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-            Socket(proxy).use { socket ->
-                socket.soTimeout = TIMEOUT_MS
+            Socket(proxy).use { plain ->
+                plain.soTimeout = TIMEOUT_MS
                 // A name, not an address: the core has to resolve it, which is the
                 // only way it can see which rule the request belongs to.
-                socket.connect(InetSocketAddress.createUnresolved(host, 80), TIMEOUT_MS)
-                socket.getOutputStream().write(
+                plain.connect(InetSocketAddress.createUnresolved(host, 443), TIMEOUT_MS)
+                val tls = SSLSocketFactory.getDefault().createSocket(plain, host, 443, true) as SSLSocket
+                tls.soTimeout = TIMEOUT_MS
+                tls.startHandshake()
+                tls.getOutputStream().write(
                     ("GET $path HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n").toByteArray()
                 )
-                val first = BufferedReader(InputStreamReader(socket.getInputStream())).readLine()
-                Answer(host, first?.take(24)?.trim(), "answered", SystemClock.elapsedRealtime() - started)
+                val first = BufferedReader(InputStreamReader(tls.inputStream)).readLine()
+                Answer(host, first?.take(28)?.trim(), "answered", SystemClock.elapsedRealtime() - started)
             }
         } catch (e: SocketTimeoutException) {
             Answer(host, null, "no answer in ${TIMEOUT_MS}ms", SystemClock.elapsedRealtime() - started)
         } catch (e: Exception) {
-            Answer(host, null, "${e.javaClass.simpleName}: ${e.message?.take(60) ?: ""}", SystemClock.elapsedRealtime() - started)
+            Answer(
+                host,
+                null,
+                "${e.javaClass.simpleName}: ${e.message?.take(60) ?: ""}",
+                SystemClock.elapsedRealtime() - started
+            )
         }
     }
 }

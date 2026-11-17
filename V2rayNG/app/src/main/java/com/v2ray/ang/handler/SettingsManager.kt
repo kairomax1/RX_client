@@ -2,8 +2,11 @@ package com.v2ray.ang.handler
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.text.TextUtils
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.AppConfig.DEFAULT_SUBSCRIPTION_ID
@@ -330,19 +333,64 @@ object SettingsManager {
      * Get domestic DNS servers from preference.
      * @return A list of domestic DNS servers.
      */
-    fun getDomesticDnsServers(): List<String> {
+    fun getDomesticDnsServers(context: Context? = null): List<String> {
         val saved = MmkvManager.decodeSettingsString(AppConfig.PREF_DOMESTIC_DNS)
         // In DNS mode almost every name is resolved here. The stock default is a
         // resolver in China, which from this country answers slowly if it answers
         // at all, and a name that is not answered is a site that never opens —
         // so it is never used, whether it was stored or not.
         val domesticDns = saved?.takeIf { it.isNotBlank() && it != AppConfig.DNS_DIRECT }
-            ?: GamingMode.DIRECT_RESOLVERS.joinToString(",")
+            ?: (phoneDnsServers(context) + GamingMode.DIRECT_RESOLVERS).distinct().joinToString(",")
         val ret = domesticDns.split(",").filter { Utils.isPureIpAddress(it) || Utils.isCoreDNSAddress(it) }
         if (ret.isEmpty()) {
             return GamingMode.DIRECT_RESOLVERS
         }
         return ret
+    }
+
+    /**
+     * The resolvers the phone's own line was given: the ones the mobile network or
+     * the Wi-Fi handed out, never the ones this app invented for the tunnel.
+     *
+     * A name that has to be answered from the phone's own line — a bank, a shop, a
+     * site at home — is best answered by whoever answers names on that line. They
+     * are always reachable from it, which is more than can be said of a resolver
+     * chosen on a map, and they answer with the address a visitor of this country
+     * is meant to get: a site that is served from inside it is answered from
+     * inside it, which is both the quicker way round and the cheaper one.
+     *
+     * The tunnel's own network is left out on purpose. Asking it for the phone's
+     * resolvers is asking this app, which is the question going round in circles.
+     */
+    fun phoneDnsServers(context: Context?): List<String> {
+        val manager = runCatching {
+            (context ?: AngApplication.application)
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        }.getOrNull() ?: return emptyList()
+        return runCatching {
+            manager.allNetworks
+                .asSequence()
+                .filterNot { network ->
+                    manager.getNetworkCapabilities(network)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                }
+                .filter { network ->
+                    val caps = manager.getNetworkCapabilities(network) ?: return@filter false
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                }
+                .flatMap { network ->
+                    manager.getLinkProperties(network)?.dnsServers?.asSequence() ?: emptySequence()
+                }
+                .mapNotNull { address ->
+                    address.hostAddress?.takeIf { Utils.isPureIpAddress(it) }
+                }
+                .filterNot { it == "127.0.0.1" || it.startsWith("127.") }
+                .distinct()
+                .take(4)
+                .toList()
+        }.getOrDefault(emptyList())
     }
 
     /**

@@ -893,7 +893,7 @@ object CoreConfigManager {
     ) {
         val servers = ArrayList<Any>()
         val remoteDns = SettingsManager.getRemoteDnsServers()
-        val domesticDns = SettingsManager.getDomesticDnsServers()
+        val domesticDns = SettingsManager.getDomesticDnsServers(configContext.context)
 
         remoteDns.forEach { servers.add(it) }
 
