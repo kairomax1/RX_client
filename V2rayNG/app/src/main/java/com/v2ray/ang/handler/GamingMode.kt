@@ -381,7 +381,7 @@ object GamingMode {
         // matched before the names of this country — behind an advert, which is never
         // wanted at all, and behind the games whose line the owner chose.
         val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
-        val games = base.firstOrNull { it.remarks.startsWith("Gaming: games") }
+        val games = base.firstOrNull { it.remarks?.startsWith("Gaming: games") == true }
         val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
         blockedGames?.let { rules += it }
         games?.let { rules += it }
