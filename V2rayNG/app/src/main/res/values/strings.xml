@@ -777,6 +777,9 @@
     <string name="update_installed_version">Installed version: %s</string>
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
+    <string name="update_install_from_file">Install an update from a file</string>
+    <string name="update_not_an_apk">This file is not a package (%1$s). Download it again while signed in to GitHub.</string>
+    <string name="update_install_permission">Allow RX VPN to install apps, then try again</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
     <string name="gaming_title">Gaming mode</string>
     <string name="gaming_about">Only what needs the tunnel uses it. Games leave by the exit you choose, adverts are blocked, and Iranian sites open on your own line \u2014 the way a bank expects to see you.</string>

@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -77,6 +79,7 @@ import com.v2ray.ang.AppConfig
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.dto.CheckUpdateResult
+import com.v2ray.ang.handler.ApkInstaller
 import com.v2ray.ang.handler.UpdateNotifier
 import com.v2ray.ang.handler.UpdateRelease
 import com.v2ray.ang.ui.base.BaseComponentActivity
@@ -129,9 +132,46 @@ fun CheckUpdateScreen(
     val noUpdateTick by viewModel.noUpdateTick.collectAsStateWithLifecycle()
     var askSize by remember { mutableStateOf(false) }
 
+    // A file the owner already has on the phone, chosen by them: the way to install a build
+    // that the update check cannot see, because GitHub hides a draft from anyone not signed in.
+    val pickApk = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (!ApkInstaller.looksLikeApk(context, uri)) {
+            val size = ApkInstaller.sizeOf(context, uri)
+            val shown = if (size > 0) android.text.format.Formatter.formatFileSize(context, size)
+            else "?"
+            Toast.makeText(
+                context,
+                context.getString(R.string.update_not_an_apk, shown),
+                Toast.LENGTH_LONG
+            ).show()
+            return@rememberLauncherForActivityResult
+        }
+        if (!ApkInstaller.install(context, uri)) {
+            Toast.makeText(context, R.string.update_install_permission, Toast.LENGTH_LONG).show()
+        }
+    }
+
     LaunchedEffect(installFile) {
         val apk = installFile ?: return@LaunchedEffect
-        // Copying the file takes a moment: off the main thread, so the screen stays smooth.
+        // The installer is opened by the app itself now; the Download folder was a detour that
+        // ended nowhere on phones where no app held the permission to install from it.
+        val installed = try {
+            ApkInstaller.install(context, ApkInstaller.uriFor(context, apk))
+        } catch (e: Exception) {
+            LogUtil.w(AppConfig.TAG, "Installer could not be reached", e)
+            false
+        }
+        if (installed) {
+            viewModel.onInstallHandled()
+            return@LaunchedEffect
+        }
+        if (!ApkInstaller.mayInstall(context)) {
+            Toast.makeText(context, R.string.update_install_permission, Toast.LENGTH_LONG).show()
+            viewModel.onInstallHandled()
+            return@LaunchedEffect
+        }
+        // Nothing else worked: copy the file where the owner can reach it.
         val handed = withContext(Dispatchers.IO) { UpdateNotifier.handOver(context, apk) }
         if (handed) {
             Toast.makeText(context, R.string.update_in_downloads, Toast.LENGTH_LONG).show()
@@ -195,6 +235,11 @@ fun CheckUpdateScreen(
                     icon = painterResource(R.drawable.ic_check_update_24dp),
                     title = stringResource(R.string.update_check_for_update),
                     onClick = { viewModel.checkForUpdates() }
+                )
+                SettingsMenuItem(
+                    icon = painterResource(R.drawable.ic_source_code_24dp),
+                    title = stringResource(R.string.update_install_from_file),
+                    onClick = { pickApk.launch("application/vnd.android.package-archive") }
                 )
                 if (result != null) {
                     UpdateCard(

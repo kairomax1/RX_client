@@ -749,6 +749,9 @@
     <string name="update_installed_version">نسخهٔ نصب‌شده: %s</string>
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
+    <string name="update_install_from_file">نصب آپدیت از یک فایل</string>
+    <string name="update_not_an_apk">این فایل برنامه نیست (%1$s). وقتی وارد حساب گیت‌هاب هستی دوباره دانلودش کن.</string>
+    <string name="update_install_permission">اجازه بده RX VPN برنامه نصب کنه، بعد دوباره امتحان کن</string>
     <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>
     <string name="gaming_title">حالت گیمینگ</string>
     <string name="gaming_about">فقط چیزی که لازم دارد از تونل رد می‌شود. بازی‌ها از راهی می‌روند که خودت انتخاب می‌کنی، تبلیغ‌ها بسته‌اند و سایت‌های ایرانی با اینترنتِ خودت باز می‌شوند \u2014 همان‌طور که بانک انتظار دارد تو را ببیند.</string>

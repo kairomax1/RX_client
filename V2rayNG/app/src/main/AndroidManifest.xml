@@ -28,6 +28,9 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Without this the phone refuses to install anything the app hands it, and an update
+         that was downloaded without complaint simply never gets put on the phone. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.INTERNET" />
