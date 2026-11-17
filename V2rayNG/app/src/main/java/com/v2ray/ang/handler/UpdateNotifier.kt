@@ -123,8 +123,10 @@ object UpdateNotifier {
         url: String,
         size: Long = 0L,
         sha256: String? = null,
+        /** Sent with the download, when the release is one only this phone may read. */
+        headers: Map<String, String> = emptyMap(),
         onProgress: (UpdateDownloader.Progress) -> Unit = {},
-    ): File? = UpdateDownloader.download(context, version, url, size, sha256, onProgress)
+    ): File? = UpdateDownloader.download(context, version, url, size, sha256, headers, onProgress)
 
     /**
      * Hands a downloaded update to the user. The app deliberately does not hold the "install
