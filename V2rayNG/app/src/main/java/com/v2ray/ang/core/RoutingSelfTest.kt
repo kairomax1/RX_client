@@ -80,7 +80,8 @@ object RoutingSelfTest {
                 // A name, not an address: the core has to resolve it, which is the
                 // only way it can see which rule the request belongs to.
                 plain.connect(InetSocketAddress.createUnresolved(host, 443), TIMEOUT_MS)
-                val tls = SSLSocketFactory.getDefault().createSocket(plain, host, 443, true) as SSLSocket
+                val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                val tls = factory.createSocket(plain, host, 443, true) as SSLSocket
                 tls.soTimeout = TIMEOUT_MS
                 tls.startHandshake()
                 tls.getOutputStream().write(
