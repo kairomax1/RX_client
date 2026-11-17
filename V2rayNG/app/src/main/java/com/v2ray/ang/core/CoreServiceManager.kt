@@ -193,6 +193,16 @@ object CoreServiceManager {
         coreController.startLoop(result.content, tunFd)
 
         if (!isRunning()) {
+            // The core keeps the reason to itself — it only says no — so the parts of the
+            // profile that it most often refuses are written down here. A core version that
+            // drops a setting (it stopped accepting "allowInsecure", for one) shows up as a
+            // connection that never opens, and the reason has to be findable.
+            AppLog.error(
+                AppLog.Section.Core,
+                "The core would not take the config: security ${config.security ?: "none"}, " +
+                    "network ${config.network ?: "none"}, " +
+                    (if (config.insecure == true) "certificate check off" else "certificate checked")
+            )
             error("Core failed to start")
         }
 

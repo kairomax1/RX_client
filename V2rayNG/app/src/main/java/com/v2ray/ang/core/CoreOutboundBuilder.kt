@@ -579,7 +579,12 @@ object CoreOutboundBuilder {
      */
     fun populateTlsSettings(streamSettings: OutboundBean.StreamSettingsBean, profileItem: ProfileItem, sniExt: String?) {
         val streamSecurity = profileItem.security.orEmpty()
-        val allowInsecure = profileItem.insecure == true && profileItem.pinnedCA256.isNullOrEmpty()
+        // Xray-core no longer accepts "allowInsecure": when it is true the core throws the
+        // whole config away and refuses to start, so a profile asking for it used to end
+        // with no connection at all and no rules at all. What the core offers instead is to
+        // name the peer rather than trust any certificate: the name is still checked, so an
+        // untrusted or expired certificate is accepted while a wrong one is not.
+        val skipCertificateCheck = profileItem.insecure == true && profileItem.pinnedCA256.isNullOrEmpty()
         val sni = if (profileItem.sni.isNullOrEmpty()) {
             when {
                 sniExt.isNotNullEmpty() && Utils.isDomainName(sniExt) -> sniExt
@@ -593,12 +598,15 @@ object CoreOutboundBuilder {
         streamSettings.security = streamSecurity.nullIfBlank()
         if (streamSettings.security == null) return
         val tlsSetting = OutboundBean.StreamSettingsBean.TlsSettingsBean(
-            allowInsecure = allowInsecure,
+            // Never true: it is not a setting the core reads any more, it is a reason for
+            // the core to refuse the config.
+            allowInsecure = false,
             serverName = sni.nullIfBlank(),
             fingerprint = profileItem.fingerPrint.nullIfBlank(),
             alpn = profileItem.alpn?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.takeIf { !it.isNullOrEmpty() },
             echConfigList = profileItem.echConfigList.nullIfBlank(),
-            verifyPeerCertByName = profileItem.verifyPeerCertByName.nullIfBlank(),
+            verifyPeerCertByName = profileItem.verifyPeerCertByName.nullIfBlank()
+                ?: if (skipCertificateCheck) sni.nullIfBlank() else null,
             pinnedPeerCertSha256 = profileItem.pinnedCA256.nullIfBlank(),
             publicKey = profileItem.publicKey.nullIfBlank(),
             shortId = profileItem.shortId.nullIfBlank(),
