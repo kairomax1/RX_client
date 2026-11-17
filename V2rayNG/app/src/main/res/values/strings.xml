@@ -779,7 +779,7 @@
     <string name="update_notes_empty">No description was written for this version.</string>
     <string name="update_install_from_file">Install an update from a file</string>
     <string name="update_github_key">GitHub key (for test releases)</string>
-    <string name="update_github_key_help">Made once in GitHub under Settings → Developer settings → Personal access tokens, with only "public_repo" ticked. It lets the app read the releases that are kept as drafts.</string>
+    <string name="update_github_key_help">Made once in GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic), with "repo" ticked. A draft is shown only to someone who can write to the repository, so a read-only key will not do. Needed only while the builds are drafts.</string>
     <string name="update_not_an_apk">This file is not a package (%1$s). Download it again while signed in to GitHub.</string>
     <string name="update_install_permission">Allow RX VPN to install apps, then try again</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
