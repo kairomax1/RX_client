@@ -1,5 +1,6 @@
 package com.v2ray.ang.handler
 
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.dto.UrlContentRequest
 import com.v2ray.ang.util.HttpUtil
 import kotlinx.coroutines.Dispatchers
@@ -30,8 +31,33 @@ object SiteLists {
     private const val PREF_ADS = "pref_rx_site_ads"
     private const val PREF_ADS_AT = "pref_rx_site_ads_at"
 
+    /**
+     * Where the names of the sites that are served from inside the country are
+     * published: the country's own domains were resolved one by one and the ones
+     * that answered from an address at home were kept.
+     */
+    private const val HOME_URL =
+        "https://raw.githubusercontent.com/bootmortis/iran-hosted-domains/main/src/data/adsl_tci.txt"
+
+    /**
+     * Where the addresses announced from inside the country are published, one
+     * range per line, kept fresh every six hours by the people who publish it.
+     */
+    private const val IRAN_IPV4_URL =
+        "https://raw.githubusercontent.com/ravenscourt/xylem-ip-db/main/lists/ir.ipv4.txt"
+    private const val IRAN_IPV6_URL =
+        "https://raw.githubusercontent.com/ravenscourt/xylem-ip-db/main/lists/ir.ipv6.txt"
+
+    private const val PREF_HOME = "pref_rx_site_home"
+    private const val PREF_HOME_AT = "pref_rx_site_home_at"
+    private const val PREF_IPS = "pref_rx_site_iran_ips"
+    private const val PREF_IPS_AT = "pref_rx_site_iran_ips_at"
+
     private const val DAY_MILLIS = 24 * 60 * 60 * 1000L
     private const val FETCH_TIMEOUT_MS = 20_000
+
+    /** Every second day: the lists move slowly, and a list is fetched for nothing otherwise. */
+    private const val TWO_DAYS_MILLIS = 2 * DAY_MILLIS
 
     /** Fewer names than this in an answer means the answer is no good. */
     private const val MIN_ADS = 100
@@ -39,12 +65,52 @@ object SiteLists {
     /** The widest a list may grow, however large the answer is. */
     private const val MAX_ADS = 5_000
 
+    /** Fewer names than this and the answer is not the list it said it was. */
+    private const val MIN_HOME = 500
+
+    private const val MAX_HOME = 30_000
+
+    /** Fewer ranges than this and it is not the country's address book. */
+    private const val MIN_IPS = 200
+
+    private const val MAX_IPS = 20_000
+
     /** The names held from the last good answer; empty when there has been none. */
     fun adDomains(): List<String> =
         MmkvManager.decodeSettingsString(PREF_ADS).orEmpty()
             .lineSequence()
             .filter { it.isNotBlank() }
             .toList()
+
+    /**
+     * The names of the sites served from inside the country. What was fetched is
+     * used when there has been a fetch; the list that travels with the app is
+     * used until there has been one, so a phone that has never been online with
+     * this app still knows where home is.
+     */
+    fun homeDomains(): List<String> {
+        val kept = MmkvManager.decodeSettingsString(PREF_HOME).orEmpty()
+            .lineSequence().filter { it.isNotBlank() }.toList()
+        return if (kept.size >= MIN_HOME) kept else bundledHomeDomains
+    }
+
+    /** The ranges announced from inside the country, IPv4 and IPv6 alike. */
+    fun iranIpRanges(): List<String> {
+        val kept = MmkvManager.decodeSettingsString(PREF_IPS).orEmpty()
+            .lineSequence().filter { it.isNotBlank() }.toList()
+        return if (kept.size >= MIN_IPS) kept else bundledIranIps
+    }
+
+    /** What travels with the app, for a phone that has not fetched the list yet. */
+    private val bundledHomeDomains: List<String> by lazy { parseHostNames(readAsset("rx_iran_hosted_domains.txt")) }
+
+    private val bundledIranIps: List<String> by lazy { parseCidrs(readAsset("rx_iran_ips.txt")) }
+
+    private fun readAsset(name: String): String = try {
+        AngApplication.application.assets.open(name).bufferedReader().readText()
+    } catch (e: Throwable) {
+        ""
+    }
 
     /** When the list now held was fetched; 0 when it never was. */
     fun fetchedAt(): Long =
@@ -55,6 +121,65 @@ object SiteLists {
 
     /** Fetches again only when the list is a day old or more. */
     suspend fun refreshIfDue(): Int = if (isStale()) refresh() else adDomains().size
+
+    /**
+     * Fetches the two lists that say where home is — the sites served from inside
+     * the country and the addresses announced from it — when either is two days
+     * old or more. Returns how many entries are held afterwards, for the log.
+     */
+    suspend fun refreshHomeIfDue(): Pair<Int, Int> {
+        val names = if (System.currentTimeMillis() - fetchedAt(PREF_HOME_AT) > TWO_DAYS_MILLIS) {
+            refreshHome()
+        } else {
+            homeDomains().size
+        }
+        val ranges = if (System.currentTimeMillis() - fetchedAt(PREF_IPS_AT) > TWO_DAYS_MILLIS) {
+            refreshIranIps()
+        } else {
+            iranIpRanges().size
+        }
+        return names to ranges
+    }
+
+    private fun fetchedAt(key: String): Long =
+        MmkvManager.decodeSettingsString(key)?.toLongOrNull() ?: 0L
+
+    /** Fetches the names of the sites served from inside the country. */
+    suspend fun refreshHome(): Int = withContext(Dispatchers.IO) {
+        val names = parseHostNames(fetch(HOME_URL))
+        if (names.size < MIN_HOME) {
+            AppLog.error(
+                AppLog.Section.Other,
+                "The list of sites at home carried ${names.size} names, so the one already held is kept",
+            )
+            return@withContext homeDomains().size
+        }
+        val kept = names.take(MAX_HOME)
+        MmkvManager.encodeSettings(PREF_HOME, kept.joinToString("\n"))
+        MmkvManager.encodeSettings(PREF_HOME_AT, System.currentTimeMillis().toString())
+        AppLog.info(AppLog.Section.Other, "Sites at home: ${kept.size} names, renewed")
+        kept.size
+    }
+
+    /** Fetches the addresses announced from inside the country, both families of them. */
+    suspend fun refreshIranIps(): Int = withContext(Dispatchers.IO) {
+        val ranges = (parseCidrs(fetch(IRAN_IPV4_URL)) + parseCidrs(fetch(IRAN_IPV6_URL))).distinct()
+        if (ranges.size < MIN_IPS) {
+            AppLog.error(
+                AppLog.Section.Other,
+                "The list of addresses at home carried ${ranges.size} ranges, so the one already held is kept",
+            )
+            return@withContext iranIpRanges().size
+        }
+        val kept = ranges.take(MAX_IPS)
+        MmkvManager.encodeSettings(PREF_IPS, kept.joinToString("\n"))
+        MmkvManager.encodeSettings(PREF_IPS_AT, System.currentTimeMillis().toString())
+        AppLog.info(AppLog.Section.Other, "Addresses at home: ${kept.size} ranges, renewed")
+        kept.size
+    }
+
+    private fun fetch(url: String): String =
+        HttpUtil.getUrlContent(UrlContentRequest(url = url, timeout = FETCH_TIMEOUT_MS)).orEmpty()
 
     /**
      * Fetches the list and keeps it. Returns how many names are held afterwards,
@@ -85,6 +210,55 @@ object SiteLists {
      * because a single bad line in a routing rule is enough to keep the core
      * from starting at all.
      */
+    /**
+     * Reads host names out of a list that publishes them as addresses: "http://site/path"
+     * and "site" alike are both one name here. Anything that is not a host name is
+     * dropped, because one bad line in a routing rule is enough to stop the core.
+     */
+    internal fun parseHostNames(text: String): List<String> = text.lineSequence()
+        .map { it.substringBefore('#').trim().lowercase() }
+        .filter { it.isNotBlank() }
+        .map { it.substringAfter("://", it).substringBefore('/').substringBefore(':').trim() }
+        .map { it.removePrefix("www.") }
+        .filter { name ->
+            name.length in 4..253 && name.contains('.') &&
+                name.all { c -> (c.isLetterOrDigit() && c.code < 128) || c == '-' || c == '.' } &&
+                !name.startsWith('.') && !name.endsWith('.') && !name.contains("..")
+        }
+        .map { "domain:$it" }
+        .distinct()
+        .toList()
+
+    /**
+     * Reads ranges out of a list of addresses: one CIDR per line, a bare address
+     * counted as one of its own, notes and blank lines passed over. Both families
+     * of address are welcome in the same list.
+     */
+    internal fun parseCidrs(text: String): List<String> = text.lineSequence()
+        .map { it.substringBefore('#').trim() }
+        .filter { it.isNotBlank() }
+        .mapNotNull { line ->
+            val range = if ('/' in line) line else line + if (':' in line) "/128" else "/32"
+            range.takeIf { isCidr(it) }
+        }
+        .distinct()
+        .toList()
+
+    private fun isCidr(value: String): Boolean {
+        val parts = value.split('/', limit = 2)
+        if (parts.size != 2) return false
+        val address = parts[0]
+        val bits = parts[1].toIntOrNull() ?: return false
+        return if (':' in address) {
+            bits in 0..128 && address.all { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' || c == ':' }
+        } else {
+            bits in 0..32 && address.split('.').size == 4 && address.split('.').all { part ->
+                part.isNotEmpty() && part.length <= 3 && part.all { it.isDigit() } &&
+                    (part.toIntOrNull() ?: -1) in 0..255
+            }
+        }
+    }
+
     internal fun parseNames(text: String): List<String> = text.lineSequence()
         .map { it.substringBefore('#').trim() }
         .map { it.removePrefix("+.").removePrefix(".") }

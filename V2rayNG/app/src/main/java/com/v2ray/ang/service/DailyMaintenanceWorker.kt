@@ -68,6 +68,8 @@ class DailyMaintenanceWorker(
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
 
         runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
+        // The names of the sites at home and the addresses announced from it, every second day.
+        runCatching { com.v2ray.ang.handler.SiteLists.refreshHomeIfDue() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
 
         runCatching { repairCloudflareConfig() }

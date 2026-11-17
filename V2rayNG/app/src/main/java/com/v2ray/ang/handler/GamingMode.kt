@@ -331,8 +331,10 @@ object GamingMode {
                 // Iranian names, which is the wider of the two; and the Iranian
                 // addresses as well, because a site of this country that keeps
                 // its name abroad still lives on an address at home.
-                domain = iranDomains + IRAN_CDN_DOMAINS + coreIranNames(),
-                ip = IRAN_ADDRESSES + coreIranAddresses(),
+                domain = (iranDomains + IRAN_CDN_DOMAINS + coreIranNames() + SiteLists.homeDomains())
+                    .distinct(),
+                ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses())
+                    .distinct(),
             )
         }
         rules += base
