@@ -97,7 +97,7 @@ object UpdateDownloader {
                             single(route, target, size, headers, onProgress)
                         }
                     } else {
-                        single(route, target, size, onProgress)
+                        single(route, target, size, headers, onProgress)
                     }
                     if (ok && verify(target, size, sha256)) return@withContext target
                     if (ok) {
