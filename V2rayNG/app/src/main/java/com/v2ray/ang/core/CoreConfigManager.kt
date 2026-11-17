@@ -1048,7 +1048,13 @@ object CoreConfigManager {
                             V2rayConfig.DnsBean.ServersBean(
                                 address = address,
                                 domains = rule.domain,
-                                skipFallback = true,
+                                // Names at home are answered by a resolver at home, and
+                                // only that one was allowed to answer: when it did not,
+                                // nothing did, and a site that never gets a name is a
+                                // site that never opens. The other resolvers are still
+                                // the last resort rather than the first, so a name at
+                                // home is still answered from home when it can be.
+                                skipFallback = false,
                                 tag = tag
                             )
                         )

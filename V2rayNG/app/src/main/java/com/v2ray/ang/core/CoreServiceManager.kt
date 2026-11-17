@@ -227,6 +227,16 @@ object CoreServiceManager {
         if (!isReload) {
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
         }
+        // The rules were written; whether they are obeyed is another matter, and it is
+        // the one that decides whether an advert is fetched and where a site at home is
+        // answered from. The tunnel is asked a moment after it settles.
+        CoroutineScope(Dispatchers.IO).launch {
+            kotlinx.coroutines.delay(3000)
+            if (isRunning()) {
+                runCatching { RoutingSelfTest.run() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Routing test could not be run", it) }
+            }
+        }
         ServiceRuntimeState.markRunning(true)
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
