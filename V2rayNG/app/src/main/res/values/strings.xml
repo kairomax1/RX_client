@@ -887,6 +887,7 @@
     <string name="xbox_dns_nameless">Nameless</string>
     <string name="xbox_dns_result_line">%1$s of %2$s Xbox addresses  •  %3$s ms</string>
     <string name="xbox_dns_none">On this connection no DNS sent the addresses of the Xbox app through a relay of its own, so none of them gets around the Xbox block. Try another connection (Wi-Fi or another SIM) as well.</string>
+    <string name="xbox_dns_own_line">Asking your own line first…</string>
     <string name="xbox_dns_own_ok">Your own line answered %1$s of %2$s Xbox names. Game pass and the console should work here without a relay; the servers below are alternatives, not a repair.</string>
     <string name="xbox_dns_own_no">Your own line answered none of the %2$s Xbox names (%1$s answered). Without a relay, Xbox cannot work on this connection.</string>
     <string name="xbox_dns_own_millis">Your line answered in %1$s ms</string>

@@ -330,12 +330,14 @@ private fun ProgressCard(state: XboxDnsUiState) {
         ScanPhase.Sweeping -> if (state.total > 0) state.asked.toFloat() / state.total * 0.8f else 0f
         ScanPhase.Proving -> 0.8f + (if (state.toProve > 0) state.proven.toFloat() / state.toProve else 1f) * 0.2f
         ScanPhase.Done -> 1f
+        ScanPhase.OwnLine -> 0f
         ScanPhase.Idle -> 0f
     }
     val shown by animateFloatAsState(fraction, tween(400), label = "scanProgress")
     Glass {
         Text(
             text = when (state.phase) {
+                ScanPhase.OwnLine -> stringResource(R.string.xbox_dns_own_line)
                 ScanPhase.Sweeping -> stringResource(R.string.xbox_dns_sweeping, state.asked.toString(), state.total.toString())
                 ScanPhase.Proving -> stringResource(R.string.xbox_dns_proving, state.proven.toString(), state.toProve.toString())
                 else -> stringResource(

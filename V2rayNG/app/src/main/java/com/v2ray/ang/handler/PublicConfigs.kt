@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -619,9 +620,9 @@ object PublicConfigs {
 
         // Measured before they are imported. Importing first and measuring second is
         // what left the group holding configs that had never carried a byte.
-        val kept = verify(context, candidates, wanted, options.verify, cancelled) { verified, carried ->
+        val kept = runBlocking { verify(context, candidates, wanted, options.verify, cancelled) { verified, carried ->
             onProgress(Progress(origin, found, tried, reachable.size, verified, carried))
-        }
+        } }
         if (kept.isEmpty()) {
             AppLog.error(AppLog.Section.Other, "Public configs: none of the ${candidates.size} measured configs carried anything on this line")
             return Outcome(0, origin)

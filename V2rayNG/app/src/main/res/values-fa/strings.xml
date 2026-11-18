@@ -859,6 +859,7 @@
     <string name="xbox_dns_nameless">بی‌نام</string>
     <string name="xbox_dns_result_line">%1$s از %2$s نشانی Xbox  •  %3$s میلی‌ثانیه</string>
     <string name="xbox_dns_none">روی این اینترنت هیچ DNSی نشانی‌های برنامهٔ Xbox را از سرور خودش رد نکرد. یعنی هیچ‌کدام تحریم Xbox را دور نمی‌زند. روی یک اینترنت دیگر (وای‌فای یا سیم‌کارت دیگر) هم امتحان کن.</string>
+    <string name="xbox_dns_own_line">اول خطِ خودت را می‌پرسد…</string>
     <string name="xbox_dns_own_ok">خط خودت به %1$s از %2$s نامِ ایکس‌باکس جواب داد. یعنی ایکس‌باکس روی همین خط بدون واسطه کار می‌کند؛ سرورهای پایین فقط گزینه‌اند، نه تعمیر.</string>
     <string name="xbox_dns_own_no">خط خودت به هیچ‌کدام از %2$s نامِ ایکس‌باکس جواب نداد (%1$s جواب داد). بدون واسطه، ایکس‌باکس روی این خط کار نمی‌کند.</string>
     <string name="xbox_dns_own_millis">خط خودت در %1$s میلی‌ثانیه جواب داد</string>
