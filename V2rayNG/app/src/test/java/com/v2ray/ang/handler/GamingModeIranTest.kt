@@ -40,7 +40,9 @@ class GamingModeIranTest {
     fun anIranianNameIsSettledBeforeTheTunnelledListIsConsulted() {
         val rules = GamingMode.rulesets()
         val iranianAt = rules.indexOfFirst { it.remarks == "Iranian sites on the phone's own line" }
-        val tunnelledAt = rules.indexOfFirst { it.remarks == GamingMode.TUNNELLED_RULE }
+        // The rule that carries the filtered and restricted lists, whichever words
+        // it happens to use: it is the one that sends a name out on the tunnel.
+        val tunnelledAt = rules.indexOfFirst { it.remarks?.contains("filtered and restricted") == true }
         assertTrue(iranianAt >= 0 && tunnelledAt >= 0)
         // The order is the decision: whichever rule a name reaches first owns it.
         // Iran first means a site cannot show one address to one of its names and
