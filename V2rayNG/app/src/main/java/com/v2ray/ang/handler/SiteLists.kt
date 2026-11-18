@@ -88,17 +88,29 @@ object SiteLists {
      * used until there has been one, so a phone that has never been online with
      * this app still knows where home is.
      */
-    fun homeDomains(): List<String> {
-        val kept = MmkvManager.decodeSettingsString(PREF_HOME).orEmpty()
-            .lineSequence().filter { it.isNotBlank() }.toList()
-        return if (kept.size >= MIN_HOME) kept else bundledHomeDomains
-    }
+    fun homeDomains(): List<String> = keptOrBundled(PREF_HOME, MIN_HOME, bundledHomeDomains)
 
     /** The ranges announced from inside the country, IPv4 and IPv6 alike. */
-    fun iranIpRanges(): List<String> {
-        val kept = MmkvManager.decodeSettingsString(PREF_IPS).orEmpty()
-            .lineSequence().filter { it.isNotBlank() }.toList()
-        return if (kept.size >= MIN_IPS) kept else bundledIranIps
+    fun iranIpRanges(): List<String> = keptOrBundled(PREF_IPS, MIN_IPS, bundledIranIps)
+
+    /**
+     * What was fetched when there is enough of it, and what travels with the app
+     * otherwise.
+     *
+     * Storage is read defensively because this is asked while a tunnel is being
+     * built, and the answer changes nothing about whether the tunnel is correct:
+     * the list that ships with the app is a good list. A store that cannot be
+     * read must not take the routing with it — and in a unit test there is no
+     * store at all, which is how this was found.
+     */
+    private fun keptOrBundled(pref: String, minimum: Int, bundled: List<String>): List<String> {
+        val kept = try {
+            MmkvManager.decodeSettingsString(pref).orEmpty()
+                .lineSequence().filter { it.isNotBlank() }.toList()
+        } catch (e: Throwable) {
+            emptyList()
+        }
+        return if (kept.size >= minimum) kept else bundled
     }
 
     /** What travels with the app, for a phone that has not fetched the list yet. */
