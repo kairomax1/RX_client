@@ -139,18 +139,20 @@ object GamingMode {
     /**
      * The routing rules of the mode, in matching order.
      *
-     * With [EXIT_CONFIG] — "IP ایران", the default — the whole connection goes through the
-     * config: every name, every address, every port, nothing left outside. Filtered sites,
-     * sanctioned services and games are all carried by the same rule, so they all open and they
-     * all see one address. The phone's own line is never used for anything but the two things
-     * that cannot use a tunnel at all: the connection that carries the tunnel itself, and the
-     * two name servers the phone talks to directly. With [EXIT_OWN] only filtered and sanctioned
-     * sites are tunnelled and everything else leaves on the phone's own line.
+     * With [EXIT_OWN] — "IP ایران", the default — everything that works from here keeps the
+     * owner's own Iranian address, and only what cannot work from here is tunnelled: the
+     * filtered, the sanctioned, the blocked games and the AI sites. With [EXIT_CONFIG] the whole
+     * connection goes through the config instead: every name, every address, every port, nothing
+     * left outside, all of it on the config's one address.
      */
     fun rulesets(
         extra: List<String> = emptyList(),
         bundled: List<String> = emptyList(),
-        gameExit: String = EXIT_CONFIG,
+        // The same default as `chosenExit`, so a caller that does not say which
+        // way round it wants gets the mode as it is actually configured rather
+        // than a different one. Two defaults disagreeing is how "IP ایران" ended
+        // up reporting one thing and routing another.
+        gameExit: String = EXIT_OWN,
     ): MutableList<RulesetItem> {
         val tunnelled = ((FILTERED + SANCTIONED + VPN_SERVICES + WHOLE_ENDINGS + extra).map { "domain:$it" } + bundled)
             .distinct()
