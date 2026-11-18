@@ -79,6 +79,12 @@ object PublicConfigs {
     private const val CONNECT_MILLIS = 2500
     private const val TESTING_AT_ONCE = 48
 
+    /** How many addresses to try per config wanted, given that most of them fail. */
+    private const val CANDIDATES_PER_WANTED = 8
+
+    /** A ceiling on trying, so a large number asked for does not search for ever. */
+    private const val CANDIDATES_CEILING = 1_200
+
     /**
      * The group a candidate is put in while it is being measured. It is a real
      * group only because a config has to belong to one to be imported; it is not
@@ -648,20 +654,29 @@ object PublicConfigs {
         var tried = 0
         val pool = Executors.newFixedThreadPool(TESTING_AT_ONCE)
 
-        // Candidates to measure. The ones that answer a connection are only a
-        // start, since some of them will not carry a download — but the number is
-        // kept modest on purpose: measuring is a tunnel raise and a download per
-        // config, and a screen that says "144 tried" for twenty asked for is not
-        // doing what its owner set out. Half again as many, plus a few, is enough
-        // to replace what fails without the search doubling in length.
-        val candidatesWanted = wanted + maxOf(wanted / 2, 6)
+        // Candidates to measure, and the arithmetic is the whole point here.
+        // Of the 144 candidates tried in the log, 60 answered a connection and
+        // only 2 of those carried a download: one in thirty of the addresses that
+        // look good actually works. Asking for 20 and measuring 60 therefore
+        // returned 2, and the screen honestly said "2 of the 20 asked for". A
+        // candidate is cheap to try (a TCP connect) and expensive to measure (a
+        // tunnel raise and a download), so enough are tried to make the expensive
+        // part count, and the search stops as soon as the wanted number has
+        // carried — the work is bounded by what succeeds, not by a guess.
+        val candidatesWanted = (wanted * CANDIDATES_PER_WANTED)
+            .coerceIn(wanted, minOf(CANDIDATES_CEILING, wanted + 400))
+        // The cheap pre-check only has to hand over more than will be measured, so
+        // that a few dead addresses do not leave the measurement short: twice the
+        // wanted number is enough, and it keeps the "tried" figure near what the
+        // work actually needs instead of eight times it.
+        val reachableWanted = (wanted * 2).coerceIn(wanted, candidatesWanted)
 
         fun tryAll(lines: List<String>) {
             val links = select(lines.asSequence(), options.kinds, options.game, seen)
             found += links.size
             onProgress(Progress(origin, found, tried, reachable.size, wanted))
             for (batch in links.chunked(TESTING_AT_ONCE)) {
-                if (cancelled.get() || reachable.size >= candidatesWanted || tried >= MAX_TRIED) break
+                if (cancelled.get() || reachable.size >= reachableWanted || tried >= MAX_TRIED) break
                 val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
                 batch.forEachIndexed { index, link -> if (runCatching { answers[index].get() }.getOrDefault(false)) reachable.add(link) }
                 tried += batch.size
@@ -672,7 +687,7 @@ object PublicConfigs {
         try {
             tryAll(if (origin == Origin.Bundled) context.assets.open(ASSET).bufferedReader().use { it.readLines() } else first.lines)
             // Not enough from the short lists: the large ones are read as well.
-            if (reachable.size < candidatesWanted && !cancelled.get()) tryAll(download(context, small = false).lines)
+            if (reachable.size < reachableWanted && !cancelled.get()) tryAll(download(context, small = false).lines)
         } finally {
             pool.shutdownNow()
         }
