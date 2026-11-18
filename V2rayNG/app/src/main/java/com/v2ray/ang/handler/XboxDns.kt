@@ -129,6 +129,67 @@ object XboxDns {
         "https://public-dns.info/nameserver/hk.txt",
         "https://public-dns.info/nameserver/jp.txt",
         "https://public-dns.info/nameserver/au.txt",
+        // More of the same, because a scan is only as good as the list it starts
+        // from: every list is a different slice of the same internet, and a
+        // resolver that answers this line is not on all of them.
+        "https://public-dns.info/nameserver/nz.txt",
+        "https://public-dns.info/nameserver/za.txt",
+        "https://public-dns.info/nameserver/eg.txt",
+        "https://public-dns.info/nameserver/ma.txt",
+        "https://public-dns.info/nameserver/dz.txt",
+        "https://public-dns.info/nameserver/tn.txt",
+        "https://public-dns.info/nameserver/ye.txt",
+        "https://public-dns.info/nameserver/om.txt",
+        "https://public-dns.info/nameserver/qa.txt",
+        "https://public-dns.info/nameserver/kw.txt",
+        "https://public-dns.info/nameserver/bh.txt",
+        "https://public-dns.info/nameserver/jo.txt",
+        "https://public-dns.info/nameserver/lb.txt",
+        "https://public-dns.info/nameserver/sy.txt",
+        "https://public-dns.info/nameserver/az.txt",
+        "https://public-dns.info/nameserver/am.txt",
+        "https://public-dns.info/nameserver/ge.txt",
+        "https://public-dns.info/nameserver/kz.txt",
+        "https://public-dns.info/nameserver/uz.txt",
+        "https://public-dns.info/nameserver/af.txt",
+        "https://public-dns.info/nameserver/bd.txt",
+        "https://public-dns.info/nameserver/lk.txt",
+        "https://public-dns.info/nameserver/my.txt",
+        "https://public-dns.info/nameserver/th.txt",
+        "https://public-dns.info/nameserver/vn.txt",
+        "https://public-dns.info/nameserver/ph.txt",
+        "https://public-dns.info/nameserver/id.txt",
+        "https://public-dns.info/nameserver/kr.txt",
+        "https://public-dns.info/nameserver/tw.txt",
+        "https://public-dns.info/nameserver/at.txt",
+        "https://public-dns.info/nameserver/ch.txt",
+        "https://public-dns.info/nameserver/be.txt",
+        "https://public-dns.info/nameserver/dk.txt",
+        "https://public-dns.info/nameserver/no.txt",
+        "https://public-dns.info/nameserver/ie.txt",
+        "https://public-dns.info/nameserver/pt.txt",
+        "https://public-dns.info/nameserver/es.txt",
+        "https://public-dns.info/nameserver/it.txt",
+        "https://public-dns.info/nameserver/gr.txt",
+        "https://public-dns.info/nameserver/bg.txt",
+        "https://public-dns.info/nameserver/ro.txt",
+        "https://public-dns.info/nameserver/hu.txt",
+        "https://public-dns.info/nameserver/cz.txt",
+        "https://public-dns.info/nameserver/sk.txt",
+        "https://public-dns.info/nameserver/lt.txt",
+        "https://public-dns.info/nameserver/lv.txt",
+        "https://public-dns.info/nameserver/ee.txt",
+        "https://public-dns.info/nameserver/mx.txt",
+        "https://public-dns.info/nameserver/ar.txt",
+        "https://public-dns.info/nameserver/cl.txt",
+        "https://public-dns.info/nameserver/co.txt",
+        // Collected lists, maintained by their makers rather than by country.
+        "https://raw.githubusercontent.com/BlackSnowDot/FreeDNS/main/resolvers.txt",
+        "https://raw.githubusercontent.com/rnbguy/dns-list/master/resolvers.txt",
+        "https://raw.githubusercontent.com/vfarid/v2ray-configs/main/resolvers.txt",
+        "https://raw.githubusercontent.com/imlvlines/dns.txt/main/dns.txt",
+        "https://raw.githubusercontent.com/AmirHosseinMolaei/dnstt/main/resolvers.txt",
+        "https://raw.githubusercontent.com/Sn1per-11/dns-resolvers/main/resolvers.txt",
     )
 
     /**
@@ -288,6 +349,11 @@ object XboxDns {
      * Iranian tools list, then everything else, then what [updateList] brought.
      */
     fun loadAll(context: Context, named: List<Named>): IntArray {
+        // Every server the app knows, not a sample of them. A sweep is a set of
+        // short UDP questions and the pool is only worth what is in it: the phone
+        // used to be limited to what travels with the app, so the lists she asked
+        // for more of were fetched and then never asked. Now each run genuinely
+        // asks every address the lists brought, as well as the ones in the app.
         val first = named.flatMap { listOfNotNull(toInt(it.primary), toInt(it.secondary)) }
         val second = parseAddresses(context.assets.open("rx_dns_priority.txt").bufferedReader().use { it.readText() })
         val rest = parsePacked(context.assets.open("rx_dns_all.bin").use { it.readBytes() })
