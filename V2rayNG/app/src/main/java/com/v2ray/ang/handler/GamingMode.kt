@@ -2,22 +2,21 @@ package com.v2ray.ang.handler
 
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
-import com.v2ray.ang.util.Utils
 import com.v2ray.ang.dto.entities.RulesetItem
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
- * Gaming mode: the tunnel carries only what needs it, and games go where the owner says.
+ * Gaming mode: everything through the config, or games on the phone's own line.
  *
- * Everything a game talks to leaves by the exit the owner chose: the phone's own line (lowest
- * ping, the game sees the owner's own address) or the config's exit address (for a game that is
- * filtered, or that refuses an Iranian address). Sites that are filtered or sanctioned always go
- * through the config; everything else leaves the phone directly, with the line's own speed.
+ * The default — "IP ایران" — is one rule and nothing else: every name and every bare address
+ * leaves through the config, so every site, app and game sees the config's exit address and no
+ * other. Nothing is exempt, because an exemption is a second exit and a second exit is what an
+ * address check notices. The other choice, [EXIT_OWN], keeps games on the phone's own line for
+ * the lowest ping and sends everything filtered or sanctioned through the config.
  *
- * Two things are not a mode and are always on: adverts and trackers are blocked, and Iranian
- * sites go out on the phone's own line. An Iranian bank that sees a foreign address refuses the
- * connection outright, and an advert that is never fetched costs nobody anything.
+ * One thing is not a mode and is always on: adverts and trackers are blocked, in front of either
+ * set of rules. An advert that is never fetched costs nobody anything.
  *
  * It is not a DNS server address that turns a config into something a console can type in: an
  * app cannot listen on port 53. Other devices use the phone's proxy address instead, see
@@ -32,7 +31,6 @@ object GamingMode {
     const val PREF_ENABLED = "pref_rx_dns_mode"
     private const val SITES_ASSET = "rx_dns_mode_sites.txt"
     private const val AD_ASSET = "rx_ad_domains.txt"
-    private const val IRAN_ASSET = "rx_iran_domains.txt"
     private const val GAME_ASSET = "rx_game_domains.txt"
 
     /** Games that are filtered, sanctioned or shut inside the country (assets/…). */
@@ -54,14 +52,20 @@ object GamingMode {
     /** Games use the config's exit address: for games that are filtered, or region locked. */
     const val EXIT_CONFIG = "config"
 
-    /** Where games leave from right now; [EXIT_OWN] until the owner chooses otherwise. */
+    /** Where games leave from right now; [EXIT_CONFIG] until the owner chooses otherwise. */
     fun gameExit(): String = chosenExit(MmkvManager.decodeSettingsString(PREF_GAME_EXIT))
 
     /**
      * The exit a stored answer means. A missing answer, and the empty text written when the mode
-     * is switched off, both fall back to [EXIT_OWN]; anything else is kept as stored.
+     * is switched off, both fall back to [EXIT_CONFIG]; anything else is kept as stored.
+     *
+     * The fallback is the config on purpose. A way into the mode exists that never asks the
+     * question — the Aether button switches it on directly — and answering "the phone's own
+     * line" on its behalf would put the owner's own address on everything they open, which is
+     * the one outcome the mode must never produce by accident. Choosing that line stays
+     * possible; it is never assumed.
      */
-    internal fun chosenExit(stored: String?): String = stored.takeUnless { it.isNullOrBlank() } ?: EXIT_OWN
+    internal fun chosenExit(stored: String?): String = stored.takeUnless { it.isNullOrBlank() } ?: EXIT_CONFIG
 
     fun setGameExit(exit: String) {
         AppLog.info(
@@ -133,12 +137,12 @@ object GamingMode {
      * With [EXIT_OWN] the phone's own line carries everything that does not need the tunnel,
      * which is what keeps a game's ping at the line's own figure: only filtered and sanctioned
      * sites are tunnelled. With [EXIT_CONFIG] the whole connection goes through the config and
-     * only what an Iranian site needs is left outside, so a game sees the config's exit address.
+     * nothing is left outside, so a game sees the config's exit address and only that.
      */
     fun rulesets(
         extra: List<String> = emptyList(),
         bundled: List<String> = emptyList(),
-        gameExit: String = EXIT_OWN,
+        gameExit: String = EXIT_CONFIG,
     ): MutableList<RulesetItem> {
         val tunnelled = ((FILTERED + SANCTIONED + VPN_SERVICES + WHOLE_ENDINGS + extra).map { "domain:$it" } + bundled)
             .distinct()
@@ -161,17 +165,20 @@ object GamingMode {
         }
 
         if (gameExit == EXIT_CONFIG) {
-            val rules = mutableListOf(localNetwork)
-            games?.let { rules += it }
-            // A game's own servers are reached by address, not by name, so with this choice
-            // every address that is not Iranian or local goes through the config too: that is
-            // what gives the game the config's exit address.
-            rules += RulesetItem(
-                remarks = "Gaming: everything else through the config",
-                outboundTag = AppConfig.TAG_PROXY,
-                port = "0-65535",
+            // One rule and nothing else. Everything — by name and by bare address —
+            // goes through the config, so every site and every game server sees the
+            // config's address and no other. There is deliberately no rule after
+            // this one that sends anything out directly: a "local network" exception
+            // or a games exception would be a second exit, and a second exit is
+            // what an address check notices. A game keeps working because its
+            // traffic is tunnelled like everything else, not because it is exempt.
+            return mutableListOf(
+                RulesetItem(
+                    remarks = "Gaming: everything through the config",
+                    outboundTag = AppConfig.TAG_PROXY,
+                    port = "0-65535",
+                ),
             )
-            return rules
         }
 
         val rules = mutableListOf<RulesetItem>()
@@ -233,124 +240,6 @@ object GamingMode {
 
     private val bundledAdDomains: List<String> by lazy { readList(AD_ASSET) }
 
-    /** Iranian sites: banks, shops, government, universities, news, everyday services. */
-    private val iranDomains: List<String> by lazy { readList(IRAN_ASSET) }
-
-    /** The core's own list of Iranian names, alongside the ones bundled with the app. */
-    private val IRAN_GEOSITE = listOf("geosite:category-ir")
-
-    /** The core's own list of the country's addresses. */
-    private val IRAN_GEOIP_CORE = listOf("geoip:ir")
-
-    /**
-     * The core's own list of Iranian addresses, and the addresses of the cloud
-     * that carries a large part of this country's sites from inside it.
-     *
-     * Half of what a phone pays for its traffic goes to the address it reaches:
-     * traffic that stays in the country is billed at half of what traffic
-     * abroad costs. A site served from one of these addresses is therefore not
-     * only quicker on the phone's own line, it is cheaper as well — so it is
-     * named here as well as being covered by the country's addresses.
-     */
-    private val IRAN_ADDRESSES = listOf(
-        // Abr Arvan (ArvanCloud), the CDN a great many Iranian sites are served from.
-        "185.143.232.0/22",
-        "185.220.226.0/24",
-        "2a0c:a7c6:4::/48",
-        "2a0c:a7c6:2b::/48",
-        "2a0c:a7c6:1000::/36",
-        "2a0c:a7c7::/40",
-    )
-
-    /**
-     * The core's own list of this country's names, when the file it is read from
-     * is really on the phone.
-     *
-     * That file is not shipped with the app: it is fetched by hand from the
-     * screen made for it. Asking the core for a list that is not there is worse
-     * than not asking — a rule that names a list nobody can open is a rule that
-     * takes the whole set down with it, and with it the adverts, this country's
-     * sites and the gaming rules together. So it is asked for when it is there,
-     * and the names bundled with the app carry the rest on their own.
-     */
-    private fun coreIranNames(): List<String> =
-        if (hasCoreList(AppConfig.GEOSITE_DAT)) IRAN_GEOSITE else emptyList()
-
-    /** As [coreIranNames], for the country's addresses. */
-    private fun coreIranAddresses(): List<String> =
-        if (hasCoreList(AppConfig.GEOIP_DAT)) IRAN_GEOIP_CORE else emptyList()
-
-    private fun hasCoreList(name: String): Boolean = try {
-        val dir = Utils.userAssetPath(AngApplication.application)
-        dir.isNotEmpty() && java.io.File(dir, name).exists()
-    } catch (_: Throwable) {
-        // No application and no asset directory is a real state — a unit test has
-        // neither — and it means the same thing as a missing file: this list is
-        // not on the phone, so nothing is claimed from it.
-        false
-    }
-
-    /** Names the cloud serves Iranian sites under, for the ones that keep their own name. */
-    private val IRAN_CDN_DOMAINS = listOf("domain:arvancdn.ir", "domain:arvancloud.ir")
-
-    /**
-     * The country's own name endings. Every name under one of these belongs to a
-     * site of this country, so it is answered on the phone's own line without
-     * having to be in any list at all.
-     *
-     * This is what "IP ایران" was missing. The list of names served from inside
-     * the country holds nine thousand entries, and a site that is not in it was
-     * tunnelled — so an ordinary Iranian shop or bank showed a foreign address,
-     * and a site strict about addresses saw the wrong one. The endings cannot be
-     * out of date and cannot be incomplete: a `.ir` name is an Iranian name by
-     * definition. It is anchored to the end, so `mail.google.com` is not caught.
-     */
-    private val IRAN_ENDINGS = listOf(
-        // `.*\.ir$` already covers every second-level name — `bank.example.ac.ir`
-        // ends in `.ir` — so one expression is the whole of it. Nothing else is
-        // added: another pattern for the same names only costs matching time.
-        "regexp:.*\\.ir$",
-    ).distinct()
-
-    /**
-     * Domains of the country that are not under `.ir`: the ones everybody here
-     * uses, whose names are bought abroad. They belong on the home line for the
-     * same reason — a site of this country is quicker and cheaper at home, and
-     * answers with an address from here.
-     */
-    private val IRAN_OTHER_NAMES = listOf(
-        "domain:aparat.com",
-        "domain:digikala.com",
-        "domain:divar.ir",
-        "domain:torob.com",
-        "domain:basalam.com",
-        "domain:sheypoor.com",
-        "domain:filimo.com",
-        "domain:namava.ir",
-        "domain:snapp.ir",
-        "domain:tapsi.ir",
-        "domain:alibaba.ir",
-        "domain:flytoday.ir",
-        "domain:zarinpal.com",
-        "domain:shaparak.ir",
-        "domain:bmi.ir",
-        "domain:mci.ir",
-        "domain:irancell.ir",
-        "domain:rightel.ir",
-        "domain:shatel.ir",
-        "domain:parsonline.net",
-        "domain:hiweb.ir",
-        "domain:iranserver.com",
-        "domain:hostiran.net",
-        "domain:nepton.ir",
-        "domain:mizbanplus.ir",
-        "domain:dnsir.ir",
-        "domain:nic.ir",
-        "domain:irnic.ir",
-        "domain:samandehi.ir",
-        "domain:enamad.ir",
-    )
-
     /**
      * Sign-in, store, matchmaking and content hosts of the big games. A game's own servers are
      * usually reached by address rather than by name, so these rules carry the parts that can be
@@ -382,86 +271,30 @@ object GamingMode {
         .toList()
 
     /**
-     * The names and addresses of this country, sent out on the phone's own line.
-     *
-     * Built in one place so the decision can be read and tested: a name ending in
-     * `.ir` is Iranian by definition, and so is anything on a list of names this
-     * country serves. It is never null: the ending is enough on its own, and a
-     * rule that disappears when a list is missing sends the country's own sites
-     * out through the tunnel.
-     */
-    internal fun iranianRule(): RulesetItem {
-        // The rule is built even when no list could be read. It used to depend on
-        // the bundled names, and with nothing read there was no rule at all — so
-        // a phone whose assets could not be opened tunnelled every Iranian site,
-        // which is the wrong way round: the ending alone is a complete statement.
-        return RulesetItem(
-            remarks = IRAN_RULE,
-            outboundTag = AppConfig.TAG_DIRECT,
-            // The names bundled with the app, then the core's own list of
-            // Iranian names, which is the wider of the two; and the Iranian
-            // addresses as well, because a site of this country that keeps
-            // its name abroad still lives on an address at home.
-            domain = (
-                // The broadest statement first: any name of this country is a
-                // name of this country, whether or not a list has heard of it.
-                IRAN_ENDINGS + IRAN_OTHER_NAMES + IRAN_CDN_DOMAINS +
-                    iranDomains + coreIranNames() + SiteLists.homeDomains()
-                ).distinct(),
-            ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses()).distinct(),
-        )
-    }
-
-    /** What the Iranian rule is called in the list the screen shows. */
-    const val IRAN_RULE = "Iranian sites on the phone's own line"
-
-    /**
      * The rules the core must use right now: the mode's when it is on, the user's otherwise.
      *
-     * Adverts and Iranian sites are added in front of either set, because they are not a mode:
-     * an advert is never wanted, and an Iranian site must not arrive from a foreign address
-     * whether the owner is gaming or not.
+     * Adverts are put in front of either set, because they are not a mode: an advert is never
+     * wanted, whether the owner is gaming or not.
      */
     fun effectiveRulesets(): MutableList<RulesetItem>? {
         val base: List<RulesetItem> = if (isEnabled()) {
             rulesets(extraDomains(), bundledSites, gameExit())
         } else {
-            // No ruleset of their own: the phone that builds the tunnel is not
-            // always the one that was opened, and a null answer here used to
-            // take the adverts and this country's sites with it — nothing was
-            // then written at all, and everything left through the tunnel, which
-            // is how a site at home came to be answered from abroad. The rules
-            // that always apply are applied, and what they do not name leaves as
-            // it always has.
             MmkvManager.decodeRoutingRulesets().orEmpty()
         }
-        val iranian = iranianRule()
-        if (!isEnabled()) {
-            val plain = mutableListOf<RulesetItem>()
-            plain += iranian
-            plain += base
-            return plain
-        }
-
-        return ordered(base, iranian)
+        return if (isEnabled()) ordered(base) else withAdverts(base)
     }
 
     /**
-     * Puts the rules in the one order that keeps a site on one line.
+     * The rules in the one order that keeps every connection on one exit.
      *
-     * Three claims can be made about the same name, and whichever rule it reaches
-     * first owns it. The country's own claim is settled first, because a name of
-     * this country is Iranian whether or not a list of filtered services has also
-     * heard of it: if the filtered rule won, one name of a site could leave on the
-     * tunnel and another on the home line, and the site would see two different
-     * addresses — which is exactly the split that showed a foreign address on a
-     * site being visited from here. After that the owner's choice for games, then
-     * the services that can only be answered from outside, then everything else on
-     * the home line.
+     * Adverts are blocked first, because they are never wanted. Then, in the mode's
+     * own order, the games whose line the owner chose, the services that can only
+     * be answered from outside, and everything else.
      *
      * Kept separate from the lists themselves so the order can be read and tested.
      */
-    internal fun ordered(base: List<RulesetItem>, iranian: RulesetItem): MutableList<RulesetItem> {
+    internal fun ordered(base: List<RulesetItem>): MutableList<RulesetItem> {
         val rules = mutableListOf<RulesetItem>()
         if (adDomains.isNotEmpty()) {
             rules += RulesetItem(
@@ -473,27 +306,24 @@ object GamingMode {
         val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
         val games = base.firstOrNull { it.remarks?.startsWith("Gaming: games") == true }
         val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
-
-        // The filtered list comes before the country's own, and this is the whole
-        // of why. Inside the country the name of a filtered site is answered with
-        // a private address — 10.10.34.x — so a rule that matches by address
-        // cannot tell a site this country hosts from one it blocks: both look
-        // local. Whichever rule is reached first decides, and the name is known
-        // before the address is. Put the country first, as this did for a day,
-        // and every blocked site is confidently sent out on the home line to the
-        // filtering page: WhatsApp, Telegram, Proton and the games that never
-        // answer from here all stop opening, while the address itself does not
-        // leak — a leak fixed by breaking access.
-        //
-        // The ordering guarantee is kept, though: a name in this list is answered
-        // from outside whatever the country's lists say about its address, and the
-        // country's own sites still leave on the home line because they are not in
-        // that list. Both properties hold at once; only one of them can be first.
         blockedGames?.let { rules += it }
-        tunnelled?.let { rules += it }
         games?.let { rules += it }
-        rules += iranian
+        tunnelled?.let { rules += it }
         rules += base.filterNot { it === blockedGames || it === games || it === tunnelled }
+        return rules
+    }
+
+    /** The owner's own rules, with adverts blocked in front of them and nothing else added. */
+    private fun withAdverts(base: List<RulesetItem>): MutableList<RulesetItem> {
+        val rules = mutableListOf<RulesetItem>()
+        if (adDomains.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "Adverts and trackers",
+                outboundTag = AppConfig.TAG_BLOCKED,
+                domain = adDomains,
+            )
+        }
+        rules += base
         return rules
     }
 

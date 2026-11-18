@@ -27,7 +27,7 @@ class GamingModeTest {
 
     @Test
     fun listedSitesAreTunnelledAndEverythingElseIsDirect() {
-        val rules = GamingMode.rulesets(listOf("mysite.net"))
+        val rules = GamingMode.rulesets(listOf("mysite.net"), gameExit = GamingMode.EXIT_OWN)
         val tunnelled = rules.first { it.outboundTag == AppConfig.TAG_PROXY && it.domain != null }
         assertTrue("domain:youtube.com" in tunnelled.domain!!)
         assertTrue("domain:openai.com" in tunnelled.domain!!)
@@ -51,7 +51,7 @@ class GamingModeTest {
     fun theBigListIsAddedAsItIsAndBadLinesAreDropped() {
         val parsed = GamingMode.parseSiteList("# note\ndomain:ea.com\n full:api.example.org \nregexp:.*\ndomain:\nbad line\ndomain:a b.com\n")
         assertEquals(listOf("domain:ea.com", "full:api.example.org"), parsed)
-        val tunnelled = GamingMode.rulesets(bundled = parsed).first().domain!!
+        val tunnelled = GamingMode.rulesets(bundled = parsed, gameExit = GamingMode.EXIT_OWN).first().domain!!
         assertTrue("domain:ea.com" in tunnelled)
         assertTrue("full:api.example.org" in tunnelled)
         assertTrue("domain:tunnelbear.com" in tunnelled)
@@ -60,7 +60,7 @@ class GamingModeTest {
 
     @Test
     fun tunnelledSitesAreMatchedBeforeTheLocalNetworkRule() {
-        val rules = GamingMode.rulesets()
+        val rules = GamingMode.rulesets(gameExit = GamingMode.EXIT_OWN)
         val tunnelled = rules.first { it.outboundTag == AppConfig.TAG_PROXY && it.domain != null }
         assertEquals(tunnelled, rules.first())
         assertTrue(rules.indexOfFirst { it.ip == listOf(AppConfig.GEOIP_PRIVATE) } > 0)
@@ -68,7 +68,8 @@ class GamingModeTest {
 
     @Test
     fun telegramIsTunnelledByAddress() {
-        val rule = GamingMode.rulesets().first { it.ip == GamingMode.TELEGRAM_NETWORKS }
+        val rule = GamingMode.rulesets(gameExit = GamingMode.EXIT_OWN)
+            .first { it.ip == GamingMode.TELEGRAM_NETWORKS }
         assertEquals(AppConfig.TAG_PROXY, rule.outboundTag)
     }
 
@@ -82,13 +83,23 @@ class GamingModeTest {
     @Test
     fun withTheConfigExitAddressTheWholeConnectionGoesThroughTheTunnel() {
         val rules = GamingMode.rulesets(gameExit = GamingMode.EXIT_CONFIG)
-        // Only the phone's own network is left outside; everything else leaves through the config,
-        // which is what gives a game the config's exit address.
-        val local = rules.indexOfFirst { it.ip == listOf(AppConfig.GEOIP_PRIVATE) }
-        assertEquals(0, local)
+        // One rule and nothing else: no local-network exception and no games exception, because
+        // either one is a second exit, and a second exit is what an address check notices.
+        assertEquals(1, rules.size)
         assertEquals(AppConfig.TAG_PROXY, rules.last().outboundTag)
         assertEquals("0-65535", rules.last().port)
-        assertTrue(rules.drop(1).all { it.outboundTag == AppConfig.TAG_PROXY })
+        assertNull(rules.last().domain)
+        assertNull(rules.last().ip)
+        assertTrue(rules.all { it.outboundTag == AppConfig.TAG_PROXY })
+    }
+
+    @Test
+    fun theDefaultIsEverythingThroughTheConfig() {
+        // A mode that is switched on without an answer must still keep one exit; the phone's own
+        // line is what "IP ایران" must never fall back to by accident.
+        val rules = GamingMode.rulesets()
+        assertEquals(1, rules.size)
+        assertEquals(AppConfig.TAG_PROXY, rules.single().outboundTag)
     }
 
     @Test
@@ -99,10 +110,11 @@ class GamingModeTest {
 
     @Test
     fun switchingTheModeOffForgetsTheChoice() {
-        // Switching the mode off stores empty text, so the question is asked again.
-        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(""))
-        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit("   "))
+        // Switching the mode off stores empty text, so the question is asked again. Until it is
+        // answered the exit is the config, never the owner's own line.
+        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit(""))
+        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit("   "))
         // A phone that has never answered the question has nothing stored at all.
-        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(null))
+        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit(null))
     }
 }

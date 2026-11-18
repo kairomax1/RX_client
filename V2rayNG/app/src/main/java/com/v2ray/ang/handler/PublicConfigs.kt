@@ -99,6 +99,26 @@ object PublicConfigs {
     private const val ROUND_MIN = 20
 
     /**
+     * How many addresses are measured properly when the cheap check answers nothing.
+     *
+     * On a network that refuses a bare TCP connect, every candidate fails the
+     * cheap check, and measuring the whole batch would mean raising a tunnel for
+     * each of them one after another — hours of a screen that looks stuck. This is
+     * enough to find the ones that work on such a network and small enough that a
+     * round still finishes while the owner is watching.
+     */
+    private const val FALLBACK_MEASURE = 32
+
+    /**
+     * The longest one collection runs before it hands over what it has.
+     *
+     * Every round is real work and a phone can grind for an hour; a number that
+     * is not reached by then is better answered with what did carry than with a
+     * screen that never stops.
+     */
+    private const val MAX_DURATION_MILLIS = 12 * 60 * 1000L
+
+    /**
      * The group a candidate is put in while it is being measured. It is a real
      * group only because a config has to belong to one to be imported; it is not
      * a tab and must never be drawn as one, so [isInternalGroup] answers for it
@@ -170,6 +190,10 @@ object PublicConfigs {
         /** Configs measured by carrying real bytes so far, and how many carried. */
         val verified: Int = 0,
         val carried: Int = 0,
+        /** Which round of looking at the lists this is; 0 before the first. */
+        val round: Int = 0,
+        /** The pool size the round is working from, so a stuck search says so. */
+        val pool: Int = 0,
     )
 
     data class Outcome(val added: Int, val origin: Origin)
@@ -693,12 +717,16 @@ object PublicConfigs {
         var rounds = 0
         var emptyRound = false
         var imported = 0
+        var poolSize = 0
 
         fun report() {
-            onProgress(Progress(origin, found, tried, kept.size, wanted, measured, carried))
+            onProgress(Progress(origin, found, tried, kept.size, wanted, measured, carried, rounds, poolSize))
         }
 
-        while (!cancelled.get() && kept.size < wanted && rounds < MAX_ROUNDS && !emptyRound) {
+        val deadline = System.currentTimeMillis() + MAX_DURATION_MILLIS
+        while (!cancelled.get() && kept.size < wanted && rounds < MAX_ROUNDS && !emptyRound &&
+            System.currentTimeMillis() < deadline
+        ) {
             rounds++
             val lines = if (rounds == 1) {
                 if (origin == Origin.Bundled) context.assets.open(ASSET).bufferedReader().use { it.readLines() }
@@ -711,7 +739,8 @@ object PublicConfigs {
                 next.lines
             }
 
-            val batch = selectFresh(lines, options, seen, rounds)
+            val batch = selectFresh(lines, options, seen)
+            poolSize = select(lines.asSequence(), options.kinds, options.game).size
             if (batch.isEmpty()) {
                 // Nothing in these lists that has not been tried already. The
                 // search is over: what was found is what there is.
@@ -722,25 +751,53 @@ object PublicConfigs {
             report()
 
             val reachable = quickCheck(batch, options, cancelled) { count -> tried += count; report() }
+            // When the cheap check answers nothing — a line that refuses a plain
+            // TCP connect to all of them, which is what a filtered network does —
+            // the batch itself is measured instead of being thrown away. Measuring
+            // is the only test that decides, and it knows how to raise a tunnel
+            // over a transport the bare socket cannot reach.
             val candidates = select(reachable.asSequence().map { it.raw }, options.kinds)
+                .ifEmpty { batch.take(FALLBACK_MEASURE) }
             if (candidates.isEmpty()) continue
 
-            // Measured properly, the only test that decides. Everything that
-            // carried is kept, still running, so the loop can reach the target.
+            // Measured properly, the only test that decides. A config that carried
+            // goes into the group straight away — while the round is still running,
+            // which is what "add them by itself" means to the person watching — and
+            // the counter on the screen moves with the tab, because both are the
+            // same list: only something that really carried is ever counted.
             val carriedNow = runBlocking {
-                verify(context, candidates, wanted - kept.size, options.verify, cancelled) { verified, carriedSoFar ->
+                verify(
+                    context = context,
+                    candidates = candidates,
+                    wanted = wanted - kept.size,
+                    verify = options.verify,
+                    cancelled = cancelled,
+                    deadline = deadline,
+                    onCarried = { link ->
+                        val isNew = synchronized(kept) { keptRaws.add(link.raw).also { if (it) kept += link } }
+                        if (isNew) {
+                            imported += importIntoGroup(context, listOf(link.raw))
+                            report()
+                        }
+                    },
+                ) { verified, carriedSoFar ->
                     measured += verified
                     carried += carriedSoFar
                     report()
                 }
             }
-            // Each round's proven configs are imported together, so the group
-            // grows while the search is still running — which is what "add them by
-            // itself when it reaches the number" means to the person watching.
-            val fresh = carriedNow.filter { keptRaws.add(it.first.raw) }.map { it.first }
-            kept += fresh
-            imported += importIntoGroup(context, fresh.map { it.raw })
+            // The callback above already put them in; this is only the count the
+            // round settled on, for the log.
+            val fresh = carriedNow.filter { it.first.raw in keptRaws }.map { it.first }
             report()
+            if (fresh.isEmpty() && kept.isEmpty()) {
+                // A whole round measured and nothing carried. Nothing is added and
+                // the screen says so rather than raising a number for nothing.
+                AppLog.info(
+                    AppLog.Section.Other,
+                    "Public configs: round $rounds measured ${candidates.size} and none carried",
+                )
+            }
         }
 
         if (kept.isEmpty()) {
@@ -761,8 +818,9 @@ object PublicConfigs {
         setFresh(false)
         AppLog.info(
             AppLog.Section.Other,
-            "Public configs: $imported of the $wanted asked for after $rounds round(s), " +
-                "$tried tried, $measured measured, each made to carry real bytes here",
+            "Public configs: $imported of the $wanted asked for after $rounds round(s). " +
+                "The pool had $poolSize; $tried were checked, $measured were measured by " +
+                "carrying real bytes on this line, and each one in the group did carry",
         )
         return Outcome(imported, origin)
     }
@@ -778,16 +836,28 @@ object PublicConfigs {
         lines: List<String>,
         options: Options,
         seen: HashSet<String>,
-        round: Int,
     ): List<Link> {
-        val all = select(lines.asSequence(), options.kinds, options.game, seen)
-        if (all.isEmpty()) return all
+        // `select` records every link it looks at in `seen`, whether or not it is
+        // taken. That was the fault behind the screen that said "0 of 0" and then
+        // sat still: the first round marked the whole pool as already tried, so the
+        // second round found nothing, the loop ended, and nothing had been measured
+        // at all. Here the pool is selected from on every round and only the batch
+        // that is actually handed out is marked, so the next round still has the
+        // rest to work with.
+        val all = select(lines.asSequence(), options.kinds, options.game)
+            .filterNot { it.raw in seen }
+        if (all.isEmpty()) return emptyList()
         // How many to take this round: enough that a round is worth the tunnel it
-        // raises, and growing, since the pool that works is small.
+        // raises, since the addresses that work are a small share of the pool.
         val size = (options.count.coerceIn(1, MAX_COUNT) * CANDIDATES_PER_WANTED)
             .coerceIn(ROUND_MIN, CANDIDATES_CEILING)
-        val offset = ((round - 1) * size) % all.size
-        return all.subList(offset, minOf(offset + size, all.size))
+        // `all` already holds only what has not been handed out, so the head of it
+        // is always new work. Taking a slice at a rotating offset used to skip
+        // links once the list shrank, because the offset was measured against a
+        // pool that was no longer the same size.
+        val batch = all.take(size)
+        batch.forEach { seen.add(it.raw) }
+        return batch
     }
 
     /**
@@ -845,9 +915,16 @@ object PublicConfigs {
         wanted: Int,
         verify: Boolean,
         cancelled: AtomicBoolean,
+        deadline: Long = Long.MAX_VALUE,
+        onCarried: (Link) -> Unit = {},
         onProgress: (verified: Int, carried: Int) -> Unit,
     ): List<Pair<Link, Int>> = coroutineScope {
-        if (!verify) return@coroutineScope candidates.take(wanted).map { it to 0 }
+        if (!verify) {
+            // No tunnel can be raised here (a test, a build machine). Nothing is
+            // claimed as measured; the candidates are handed over as they are so
+            // the caller's own accounting still works.
+            return@coroutineScope candidates.take(wanted).map { it to 0 }
+        }
         val gate = Semaphore(VERIFY_AT_ONCE)
         val carried = java.util.Collections.synchronizedList(mutableListOf<Pair<Link, Int>>())
         val done = java.util.concurrent.atomic.AtomicInteger(0)
@@ -862,7 +939,12 @@ object PublicConfigs {
                 // instead of taking a permit only to return it.
                 if (cancelled.get() || carried.size >= wanted) return@async
                 gate.withPermit {
-                    if (cancelled.get() || carried.size >= wanted) return@withPermit
+                    // The deadline is checked here as well as between rounds: one
+                    // candidate can take eighteen seconds, and a round must not run
+                    // for an hour past the moment the work was meant to stop.
+                    if (cancelled.get() || carried.size >= wanted || System.currentTimeMillis() >= deadline) {
+                        return@withPermit
+                    }
                     val speed = oneAtATime.withLock { speedOf(context, link) }
                     done.incrementAndGet()
                     if (speed > 0) {
@@ -871,6 +953,9 @@ object PublicConfigs {
                             AppLog.Section.Other,
                             "Public configs: ${link.kind.name} ${link.host} carried ${speed / 1000} kbit/s here",
                         )
+                        // Into the tab the moment it is proven, not at the end of the
+                        // round: the one watching is meant to see the list grow.
+                        onCarried(link)
                     }
                     onProgress(done.get(), carried.size)
                 }

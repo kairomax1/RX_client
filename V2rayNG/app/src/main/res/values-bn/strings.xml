@@ -489,7 +489,6 @@
     <string name="routing_preset_china_whitelist">চায়না হোয়াইটলিস্ট</string>
     <string name="routing_preset_china_blacklist">চায়না ব্ল্যাকলিস্ট</string>
     <string name="routing_preset_global">গ্লোবাল</string>
-    <string name="routing_preset_iran_whitelist">ইরান হোয়াইটলিস্ট</string>
     <string name="routing_preset_russia_whitelist">রাশিয়া হোয়াইটলিস্ট</string>
 
     <string-array name="vpn_bypass_lan">

@@ -269,8 +269,8 @@ Nine items, delivered together.
 
 - Big site list: `assets/rx_dns_mode_sites.txt` (~6,800 entries) generated from
   v2fly/domain-list-community (MIT, commit 777d056): VPN/anti-censorship services, Google,
-  social, communication, AI, dev, media, entertainment, crypto, game publishers. Iranian sites,
-  IP-check and speed-test sites are removed so they stay direct. Adult sites are not included.
+  social, communication, AI, dev, media, entertainment, crypto, game publishers. IP-check and speed-test sites are removed. Adult
+  sites are not included.
   Loaded lazily by `DnsMode.bundledSites`; the short Kotlin lists remain as the fallback.
 - Top bar: ping button = `MainAction.PingAndSortAll` (the automatic test over every config:
   ping, badges, sort by ping).

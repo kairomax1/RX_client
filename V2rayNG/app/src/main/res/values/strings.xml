@@ -492,7 +492,6 @@
     <string name="routing_preset_china_whitelist">China Whitelist</string>
     <string name="routing_preset_china_blacklist">China Blacklist</string>
     <string name="routing_preset_global">Global</string>
-    <string name="routing_preset_iran_whitelist">Iran Whitelist</string>
     <string name="routing_preset_russia_whitelist">Russia Whitelist</string>
 
     <string-array name="vpn_bypass_lan">
@@ -784,7 +783,7 @@
     <string name="update_install_permission">Allow RX VPN to install apps, then try again</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
     <string name="gaming_title">Gaming mode</string>
-    <string name="gaming_about">Only what needs the tunnel uses it. Games leave by the exit you choose, adverts are blocked, and Iranian sites open on your own line \u2014 the way a bank expects to see you.</string>
+    <string name="gaming_about">Everything goes through your config \u2014 nothing goes out directly \u2014 so every site, app and game sees the config\'s address and only that. Adverts are blocked.</string>
     <string name="gaming_state_on">On</string>
     <string name="gaming_state_off">Off</string>
     <string name="gaming_turn_on">Turn it on</string>
@@ -909,7 +908,7 @@
     <string name="public_count_exact">Type a number:</string>
     <string name="public_start">Get configs</string>
     <string name="public_step_fetch">Getting the lists…</string>
-    <string name="public_step_try">%1$d of %2$d ready — %3$d tried</string>
+    <string name="public_step_try">%1$d of %2$d ready — %3$d really tested</string>
     <string name="public_reached">%1$d of %2$d ready and added to the list</string>
     <string name="public_short">Only %1$d of %2$d could be found; the rest of the pool did not answer on your connection</string>
     <string name="public_step_round">Round %1$d: %2$d of %3$d ready</string>

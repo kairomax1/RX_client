@@ -487,7 +487,6 @@
     <string name="routing_preset_china_whitelist">绕过大陆 (Whitelist)</string>
     <string name="routing_preset_china_blacklist">黑名单 (Blacklist)</string>
     <string name="routing_preset_global">全局 (Global)</string>
-    <string name="routing_preset_iran_whitelist">伊朗 (Iran)</string>
     <string name="routing_preset_russia_whitelist">俄罗斯白名单 (Russia Whitelist)</string>
 
     <string-array name="vpn_bypass_lan">

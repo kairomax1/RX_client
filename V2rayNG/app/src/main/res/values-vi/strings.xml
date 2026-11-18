@@ -487,7 +487,6 @@
     <string name="routing_preset_china_whitelist">Danh sách trắng Trung Quốc</string>
     <string name="routing_preset_china_blacklist">Danh sách đen Trung Quốc</string>
     <string name="routing_preset_global">Toàn cầu</string>
-    <string name="routing_preset_iran_whitelist">Danh sách trắng Iran</string>
     <string name="routing_preset_russia_whitelist">Danh sách trắng Nga</string>
 
     <string-array name="vpn_bypass_lan">

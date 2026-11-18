@@ -49,8 +49,8 @@ data class GamingModeUiState(
     val vpnUp: Boolean = false,
     /** A proxy password is set; consoles cannot enter one. */
     val needsPassword: Boolean = false,
-    /** Where games leave from: the phone's own line, or the config's exit address. */
-    val gameExit: String = GamingMode.EXIT_OWN,
+    /** Where games leave from: the config's exit address, or the phone's own line. */
+    val gameExit: String = GamingMode.EXIT_CONFIG,
     /** This build carries the Aether engine, so connecting without a config is possible. */
     val aetherAvailable: Boolean = false,
 )

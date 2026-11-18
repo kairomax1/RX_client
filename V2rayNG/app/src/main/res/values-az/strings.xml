@@ -489,7 +489,6 @@
     <string name="routing_preset_china_whitelist">Çin Ağ Siyahısı</string>
     <string name="routing_preset_china_blacklist">Çin Qara Siyahısı</string>
     <string name="routing_preset_global">Qlobal</string>
-    <string name="routing_preset_iran_whitelist">İran Ağ Siyahısı</string>
     <string name="routing_preset_russia_whitelist">Rusiya Ağ Siyahısı</string>
 
     <string-array name="vpn_bypass_lan">

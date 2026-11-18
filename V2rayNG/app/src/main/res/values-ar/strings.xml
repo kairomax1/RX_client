@@ -497,7 +497,6 @@
     <string name="routing_preset_china_whitelist">القائمة البيضاء للصين</string>
     <string name="routing_preset_china_blacklist">القائمة السوداء للصين</string>
     <string name="routing_preset_global">عالمي</string>
-    <string name="routing_preset_iran_whitelist">القائمة البيضاء لإيران</string>
     <string name="routing_preset_russia_whitelist">القائمة البيضاء لروسيا</string>
 
     <string-array name="vpn_bypass_lan">

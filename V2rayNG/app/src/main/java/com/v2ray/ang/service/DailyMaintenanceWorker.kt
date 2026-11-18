@@ -67,10 +67,12 @@ class DailyMaintenanceWorker(
         runCatching { com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext) }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
 
-        runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
-        // The names of the sites at home and the addresses announced from it, every second day.
-        runCatching { com.v2ray.ang.handler.SiteLists.refreshHomeIfDue() }
-            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+        // Only when there is a line to fetch it over: offline, the request would sit
+        // on its timeout and hold up everything after it.
+        if (isOnline()) {
+            runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+        }
 
         runCatching { repairCloudflareConfig() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Cloudflare repair failed", it) }

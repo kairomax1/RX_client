@@ -246,11 +246,16 @@ private fun PublicConfigsScreen(
                         progress?.origin == null -> stringResource(R.string.public_step_fetch)
                         // Read the way the question is asked: what I have, out of
                         // what I asked for, with how much work it took after it.
+                        // The third figure is the work that decides: a config only
+                        // counts once a tunnel was raised over it and it carried
+                        // real bytes. The pool was looked at far more often than
+                        // that, and counting that would be raising a number for
+                        // work that proved nothing.
                         else -> stringResource(
                             R.string.public_step_try,
                             progress.reachable,
                             wanted,
-                            progress.tried,
+                            progress.verified,
                         )
                     }
                     Text(text, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
