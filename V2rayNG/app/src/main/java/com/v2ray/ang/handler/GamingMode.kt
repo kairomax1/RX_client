@@ -90,11 +90,22 @@ object GamingMode {
     fun isEnabled(): Boolean = MmkvManager.decodeSettingsBool(PREF_ENABLED, false)
 
     fun setEnabled(enabled: Boolean) {
-        AppLog.info(AppLog.Section.GamingMode, if (enabled) "Gaming mode switched on" else "Gaming mode switched off")
+        AppLog.info(
+            AppLog.Section.GamingMode,
+            when {
+                !enabled -> "Gaming mode switched off"
+                // Said out loud, because the whole promise of the mode is this one
+                // sentence and the owner has to be able to check it in her own log.
+                chosenExit(MmkvManager.decodeSettingsString(PREF_GAME_EXIT)) == EXIT_CONFIG ->
+                    "Gaming mode switched on: every name, address and game through the config, nothing direct"
+                else -> "Gaming mode switched on: games on the phone's own line"
+            },
+        )
         MmkvManager.encodeSettings(PREF_ENABLED, enabled)
-        // Switching the mode off also forgets where games were leaving from: the
-        // question is asked again the next time it is switched on, and no answer
-        // is carried over into another session.
+        // Switching the mode off also forgets where games were leaving from, so an
+        // answer given once is never carried silently into another session. With
+        // nothing stored the mode answers to the config, which is the one answer
+        // that opens everything.
         if (!enabled) MmkvManager.encodeSettings(PREF_GAME_EXIT, "")
     }
 
@@ -134,10 +145,13 @@ object GamingMode {
     /**
      * The routing rules of the mode, in matching order.
      *
-     * With [EXIT_OWN] the phone's own line carries everything that does not need the tunnel,
-     * which is what keeps a game's ping at the line's own figure: only filtered and sanctioned
-     * sites are tunnelled. With [EXIT_CONFIG] the whole connection goes through the config and
-     * nothing is left outside, so a game sees the config's exit address and only that.
+     * With [EXIT_CONFIG] — "IP ایران", the default — the whole connection goes through the
+     * config: every name, every address, every port, nothing left outside. Filtered sites,
+     * sanctioned services and games are all carried by the same rule, so they all open and they
+     * all see one address. The phone's own line is never used for anything but the two things
+     * that cannot use a tunnel at all: the connection that carries the tunnel itself, and the
+     * two name servers the phone talks to directly. With [EXIT_OWN] only filtered and sanctioned
+     * sites are tunnelled and everything else leaves on the phone's own line.
      */
     fun rulesets(
         extra: List<String> = emptyList(),
@@ -165,14 +179,28 @@ object GamingMode {
         }
 
         if (gameExit == EXIT_CONFIG) {
-            // One rule and nothing else. Everything — by name and by bare address —
-            // goes through the config, so every site and every game server sees the
-            // config's address and no other. There is deliberately no rule after
-            // this one that sends anything out directly: a "local network" exception
-            // or a games exception would be a second exit, and a second exit is
-            // what an address check notices. A game keeps working because its
-            // traffic is tunnelled like everything else, not because it is exempt.
+            // Two rules, and neither of them is a way out.
+            //
+            // The first drops the quarrels of a QUIC handshake. Chrome apps — YouTube, the Play
+            // Store, Maps — and every game that speaks QUIC start on UDP 443. A tunnel carries
+            // TCP and its own UDP; a UDP 443 that is neither of those leaves the phone and is
+            // answered, or not, by the network here, and what the app sees is a site that half
+            // loads. Dropping it makes the app fall back to TCP at once, inside the tunnel — the
+            // same thing every browser does when QUIC is unavailable — so the site opens.
+            //
+            // The second is the whole connection: every name, every bare address, every port,
+            // through the config. There is deliberately nothing after it that sends anything
+            // out directly: a "local network" exception or a games exception would be a second
+            // exit, and a second exit is exactly what an address or sanction check notices. A
+            // blocked game opens because its traffic is tunnelled like everything else, not
+            // because it is exempt.
             return mutableListOf(
+                RulesetItem(
+                    remarks = "Gaming: QUIC on UDP 443 dropped so it falls back into the tunnel",
+                    outboundTag = AppConfig.TAG_BLOCKED,
+                    network = "udp",
+                    port = "443",
+                ),
                 RulesetItem(
                     remarks = "Gaming: everything through the config",
                     outboundTag = AppConfig.TAG_PROXY,

@@ -40,7 +40,7 @@ import com.v2ray.ang.ui.compose.RxPromptSubject
 import com.v2ray.ang.ui.compose.RxPromptTone
 import com.v2ray.ang.ui.compose.RxRisingNote
 
-private enum class GamingPage { Main, AskExit, Sharing }
+private enum class GamingPage { Main, Sharing }
 
 /** How long sharing may run, in minutes; 0 is "until it is switched off". */
 val SHARING_TIMES = listOf(0, 30, 120, 480)
@@ -125,29 +125,21 @@ fun MainGamingModeCard(
                 )
                 if (state.enabled) {
                     Spacer(Modifier.height(8.dp))
-                    CardNote(
-                        stringResource(
-                            R.string.gaming_ip_current,
-                            stringResource(
-                                if (state.gameExit == GamingMode.EXIT_CONFIG) R.string.gaming_ip_config_short
-                                else R.string.gaming_ip_own_short
-                            )
-                        )
-                    )
+                    CardNote(stringResource(R.string.gaming_ip_current))
                 }
                 RxPromptButtons {
                     RxPromptButton(
                         text = stringResource(if (state.enabled) R.string.gaming_turn_off else R.string.gaming_turn_on),
                         tone = if (state.enabled) RxPromptTone.Ghost else RxPromptTone.Silver,
                         onClick = {
-                            if (state.enabled) {
-                                onSetEnabled(false)
-                                onChanged()
-                            } else {
-                                // The right answer depends on which game is about
-                                // to be played, so it is asked every time.
-                                page = GamingPage.AskExit
-                            }
+                            // One question fewer. There used to be a choice of
+                            // where games leave from, and "my own internet" put the
+                            // owner's own address on everything that then failed to
+                            // open. The mode has one answer now — the config carries
+                            // everything — so it is switched on and that is that.
+                            if (!state.enabled) onSetGameExit(GamingMode.EXIT_CONFIG)
+                            onSetEnabled(!state.enabled)
+                            onChanged()
                         },
                         modifier = fullWidth,
                     )
@@ -175,16 +167,6 @@ fun MainGamingModeCard(
                 }
             }
 
-            GamingPage.AskExit -> AskExitPage(
-                onPick = { exit ->
-                    onSetGameExit(exit)
-                    onSetEnabled(true)
-                    onChanged()
-                    page = GamingPage.Main
-                },
-                onBack = { page = GamingPage.Main },
-            )
-
             GamingPage.Sharing -> SharingPage(
                 state = state.sharingCardState(),
                 note = { text ->
@@ -199,47 +181,6 @@ fun MainGamingModeCard(
                 onBack = { page = GamingPage.Main },
             )
         }
-    }
-}
-
-/**
- * The question asked each time the mode is switched on: where the games leave
- * from. Both answers are written out, because the difference is not obvious
- * from the two names alone.
- */
-@Composable
-private fun AskExitPage(
-    onPick: (String) -> Unit,
-    onBack: () -> Unit,
-) {
-    val fullWidth = Modifier.fillMaxWidth()
-    RxPromptMessage(stringResource(R.string.gaming_ip_ask), fontSize = 20)
-    Spacer(Modifier.height(14.dp))
-    RxPromptButtons {
-        RxPromptButton(
-            text = stringResource(R.string.gaming_ip_own),
-            tone = RxPromptTone.Silver,
-            onClick = { onPick(GamingMode.EXIT_OWN) },
-            modifier = fullWidth,
-        )
-        CardNote(stringResource(R.string.gaming_ip_own_note))
-        Spacer(Modifier.height(14.dp))
-        RxPromptButton(
-            text = stringResource(R.string.gaming_ip_config),
-            tone = RxPromptTone.Silver,
-            onClick = { onPick(GamingMode.EXIT_CONFIG) },
-            modifier = fullWidth,
-            order = 1,
-        )
-        CardNote(stringResource(R.string.gaming_ip_config_note))
-        Spacer(Modifier.height(10.dp))
-        RxPromptButton(
-            text = stringResource(R.string.gaming_back),
-            tone = RxPromptTone.Ghost,
-            onClick = onBack,
-            modifier = fullWidth,
-            order = 2,
-        )
     }
 }
 

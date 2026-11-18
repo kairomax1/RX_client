@@ -678,14 +678,7 @@
     <string name="gaming_back">برگرد</string>
     <string name="acc_ping_sort">پینگ همهٔ کانفیگ‌ها و مرتب‌سازی از کم به زیاد</string>
     <string name="gaming_use_aether">کانفیگ ندارم؛ با Aether وصل شو</string>
-    <string name="gaming_ip_ask">بازی‌ها از کدام آی‌پی وصل بشن؟</string>
-    <string name="gaming_ip_own">آی‌پی اینترنت خودم</string>
-    <string name="gaming_ip_config">آی‌پی خروجِ کانفیگ</string>
-    <string name="gaming_ip_own_note">بازی مستقیم با اینترنت خودت وصل می‌شه: کمترین پینگ، و بازی آی‌پی خودت رو می‌بینه. برای بازی‌هایی که فیلتر نیستن بهترین انتخابه.</string>
-    <string name="gaming_ip_config_note">بازی از تونل رد می‌شه و با آی‌پیِ خروجِ کانفیگ بیرون می‌ره: برای بازی‌های فیلترشده، یا وقتی لازم است جای دیگری باشی. پینگ کمی بیشتر می‌شه.</string>
-    <string name="gaming_ip_current">خروجِ بازی‌ها الآن: %1$s</string>
-    <string name="gaming_ip_own_short">اینترنت خودت</string>
-    <string name="gaming_ip_config_short">خروجِ کانفیگ</string>
+    <string name="gaming_ip_current">همه چیز از کانفیگ می‌رود: هر سایت، هر برنامه و هر بازی که فیلتر یا تحریم است هم باز می‌شود. هیچ چیز مستقیم نمی‌رود، برای همین آی‌پیِ اینترنت خودت هیچ‌جا دیده نمی‌شود.</string>
     <string name="gaming_aether_note">Aether داره راه پیدا می‌کنه؛ ممکنه تا یک دقیقه طول بکشه</string>
     <string name="notification_channel_sharing">شیرینگ</string>
     <string name="notification_channel_sharing_ask">دستگاهی می‌خواهد وصل شود</string>

@@ -83,14 +83,25 @@ class GamingModeTest {
     @Test
     fun withTheConfigExitAddressTheWholeConnectionGoesThroughTheTunnel() {
         val rules = GamingMode.rulesets(gameExit = GamingMode.EXIT_CONFIG)
-        // One rule and nothing else: no local-network exception and no games exception, because
-        // either one is a second exit, and a second exit is what an address check notices.
-        assertEquals(1, rules.size)
-        assertEquals(AppConfig.TAG_PROXY, rules.last().outboundTag)
-        assertEquals("0-65535", rules.last().port)
-        assertNull(rules.last().domain)
-        assertNull(rules.last().ip)
-        assertTrue(rules.all { it.outboundTag == AppConfig.TAG_PROXY })
+        // The last rule carries the whole connection: every name, every bare address, every port.
+        // Nothing after it sends anything out directly — no local-network exception and no games
+        // exception — because either one is a second exit, and a second exit is what an address
+        // check notices.
+        val all = rules.last()
+        assertEquals(AppConfig.TAG_PROXY, all.outboundTag)
+        assertEquals("0-65535", all.port)
+        assertNull(all.domain)
+        assertNull(all.ip)
+        // The only other rule is not a way out: it drops QUIC on UDP 443 so the app falls back to
+        // TCP inside the tunnel instead of half loading over a UDP nobody carries.
+        assertEquals(2, rules.size)
+        assertEquals(AppConfig.TAG_BLOCKED, rules.first().outboundTag)
+        assertEquals("udp", rules.first().network)
+        assertEquals("443", rules.first().port)
+        assertNull(rules.first().domain)
+        assertNull(rules.first().ip)
+        // Nothing is sent out directly under any name or address.
+        assertTrue(rules.none { it.outboundTag == AppConfig.TAG_DIRECT })
     }
 
     @Test
@@ -98,8 +109,9 @@ class GamingModeTest {
         // A mode that is switched on without an answer must still keep one exit; the phone's own
         // line is what "IP ایران" must never fall back to by accident.
         val rules = GamingMode.rulesets()
-        assertEquals(1, rules.size)
-        assertEquals(AppConfig.TAG_PROXY, rules.single().outboundTag)
+        assertEquals(AppConfig.TAG_PROXY, rules.last().outboundTag)
+        assertEquals("0-65535", rules.last().port)
+        assertTrue(rules.none { it.outboundTag == AppConfig.TAG_DIRECT })
     }
 
     @Test

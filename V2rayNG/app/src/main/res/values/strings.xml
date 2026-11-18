@@ -791,14 +791,7 @@
     <string name="gaming_back">Back</string>
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
     <string name="gaming_use_aether">I have no config; connect with Aether</string>
-    <string name="gaming_ip_ask">Where should the games connect from?</string>
-    <string name="gaming_ip_own">My own internet IP</string>
-    <string name="gaming_ip_config">The config\'s exit IP</string>
-    <string name="gaming_ip_own_note">The game connects straight out on your own line: the lowest ping, and the game sees your own address. Best for games that are not filtered.</string>
-    <string name="gaming_ip_config_note">The game goes through the tunnel and leaves at the config\'s address: for games that are filtered, or that need to be somewhere else. The ping is a little higher.</string>
-    <string name="gaming_ip_current">Games now leave from: %1$s</string>
-    <string name="gaming_ip_own_short">your own internet</string>
-    <string name="gaming_ip_config_short">the config\'s exit</string>
+    <string name="gaming_ip_current">Everything goes through the config: every site, app and game opens, including the ones that are filtered or sanctioned. Nothing goes out directly, so your own address is never seen.</string>
     <string name="gaming_aether_note">Aether is finding a route; this can take up to a minute</string>
     <string name="notification_channel_sharing">Sharing</string>
     <string name="notification_channel_sharing_ask">A device asks to connect</string>
