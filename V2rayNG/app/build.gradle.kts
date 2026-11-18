@@ -96,9 +96,15 @@ android {
 
     packaging {
         jniLibs {
-            // Compressed, extract-at-install native libraries. The alternative (uncompressed, mapped
-            // straight out of the APK) is refused by some device installers as an invalid package.
-            useLegacyPackaging = true
+            // Uncompressed, mapped straight out of the APK.
+            //
+            // The old comment here said the opposite and was wrong. Compressed libraries are the
+            // shape that produces "the package appears to be invalid" on install: a device must
+            // then extract them at install time into the app's own storage, and when that step
+            // does not fit the install transaction the installer refuses the whole package.
+            // Uncompressed is what Android has shipped native libraries in since 2010 and the
+            // only packaging every installer accepts. Nothing in this app needs them on disk.
+            useLegacyPackaging = false
         }
     }
 
@@ -195,12 +201,6 @@ android {
             "bn",
             "bqi-rIR"
         )
-    }
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
     }
 
     testOptions {
