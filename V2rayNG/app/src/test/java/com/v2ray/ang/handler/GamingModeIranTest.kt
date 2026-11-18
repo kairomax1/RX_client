@@ -14,9 +14,7 @@ import org.junit.jupiter.api.Test
  */
 class GamingModeIranTest {
 
-    private fun iranianRule() = GamingMode.rulesets().firstOrNull {
-        it.remarks == "Iranian sites on the phone's own line"
-    }
+    private fun iranianRule() = GamingMode.iranianRule()
 
     @Test
     fun everyNameOfThisCountryGoesOutOnTheHomeLine() {
@@ -39,7 +37,7 @@ class GamingModeIranTest {
     @Test
     fun anIranianNameIsSettledBeforeTheTunnelledListIsConsulted() {
         val rules = GamingMode.rulesets()
-        val iranianAt = rules.indexOfFirst { it.remarks == "Iranian sites on the phone's own line" }
+        val iranianAt = rules.indexOfFirst { it.remarks == GamingMode.IRAN_RULE }
         // The rule that carries the filtered and restricted lists, whichever words
         // it happens to use: it is the one that sends a name out on the tunnel.
         val tunnelledAt = rules.indexOfFirst { it.remarks?.contains("filtered and restricted") == true }
@@ -54,7 +52,7 @@ class GamingModeIranTest {
     fun advertsAreStillBlockedBeforeEither() {
         val rules = GamingMode.rulesets()
         val adAt = rules.indexOfFirst { it.outboundTag == AppConfig.TAG_BLOCKED }
-        val iranianAt = rules.indexOfFirst { it.remarks == "Iranian sites on the phone's own line" }
-        if (adAt >= 0) assertTrue(adAt < iranianAt)
+        val iranianAt = rules.indexOfFirst { it.remarks == GamingMode.IRAN_RULE }
+        if (adAt >= 0 && iranianAt >= 0) assertTrue(adAt < iranianAt)
     }
 }

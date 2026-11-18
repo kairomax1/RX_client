@@ -379,6 +379,37 @@ object GamingMode {
         .toList()
 
     /**
+     * The names and addresses of this country, sent out on the phone's own line.
+     *
+     * Built in one place so the decision can be read and tested: a name ending in
+     * `.ir` is Iranian by definition, and so is anything on a list of names this
+     * country serves. Null when no list of them could be read at all, in which
+     * case nothing is claimed rather than everything.
+     */
+    internal fun iranianRule(): RulesetItem? = if (iranDomains.isNotEmpty()) {
+        RulesetItem(
+            remarks = IRAN_RULE,
+            outboundTag = AppConfig.TAG_DIRECT,
+            // The names bundled with the app, then the core's own list of
+            // Iranian names, which is the wider of the two; and the Iranian
+            // addresses as well, because a site of this country that keeps
+            // its name abroad still lives on an address at home.
+            domain = (
+                // The broadest statement first: any name of this country is a
+                // name of this country, whether or not a list has heard of it.
+                IRAN_ENDINGS + IRAN_OTHER_NAMES + IRAN_CDN_DOMAINS +
+                    iranDomains + coreIranNames() + SiteLists.homeDomains()
+                ).distinct(),
+            ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses()).distinct(),
+        )
+    } else {
+        null
+    }
+
+    /** What the Iranian rule is called in the list the screen shows. */
+    const val IRAN_RULE = "Iranian sites on the phone's own line"
+
+    /**
      * The rules the core must use right now: the mode's when it is on, the user's otherwise.
      *
      * Adverts and Iranian sites are added in front of either set, because they are not a mode:
@@ -398,28 +429,7 @@ object GamingMode {
             // it always has.
             MmkvManager.decodeRoutingRulesets().orEmpty()
         }
-        // The names of this country, on the phone's own line.
-        val iranian = if (iranDomains.isNotEmpty()) {
-            RulesetItem(
-                remarks = "Iranian sites on the phone's own line",
-                outboundTag = AppConfig.TAG_DIRECT,
-                // The names bundled with the app, then the core's own list of
-                // Iranian names, which is the wider of the two; and the Iranian
-                // addresses as well, because a site of this country that keeps
-                // its name abroad still lives on an address at home.
-                domain = (
-                    // The broadest statement first: any name of this country is a
-                    // name of this country, whether or not a list has heard of it.
-                    IRAN_ENDINGS + IRAN_OTHER_NAMES + IRAN_CDN_DOMAINS +
-                        iranDomains + coreIranNames() + SiteLists.homeDomains()
-                    ).distinct(),
-                ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses())
-                    .distinct(),
-            )
-        } else {
-            null
-        }
-
+        val iranian = iranianRule()
         if (!isEnabled()) {
             val plain = mutableListOf<RulesetItem>()
             iranian?.let { plain += it }
