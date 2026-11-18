@@ -456,8 +456,20 @@ object SettingsManager {
      * Get the VPN MTU from settings, defaulting to AppConfig.VPN_MTU.
      */
     fun getVpnMtu(): Int {
-        return Utils.parseInt(MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_MTU), AppConfig.VPN_MTU)
+        val stored = MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_MTU)
+        // In gaming mode the tunnel is tuned for latency, and 1500 is the wrong
+        // number for a mobile line: the tunnel wraps every packet in its own
+        // header, so a 1500-byte packet does not fit the line's real limit and is
+        // split on the way out. Splitting costs a second round of sending for one
+        // packet — which a game feels far more than a download does. 1280 is the
+        // largest size every network in the world is required to carry, so nothing
+        // is split; the number is only lowered when she has not chosen one herself.
+        if (GamingMode.isEnabled() && stored.isNullOrBlank()) return GAMING_MTU
+        return Utils.parseInt(stored, AppConfig.VPN_MTU)
     }
+
+    /** The tunnel's packet size in gaming mode: the largest every network must carry. */
+    private const val GAMING_MTU = 1280
 
     /**
      * Check if HEV TUN is being used.

@@ -568,6 +568,18 @@ object CoreConfigManager {
         if (!sniffAllTlsAndHttp) {
             inbound1.sniffing?.destOverride?.clear()
         }
+        if (sniffAllTlsAndHttp) {
+            // What the core is told to read out of every connection. `http` and
+            // `tls` are what the rules match on and cost nothing worth measuring;
+            // `quic` makes the core reassemble and parse QUIC headers for every
+            // UDP 443 flow, which is a per-packet cost on the same CPU that is
+            // carrying a game. The template lists all three, and in this mode the
+            // third buys nothing: a UDP 443 flow is dropped outright by the rules,
+            // so there is no name to read from it. Leaving it out is the cheapest
+            // real speed there is in this mode — no extra bytes on the wire, just
+            // less work per packet.
+            inbound1.sniffing?.destOverride?.removeAll { it == "quic" }
+        }
         if (fakedns) {
             inbound1.sniffing?.destOverride?.add("fakedns")
         }
