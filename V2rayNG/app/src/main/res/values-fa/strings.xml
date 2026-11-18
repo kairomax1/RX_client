@@ -881,6 +881,7 @@
     <string name="public_start">کانفیگ بگیر</string>
     <string name="public_step_fetch">در حال گرفتن فهرست‌ها…</string>
     <string name="public_step_try">امتحان شد: %1$s از %2$s • در دسترس: %3$s</string>
+    <string name="public_stopping">باشه، همین‌ها را نگه می‌دارم…</string>
     <string name="public_none">از این اینترنت به هیچ سروری نرسیدیم. نوع‌ها را عوض کن یا با شبکه‌ی دیگری امتحان کن.</string>
     <string name="public_origin_saved">به منبع‌ها راه نبود؛ از فهرست ذخیره‌شده‌ی دفعه‌ی قبل استفاده شد.</string>
     <string name="public_origin_bundled">به منبع‌ها راه نبود؛ از فهرست داخل خود برنامه استفاده شد (ممکن است قدیمی باشد).</string>
@@ -906,6 +907,7 @@
     <string name="firefox_vpn_enter_email_code">کدی که به %1$s ارسال شده را وارد کن</string>
     <string name="firefox_vpn_enter_totp">کد احراز هویت خود را وارد کن</string>
     <string name="firefox_vpn_quota">مصرف %.1f گیگ از %.1f گیگ</string>
+    <string name="firefox_vpn_quota_left">باقی‌مانده: %.2f گیگ از %.2f گیگ</string>
     <string name="firefox_vpn_usage_used">حجمِ مصرفی روی این تونل</string>
     <string name="firefox_vpn_usage_values">%1$s دریافتی · %2$s ارسالی</string>
     <string name="firefox_vpn_usage_open">%1$s دقیقه روشن · %2$s اتصال</string>
@@ -977,7 +979,7 @@
     <string name="firefox_vpn_err_421">این نشانی را قبول نکرد (۴۲۱)</string>
     <string name="firefox_vpn_err_403">این حساب اجازه ندارد (۴۰۳)</string>
     <string name="firefox_vpn_err_429">سهم این حساب فعلاً تمام شده (۴۲۹)</string>
-    <string name="rx_tuning_searching">داری فرگمنت و موکس رو به بهترین حالتش پیدا می‌کنم</string>
+    <string name="rx_tuning_searching">دارم فرگمنت و موکس رو به بهترین حالتش پیدا می‌کنم</string>
     <string name="rx_tuning_done">پیداشون کردم، دارم وصل می‌شم</string>
     <string name="title_pref_auto_failover">رفتنِ خودکار به کانفیگِ بعدی</string>
     <string name="summary_pref_auto_failover">وقتی کانفیگی که وصل است از کار می‌افتد، برنامه بی‌صدا کانفیگِ دیگری از همان گروه را وصل می‌کند.</string>

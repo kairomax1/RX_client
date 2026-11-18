@@ -155,6 +155,34 @@ object FirefoxVpnManager {
     }
 
     /**
+     * The account's real standing with the service, read from the service itself.
+     *
+     * The figure that comes with a pass is what was left when that pass was
+     * minted — and the app mints one per connection, so an account that has been
+     * used for days still showed a full allowance, because the pass it showed was
+     * a new one. That is the "reads the quota from zero" the owner reported. This
+     * asks the service directly, with the account's own token, and returns what it
+     * says is left now.
+     *
+     * Null when there is nothing to read from: no account, no token, or a service
+     * that did not answer. A stale figure is worse than none, so the caller is
+     * told to keep what it has rather than draw a full bar.
+     */
+    suspend fun liveQuota(context: Context): Pair<Long, Long>? = withContext(Dispatchers.IO) {
+        val account = FirefoxVpnStore.loadAccounts(context)
+            .firstOrNull { it.id == FirefoxVpnStore.loadActiveAccountId(context) }
+            ?: FirefoxVpnStore.loadAccounts(context).firstOrNull()
+            ?: return@withContext null
+        // The stored token may have run out: an expired one answers 401, and the
+        // log is full of them. Going through the same path a connection uses means
+        // the token is refreshed when it needs to be, instead of the allowance
+        // silently reading as unknown because the request was refused.
+        val token = ensureAccessToken(context, account)?.takeIf { it.isNotBlank() }
+            ?: return@withContext null
+        FirefoxVpnGuardian.checkQuota(token)
+    }
+
+    /**
      * Every address worth dialling for [country]: its own servers first, then
      * the recommended location's, and last the address named in the pass.
      */
@@ -176,19 +204,24 @@ object FirefoxVpnManager {
                 .take(limit)
                 .forEach { server -> add(server.connectHost, server.tunnelPort, item.name) }
         }
-        // Only the chosen country's own addresses, and enough of them to survive one
-        // being refused. A recommended location is added only when there was no
-        // choice at all — otherwise "choose Germany" could be answered by a tunnel
-        // that leaves somewhere else, which is what made the choice look random.
+        // The address the pass was minted for comes first, and nothing before it.
+        // A pass is signed for one door: its token says which proxy it may be
+        // presented to, and the door it does not name answers 421 Misdirected
+        // Request. Dialling the country's other servers first meant every
+        // connection began by having a handful of tunnels refused — the run of
+        // 401 and 421 lines in the log — and only then reached the one address
+        // that had been waiting to work all along.
+        add(pass.proxyHost, pass.proxyPort, "the pass")
+        // Then the chosen country's own addresses, to survive that door being
+        // busy or gone. A recommended location is added only when there was no
+        // choice at all — otherwise "choose Germany" could be answered by a
+        // tunnel that leaves somewhere else, which is what made the choice look
+        // random.
         addCountry(chosenCountry, 4)
         if (chosenCountry == null) {
             val recommended = FirefoxVpnServers.pickRecommended(countries)
             if (recommended != null) addCountry(recommended, 2)
         }
-        // The address named in the pass is the last resort: it is a working door
-        // even when the list is stale, and refusing it because it is somewhere else
-        // would leave a phone with no tunnel at all.
-        add(pass.proxyHost, pass.proxyPort, "the pass")
         return list.take(5)
     }
 

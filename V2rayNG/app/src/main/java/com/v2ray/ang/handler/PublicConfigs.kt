@@ -49,19 +49,60 @@ import kotlinx.coroutines.sync.withPermit
 object PublicConfigs {
 
     const val GROUP_ID = "rx_public_configs"
-    const val MAX_COUNT = 150
+
+    /**
+     * The most the slider offers, and the hard ceiling on what is kept.
+     *
+     * It used to be 150, and the log shows what that did: the screen said "asked
+     * for 2220" while the collection stopped at 150 candidates and kept 50 — the
+     * number the owner set was never the number that ran. 2220 is not a number
+     * anybody chooses by accident, so it is honoured here.
+     */
+    const val MAX_COUNT = 2500
     private const val ASSET = "rx_public_configs.txt"
     private const val KEY_KINDS = "rx_public_kinds"
     private const val KEY_COUNT = "rx_public_count"
     private const val KEY_FRESH = "rx_public_fresh"
     private const val KEY_CHECKED = "rx_public_checked"
+    private const val KEY_REBUILT = "rx_public_rebuilt"
     private const val KEY_TAG = "rx_public_tag_"
-    private const val REFRESH_MILLIS = 3 * 60 * 60 * 1000L
+    /** How often the lists are looked at. Fifteen minutes, as the owner asked. */
+    private const val REFRESH_MILLIS = 15 * 60 * 1000L
+
+    /**
+     * How old the configs in the group may get before they are rebuilt even
+     * though no list changed. A list that has not changed still ages: its
+     * configs die one by one, and a group that was filled a day ago is a group
+     * of dead addresses.
+     */
+    private const val REBUILD_MILLIS = 6 * 60 * 60 * 1000L
     private const val CONNECT_MILLIS = 2500
     private const val TESTING_AT_ONCE = 48
 
-    /** The group a candidate is put in while it is being measured; never shown. */
-    private const val PENDING_GROUP = "rx_public_pending"
+    /**
+     * The group a candidate is put in while it is being measured. It is a real
+     * group only because a config has to belong to one to be imported; it is not
+     * a tab and must never be drawn as one, so [isInternalGroup] answers for it
+     * wherever the list of tabs is built.
+     */
+    const val PENDING_GROUP = "rx_public_pending"
+
+    /** True for a group the app keeps for itself: measured in, never shown. */
+    fun isInternalGroup(guid: String?): Boolean =
+        guid == PENDING_GROUP || guid == GROUP_ID_SWEEP
+
+    /** A second scratch group, so a measurement of a public config and a sweep cannot collide. */
+    private const val GROUP_ID_SWEEP = "rx_public_sweep"
+
+    /**
+     * Removes what a measurement left behind, if it was interrupted before it
+     * could. Called when the screen opens, so an old scratch group cannot come
+     * back into view after a crash.
+     */
+    fun tidyUp() {
+        runCatching { MmkvManager.removeServerViaSubid(PENDING_GROUP) }
+        runCatching { MmkvManager.removeServerViaSubid(GROUP_ID_SWEEP) }
+    }
 
     /** How many candidates carry a real download at the same time. */
     private const val VERIFY_AT_ONCE = 4
@@ -105,6 +146,8 @@ object PublicConfigs {
         val found: Int,
         val tried: Int,
         val reachable: Int,
+        /** How many were asked for; the work stops at this, not past it. */
+        val wanted: Int = 0,
         /** Configs measured by carrying real bytes so far, and how many carried. */
         val verified: Int = 0,
         val carried: Int = 0,
@@ -474,9 +517,16 @@ object PublicConfigs {
     fun refreshIfDue(context: Context): Boolean {
         val now = System.currentTimeMillis()
         if (now - MmkvManager.decodeSettingsLong(KEY_CHECKED, 0L) < REFRESH_MILLIS) return false
+
+        // The lists are only looked at again after fifteen minutes, so the marker
+        // is written before the work starts — otherwise two calls at once would
+        // both download. It is put back when the work cannot finish, below, so a
+        // check that was blocked is not counted as one that was done.
         MmkvManager.encodeSettings(KEY_CHECKED, now)
-        if (!download(context, small = true).changed) return false
-        setFresh(true)
+        val listing = download(context, small = true)
+        val old = now - MmkvManager.decodeSettingsLong(KEY_REBUILT, 0L) >= REBUILD_MILLIS
+        if (listing.changed) setFresh(true)
+        if (!listing.changed && !old) return false
         // The lists changed, and the group is what is out of date: a dot on a button
         // that only clears when somebody walks to the screen is not a refresh, and
         // was why the public configs were the same ones weeks later.
@@ -487,7 +537,13 @@ object PublicConfigs {
         // job must never do. With a tunnel up, the list is marked as waiting and the
         // group is renewed the next time the app is opened without one.
         if (ServiceRuntimeState.isRunning(context)) {
-            AppLog.info(AppLog.Section.Other, "Public configs: the lists changed, but a tunnel is up; the group is renewed when it is not")
+            // Not now, but not lost either: going back to "due" is what makes the
+            // next check try again. Before, the marker had already been written,
+            // so a phone whose tunnel was always up waited another full round and
+            // the group kept whatever it was filled with the first time — the
+            // count on the screen never moved.
+            MmkvManager.encodeSettings(KEY_CHECKED, now - REFRESH_MILLIS)
+            AppLog.info(AppLog.Section.Other, "Public configs: a tunnel is up; the group is renewed at the next idle check")
             return false
         }
         val options = savedOptions()
@@ -498,15 +554,17 @@ object PublicConfigs {
                 "Public configs: the group was renewed by itself, ${outcome.added} configs",
             )
             setFresh(false)
+            MmkvManager.encodeSettings(KEY_REBUILT, now)
+            MmkvManager.encodeSettings(KEY_CHECKED, now)
             runCatching { SettingsChangeManager.makeSetupGroupTab() }
             return true
         }
         return false
     }
 
-    /** Looks at the lists every three hours, also while the app is closed. */
+    /** Looks at the lists every fifteen minutes, also while the app is closed. */
     fun schedule(context: Context) {
-        val request = PeriodicWorkRequestBuilder<PublicConfigsWorker>(3, TimeUnit.HOURS)
+        val request = PeriodicWorkRequestBuilder<PublicConfigsWorker>(15, TimeUnit.MINUTES)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork("rx_public_configs", ExistingPeriodicWorkPolicy.KEEP, request)
@@ -590,20 +648,24 @@ object PublicConfigs {
         var tried = 0
         val pool = Executors.newFixedThreadPool(TESTING_AT_ONCE)
 
-        // Enough candidates to measure: the ones that answer a connection are only
-        // a start, and a download through each of them takes a few seconds.
-        val candidatesWanted = maxOf(wanted * 3, wanted + 10)
+        // Candidates to measure. The ones that answer a connection are only a
+        // start, since some of them will not carry a download — but the number is
+        // kept modest on purpose: measuring is a tunnel raise and a download per
+        // config, and a screen that says "144 tried" for twenty asked for is not
+        // doing what its owner set out. Half again as many, plus a few, is enough
+        // to replace what fails without the search doubling in length.
+        val candidatesWanted = wanted + maxOf(wanted / 2, 6)
 
         fun tryAll(lines: List<String>) {
             val links = select(lines.asSequence(), options.kinds, options.game, seen)
             found += links.size
-            onProgress(Progress(origin, found, tried, reachable.size))
+            onProgress(Progress(origin, found, tried, reachable.size, wanted))
             for (batch in links.chunked(TESTING_AT_ONCE)) {
                 if (cancelled.get() || reachable.size >= candidatesWanted || tried >= MAX_TRIED) break
                 val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
                 batch.forEachIndexed { index, link -> if (runCatching { answers[index].get() }.getOrDefault(false)) reachable.add(link) }
                 tried += batch.size
-                onProgress(Progress(origin, found, tried, reachable.size))
+                onProgress(Progress(origin, found, tried, reachable.size, wanted))
             }
         }
 
@@ -631,9 +693,19 @@ object PublicConfigs {
         // Measured before they are imported. Importing first and measuring second is
         // what left the group holding configs that had never carried a byte.
         val kept = runBlocking { verify(context, candidates, wanted, options.verify, cancelled) { verified, carried ->
-            onProgress(Progress(origin, found, tried, reachable.size, verified, carried))
+            onProgress(Progress(origin, found, tried, reachable.size, wanted, verified, carried))
         } }
         if (kept.isEmpty()) {
+            // "Enough" before anything carried is not a failure of the line, and
+            // saying so would send its owner looking for a fault that is not
+            // there. What was measured is reported as it stands.
+            if (cancelled.get()) {
+                AppLog.info(
+                    AppLog.Section.Other,
+                    "Public configs: stopped on request after ${candidates.size} candidates, nothing had carried yet",
+                )
+                return Outcome(0, origin)
+            }
             AppLog.error(AppLog.Section.Other, "Public configs: none of the ${candidates.size} measured configs carried anything on this line")
             return Outcome(0, origin)
         }
@@ -678,6 +750,10 @@ object PublicConfigs {
         val oneAtATime = Mutex()
         candidates.map { link ->
             async(Dispatchers.IO) {
+                // Checked before the gate as well as after it: when the owner says
+                // "enough", the candidates still queued must fall away at once
+                // instead of taking a permit only to return it.
+                if (cancelled.get() || carried.size >= wanted) return@async
                 gate.withPermit {
                     if (cancelled.get() || carried.size >= wanted) return@withPermit
                     val speed = oneAtATime.withLock { speedOf(context, link) }

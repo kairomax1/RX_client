@@ -226,8 +226,12 @@ object NotificationManager {
 
         // If the query interval is too short, skip this round to avoid excessive CPU usage
         if (sinceLastQueryIn < QUERY_INTERVAL_MS) {
-            LogUtil.w(AppConfig.TAG, "Query interval too short: ${sinceLastQueryIn}ms, skipping")
-            lastQueryTime = queryTime
+            // The clock is NOT moved on. Moving it here threw away the interval
+            // that had already passed: the round that was skipped reset the
+            // measurement window, so the first reading after a tunnel came up was
+            // dropped and the one after it covered a fraction of a second, and the
+            // speed it showed was wrong until the next full interval. Leaving the
+            // clock alone lets the next call measure from the last real one.
             return lastZeroSpeed
         }
         val sinceLastQueryInSeconds = sinceLastQueryIn / 1000.0

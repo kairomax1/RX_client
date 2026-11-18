@@ -155,6 +155,8 @@ class MainRepository(
                 }
             )
         }
+        // decodeSubscriptions already leaves out the groups the app keeps for
+        // itself, so the tab list cannot inherit "rx public pending" again.
         result += MmkvManager.decodeSubscriptions()
         return result
     }

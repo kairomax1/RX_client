@@ -909,6 +909,7 @@
     <string name="public_start">Get configs</string>
     <string name="public_step_fetch">Getting the lists…</string>
     <string name="public_step_try">Tried %1$s of %2$s • reachable: %3$s</string>
+    <string name="public_stopping">Enough — keeping what has been found…</string>
     <string name="public_none">No server could be reached from this connection. Change the types or try another network.</string>
     <string name="public_origin_saved">No way to the sources; using the list saved last time.</string>
     <string name="public_origin_bundled">No way to the sources; using the list shipped inside the app (may be old).</string>
@@ -934,6 +935,7 @@
     <string name="firefox_vpn_enter_email_code">Enter the code sent to %1$s</string>
     <string name="firefox_vpn_enter_totp">Enter your authenticator code</string>
     <string name="firefox_vpn_quota">Used %.1f GB of %.1f GB</string>
+    <string name="firefox_vpn_quota_left">Left: %.2f GB of %.2f GB</string>
     <string name="firefox_vpn_usage_used">Traffic used on this tunnel</string>
     <string name="firefox_vpn_usage_values">%1$s received · %2$s sent</string>
     <string name="firefox_vpn_usage_open">Up for %1$s minutes · %2$s connections</string>

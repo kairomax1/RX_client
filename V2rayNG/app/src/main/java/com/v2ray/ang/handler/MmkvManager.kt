@@ -233,8 +233,11 @@ object MmkvManager {
             allServers.addAll(decodeServerList(DEFAULT_SUBSCRIPTION_ID))
         }
 
-        // Add servers from all subscriptions
-        subsList.forEach { guid ->
+        // Add servers from all subscriptions, but not from the scratch groups the
+        // app measures public configs in: one of those holds a single config that
+        // is being tried at this moment, and pulling it into "test all", an export
+        // or a backup would carry a half-tested address into the owner's list.
+        subsList.filterNot { PublicConfigs.isInternalGroup(it) }.forEach { guid ->
             allServers.addAll(decodeServerList(guid))
         }
 
@@ -671,6 +674,10 @@ object MmkvManager {
             val json = subStorage.decodeString(key)
             if (!json.isNullOrBlank()) {
                 val item = JsonUtil.fromJsonSafe(json, SubscriptionItem::class.java) ?: SubscriptionItem()
+                // The scratch groups the app measures in are real store entries but
+                // not anybody's subscription: they are left out of every list that
+                // is drawn, which is the one place that decides it.
+                if (PublicConfigs.isInternalGroup(key)) return@forEach
                 subscriptions.add(SubscriptionCache(key, item))
             }
         }

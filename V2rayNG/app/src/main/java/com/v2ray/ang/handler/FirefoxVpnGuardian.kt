@@ -136,8 +136,15 @@ object FirefoxVpnGuardian {
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) return@withContext null
 
-                val limit = response.header("X-Quota-Limit")?.toLongOrNull() ?: 0
-                val remaining = response.header("X-Quota-Remaining")?.toLongOrNull() ?: 0
+                // A header that is missing is not a zero: reporting "0 of 0 used"
+                // would draw a full allowance for an account that has spent it,
+                // which is the reading the owner complained about. When neither
+                // figure is there, the answer is "not known" and the screen keeps
+                // whatever it last knew.
+                val limit = response.header("X-Quota-Limit")?.toLongOrNull() ?: 0L
+                val remaining = response.header("X-Quota-Remaining")?.toLongOrNull()
+                    ?: return@withContext null
+                if (limit <= 0L) return@withContext null
                 limit to remaining
             } catch (_: Exception) {
                 null

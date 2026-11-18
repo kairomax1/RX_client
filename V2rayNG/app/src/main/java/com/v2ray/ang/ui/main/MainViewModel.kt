@@ -552,17 +552,28 @@ class MainViewModel(
             rememberIfItLasts()
             return
         }
-        // One failed probe can be a hiccup of the test address; a second one means no traffic flows.
+        // A probe that answers nothing right after the tunnel came up says more
+        // about the tunnel than about the config: the interface has only just
+        // been handed the routes, and the first name being looked up can time out
+        // on its own. Giving it one second and then giving up was what turned a
+        // working config into "two connection tests in a row failed" — the log
+        // shows exactly that, a failure pair and a good answer a moment later.
+        // Each retry now waits longer than the one before it, and three are
+        // allowed, so a line that needs four seconds to settle still connects.
         verifyAttempts++
         if (verifyAttempts < VERIFY_MAX_ATTEMPTS) {
+            val wait = VERIFY_RETRY_MS * verifyAttempts
             viewModelScope.launch {
-                delay(VERIFY_RETRY_MS)
+                delay(wait)
                 if (uiState.value.isRunning && uiState.value.connectPhase == ConnectPhase.Connecting) {
                     testCurrentServerRealPing()
                 }
             }
         } else {
-            AppLog.error(AppLog.Section.Connection, "Two connection tests in a row failed")
+            AppLog.error(
+                AppLog.Section.Connection,
+                "$VERIFY_MAX_ATTEMPTS connection tests in a row failed; the config is not carrying traffic",
+            )
             if (!onConnectFailed()) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
         }
     }
@@ -1574,8 +1585,9 @@ class MainViewModel(
         const val CONNECT_TIMEOUT_MS = 25_000L
         const val AETHER_POLL_MS = 700L
         const val VERIFY_SETTLE_MS = 400L
-        const val VERIFY_RETRY_MS = 900L
-        const val VERIFY_MAX_ATTEMPTS = 2
+        /** How long the first retry waits; each further retry waits this much longer again. */
+        const val VERIFY_RETRY_MS = 1_500L
+        const val VERIFY_MAX_ATTEMPTS = 3
         const val FAILURE_FEEDBACK_MS = 3_800L
     }
 }

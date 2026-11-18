@@ -291,6 +291,64 @@ object GamingMode {
     private val IRAN_CDN_DOMAINS = listOf("domain:arvancdn.ir", "domain:arvancloud.ir")
 
     /**
+     * The country's own name endings. Every name under one of these belongs to a
+     * site of this country, so it is answered on the phone's own line without
+     * having to be in any list at all.
+     *
+     * This is what "IP ایران" was missing. The list of names served from inside
+     * the country holds nine thousand entries, and a site that is not in it was
+     * tunnelled — so an ordinary Iranian shop or bank showed a foreign address,
+     * and a site strict about addresses saw the wrong one. The endings cannot be
+     * out of date and cannot be incomplete: a `.ir` name is an Iranian name by
+     * definition. It is anchored to the end, so `mail.google.com` is not caught.
+     */
+    private val IRAN_ENDINGS = listOf(
+        // `.*\.ir$` already covers every second-level name — `bank.example.ac.ir`
+        // ends in `.ir` — so one expression is the whole of it. Nothing else is
+        // added: another pattern for the same names only costs matching time.
+        "regexp:.*\\.ir$",
+    ).distinct()
+
+    /**
+     * Domains of the country that are not under `.ir`: the ones everybody here
+     * uses, whose names are bought abroad. They belong on the home line for the
+     * same reason — a site of this country is quicker and cheaper at home, and
+     * answers with an address from here.
+     */
+    private val IRAN_OTHER_NAMES = listOf(
+        "domain:aparat.com",
+        "domain:digikala.com",
+        "domain:divar.ir",
+        "domain:torob.com",
+        "domain:basalam.com",
+        "domain:sheypoor.com",
+        "domain:filimo.com",
+        "domain:namava.ir",
+        "domain:snapp.ir",
+        "domain:tapsi.ir",
+        "domain:alibaba.ir",
+        "domain:flytoday.ir",
+        "domain:zarinpal.com",
+        "domain:shaparak.ir",
+        "domain:bmi.ir",
+        "domain:mci.ir",
+        "domain:irancell.ir",
+        "domain:rightel.ir",
+        "domain:shatel.ir",
+        "domain:parsonline.net",
+        "domain:hiweb.ir",
+        "domain:iranserver.com",
+        "domain:hostiran.net",
+        "domain:nepton.ir",
+        "domain:mizbanplus.ir",
+        "domain:dnsir.ir",
+        "domain:nic.ir",
+        "domain:irnic.ir",
+        "domain:samandehi.ir",
+        "domain:enamad.ir",
+    )
+
+    /**
      * Sign-in, store, matchmaking and content hosts of the big games. A game's own servers are
      * usually reached by address rather than by name, so these rules carry the parts that can be
      * named and the owner's choice carries the rest.
@@ -349,8 +407,12 @@ object GamingMode {
                 // Iranian names, which is the wider of the two; and the Iranian
                 // addresses as well, because a site of this country that keeps
                 // its name abroad still lives on an address at home.
-                domain = (iranDomains + IRAN_CDN_DOMAINS + coreIranNames() + SiteLists.homeDomains())
-                    .distinct(),
+                domain = (
+                    // The broadest statement first: any name of this country is a
+                    // name of this country, whether or not a list has heard of it.
+                    IRAN_ENDINGS + IRAN_OTHER_NAMES + IRAN_CDN_DOMAINS +
+                        iranDomains + coreIranNames() + SiteLists.homeDomains()
+                    ).distinct(),
                 ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses())
                     .distinct(),
             )
@@ -373,20 +435,25 @@ object GamingMode {
                 domain = adDomains,
             )
         }
-        // The order is what keeps a service open. The lists of this country hold several
-        // thousand names and the lists of filtered and restricted services hold several
-        // thousand more; a name can sit on both. Whichever is matched first wins, and the
-        // one that shuts a service is the one that sends it out on the home line, where it
-        // is answered with a dead address. So what can only be answered from outside is
-        // matched before the names of this country — behind an advert, which is never
-        // wanted at all, and behind the games whose line the owner chose.
+        // The order decides which line a name takes, and three claims can be made
+        // about the same name. What is settled once and for all is the country's
+        // own: a `.ir` name, or a name this country serves, is Iranian whether or
+        // not some list of filtered services has also heard of it. If that were
+        // not so, one name of a site could leave on the tunnel and another on the
+        // home line, and the site would see two different addresses — which is
+        // exactly the split that showed a foreign address on a site that was
+        // being visited from here.
+        //
+        // After that comes the choice the owner made for games, which is a choice
+        // about latency rather than about a name; then the services that can only
+        // be answered from outside; then everything else on the home line.
         val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
         val games = base.firstOrNull { it.remarks?.startsWith("Gaming: games") == true }
         val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
         blockedGames?.let { rules += it }
         games?.let { rules += it }
-        tunnelled?.let { rules += it }
         iranian?.let { rules += it }
+        tunnelled?.let { rules += it }
         rules += base.filterNot { it === blockedGames || it === games || it === tunnelled }
         return rules
     }

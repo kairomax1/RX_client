@@ -65,6 +65,8 @@ data class PublicConfigsState(
     val address: String? = null,
     val provider: String = "",
     val running: Boolean = false,
+    /** True from the moment "enough" is pressed until the work has stopped. */
+    val stopping: Boolean = false,
     val progress: PublicConfigs.Progress? = null,
     val outcome: PublicConfigs.Outcome? = null,
 )
@@ -79,6 +81,10 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
+            // Anything a previous measurement left behind — a scratch group from a
+            // run that was killed, or from the version that drew it as a tab — is
+            // cleared when the screen opens.
+            PublicConfigs.tidyUp()
             val (address, provider) = PublicConfigs.whoAmI()
             _state.update { it.copy(address = address, provider = provider) }
         }
@@ -97,12 +103,22 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
                     _state.update { it.copy(progress = progress) }
                 }
             }.getOrElse { PublicConfigs.Outcome(0, PublicConfigs.Origin.Bundled) }
-            _state.update { it.copy(running = false, outcome = outcome) }
+            _state.update { it.copy(running = false, stopping = false, outcome = outcome) }
         }
     }
 
-    /** "Enough": stops trying more servers; those already found are used. */
-    fun stop() = cancelled.set(true)
+    /**
+     * "Enough": stops trying more servers; those already found are used.
+     *
+     * The button used to set a flag and say nothing, so it looked dead while the
+     * measurement already in flight finished — a few seconds of a screen that
+     * ignored the press. The work now stops at the next checkpoint and the screen
+     * says so at once.
+     */
+    fun stop() {
+        cancelled.set(true)
+        if (_state.value.running) _state.update { it.copy(stopping = true) }
+    }
 }
 
 /**
@@ -198,13 +214,16 @@ private fun PublicConfigsScreen(
                     val progress = state.progress
                     val origin = state.outcome?.origin ?: progress?.origin
                     val text = when {
+                        state.stopping -> stringResource(R.string.public_stopping)
                         state.outcome != null -> stringResource(R.string.public_none)
                         progress?.origin == null -> stringResource(R.string.public_step_fetch)
                         else -> stringResource(R.string.public_step_try, progress.tried.toString(), progress.found.toString(), progress.reachable.toString())
                     }
                     Text(text, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
                     if (state.running) {
-                        val wanted = (options.count * 3).coerceAtLeast(1)
+                        // The bar is against what was asked for, not a guess at
+                        // how many candidates the search might take.
+                        val wanted = progress?.wanted?.takeIf { it > 0 } ?: options.count.coerceAtLeast(1)
                         if (progress?.origin == null) {
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                         } else {
@@ -239,9 +258,17 @@ private fun PublicConfigsScreen(
                         color = colors.onSurfaceVariant,
                     )
                     Text(stringResource(R.string.public_count, options.count.toString()), style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
+                    // Steps of ten up to five hundred, so the number she wants is easy
+                    // to land on; above that the steps are of a hundred, because a
+                    // slider that moves by ten across two and a half thousand places
+                    // cannot be aimed at all.
                     Slider(
                         value = options.count.toFloat(),
-                        onValueChange = { onChange(options.copy(count = (it / 10).toInt() * 10)) },
+                        onValueChange = { raw ->
+                            val value = raw.toInt()
+                            val step = if (value <= 500) 10 else 100
+                            onChange(options.copy(count = (value / step) * step))
+                        },
                         valueRange = 10f..PublicConfigs.MAX_COUNT.toFloat(),
                     )
                 }
