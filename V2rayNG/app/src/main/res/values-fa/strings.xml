@@ -877,10 +877,14 @@
     <string name="public_intro">برنامه خودش کانفیگ‌های رایگان را از فهرست‌های عمومی می‌گیرد، ناامن‌ها را دور می‌ریزد، هر کدام را روی اینترنت خودت امتحان می‌کند، سالم‌ها را در زبانه‌ی «کانفیگ عمومی» می‌گذارد و به سریع‌ترین وصل می‌شود.</string>
     <string name="public_warning">این سرورها مال افراد ناشناس است. برای کار بانکی و کارهای حساس از آن‌ها استفاده نکن.</string>
     <string name="public_kinds">نوع کانفیگ</string>
-    <string name="public_count">چند تا بماند: %1$s</string>
+    <string name="public_count">چند تا می‌خواهی: %1$s</string>
+    <string name="public_count_exact">دقیق بنویس:</string>
     <string name="public_start">کانفیگ بگیر</string>
     <string name="public_step_fetch">در حال گرفتن فهرست‌ها…</string>
-    <string name="public_step_try">امتحان شد: %1$s از %2$s • در دسترس: %3$s</string>
+    <string name="public_step_try">%1$d از %2$d تا آماده شد — %3$d تا امتحان شد</string>
+    <string name="public_reached">%1$d از %2$d تا آماده شد و به فهرست اضافه شد</string>
+    <string name="public_short">فقط %1$d از %2$d تا پیدا شد؛ بقیه‌ی کانفیگ‌های مخزن روی اینترنت تو جواب ندادند</string>
+    <string name="public_step_round">دور %1$d: %2$d از %3$d آماده است</string>
     <string name="public_stopping">باشه، همین‌ها را نگه می‌دارم…</string>
     <string name="public_none">از این اینترنت به هیچ سروری نرسیدیم. نوع‌ها را عوض کن یا با شبکه‌ی دیگری امتحان کن.</string>
     <string name="public_origin_saved">به منبع‌ها راه نبود؛ از فهرست ذخیره‌شده‌ی دفعه‌ی قبل استفاده شد.</string>

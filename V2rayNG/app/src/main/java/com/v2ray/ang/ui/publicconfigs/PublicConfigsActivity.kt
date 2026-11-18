@@ -17,18 +17,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,7 +40,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -167,6 +173,12 @@ private fun PublicConfigsScreen(
     onStop: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // The figure being typed. Held as text so a half-typed number is not rounded
+    // or thrown away, and shared with the slider so both show the same value.
+    var typedCount by rememberSaveable(state.options.count) {
+        mutableStateOf(state.options.count.toString())
+    }
+
     val colors = MaterialTheme.colorScheme
     val options = state.options
     Box(Modifier.fillMaxSize().background(rxScreenBrush())) {
@@ -213,17 +225,38 @@ private fun PublicConfigsScreen(
                 if (state.running || state.outcome != null) {
                     val progress = state.progress
                     val origin = state.outcome?.origin ?: progress?.origin
+                    val wanted = progress?.wanted?.takeIf { it > 0 } ?: options.count.coerceAtLeast(1)
                     val text = when {
                         state.stopping -> stringResource(R.string.public_stopping)
-                        state.outcome != null -> stringResource(R.string.public_none)
+                        // What happened, told truthfully: the number reached, and
+                        // when it fell short, why — the pool was tried and did not
+                        // answer on this line. "No server could be reached" was
+                        // wrong whenever some were found and added.
+                        state.outcome != null -> {
+                            val got = state.outcome.added
+                            if (got <= 0) {
+                                stringResource(R.string.public_none)
+                            } else if (got >= wanted) {
+                                stringResource(R.string.public_reached, got, wanted)
+                            } else {
+                                stringResource(R.string.public_short, got, wanted)
+                            }
+                        }
                         progress?.origin == null -> stringResource(R.string.public_step_fetch)
-                        else -> stringResource(R.string.public_step_try, progress.tried.toString(), progress.found.toString(), progress.reachable.toString())
+                        // Read the way the question is asked: what I have, out of
+                        // what I asked for, with how much work it took after it.
+                        else -> stringResource(
+                            R.string.public_step_try,
+                            progress.reachable,
+                            wanted,
+                            progress.tried,
+                        )
                     }
                     Text(text, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
                     if (state.running) {
-                        // The bar is against what was asked for, not a guess at
-                        // how many candidates the search might take.
-                        val wanted = progress?.wanted?.takeIf { it > 0 } ?: options.count.coerceAtLeast(1)
+                        // The bar fills with the number of configs proven, against
+                        // the number asked for — the only progress that matters to
+                        // the person watching.
                         if (progress?.origin == null) {
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                         } else {
@@ -258,18 +291,43 @@ private fun PublicConfigsScreen(
                         color = colors.onSurfaceVariant,
                     )
                     Text(stringResource(R.string.public_count, options.count.toString()), style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
-                    // Steps of ten up to five hundred, so the number she wants is easy
-                    // to land on; above that the steps are of a hundred, because a
-                    // slider that moves by ten across two and a half thousand places
+                    // A number to type, above the slider. The slider is for a rough
+                    // idea; typing is how a figure is actually chosen, and a slider
+                    // that moves by ten across two and a half thousand places
                     // cannot be aimed at all.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.public_count_exact),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = typedCount,
+                            onValueChange = { input ->
+                                val digits = input.filter { it.isDigit() }.take(4)
+                                typedCount = digits
+                                digits.toIntOrNull()?.let { typed ->
+                                    if (typed > 0) {
+                                        onChange(options.copy(count = typed.coerceIn(1, PublicConfigs.MAX_COUNT)))
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.width(96.dp),
+                        )
+                    }
                     Slider(
                         value = options.count.toFloat(),
                         onValueChange = { raw ->
                             val value = raw.toInt()
                             val step = if (value <= 500) 10 else 100
-                            onChange(options.copy(count = (value / step) * step))
+                            val next = (value / step) * step
+                            if (next != options.count) typedCount = next.toString()
+                            onChange(options.copy(count = next))
                         },
-                        valueRange = 10f..PublicConfigs.MAX_COUNT.toFloat(),
+                        valueRange = 1f..PublicConfigs.MAX_COUNT.toFloat(),
                     )
                 }
             }

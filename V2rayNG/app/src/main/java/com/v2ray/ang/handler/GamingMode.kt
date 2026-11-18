@@ -473,10 +473,26 @@ object GamingMode {
         val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
         val games = base.firstOrNull { it.remarks?.startsWith("Gaming: games") == true }
         val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
+
+        // The filtered list comes before the country's own, and this is the whole
+        // of why. Inside the country the name of a filtered site is answered with
+        // a private address — 10.10.34.x — so a rule that matches by address
+        // cannot tell a site this country hosts from one it blocks: both look
+        // local. Whichever rule is reached first decides, and the name is known
+        // before the address is. Put the country first, as this did for a day,
+        // and every blocked site is confidently sent out on the home line to the
+        // filtering page: WhatsApp, Telegram, Proton and the games that never
+        // answer from here all stop opening, while the address itself does not
+        // leak — a leak fixed by breaking access.
+        //
+        // The ordering guarantee is kept, though: a name in this list is answered
+        // from outside whatever the country's lists say about its address, and the
+        // country's own sites still leave on the home line because they are not in
+        // that list. Both properties hold at once; only one of them can be first.
         blockedGames?.let { rules += it }
+        tunnelled?.let { rules += it }
         games?.let { rules += it }
         rules += iranian
-        tunnelled?.let { rules += it }
         rules += base.filterNot { it === blockedGames || it === games || it === tunnelled }
         return rules
     }

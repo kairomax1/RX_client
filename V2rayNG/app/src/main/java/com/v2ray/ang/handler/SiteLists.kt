@@ -257,10 +257,37 @@ object SiteLists {
         .filter { it.isNotBlank() }
         .mapNotNull { line ->
             val range = if ('/' in line) line else line + if (':' in line) "/128" else "/32"
-            range.takeIf { isCidr(it) }
+            range.takeIf { isCidr(it) && !isPrivateRange(it) }
         }
         .distinct()
         .toList()
+
+    /**
+     * True for an address that belongs to the phone's own network rather than to
+     * the internet, and so to neither this country's sites nor any other.
+     *
+     * These are left out wherever a list of countries is parsed, because a
+     * published list can carry them and the consequence is not cosmetic.
+     * `10.0.0.0/8` is where the filtering page answers (10.10.34.x): treating it
+     * as an Iranian address sent every filtered site out on the home line, where
+     * it is blocked — which is why WhatsApp, Telegram and Proton stopped opening
+     * in gaming mode, even though the address itself never leaked.
+     * `100.64.0.0/10` is the carrier's own translation range and means only that
+     * the phone is behind one.
+     */
+    internal fun isPrivateRange(range: String): Boolean {
+        val address = range.substringBefore('/')
+        if (':' in address) return false
+        val first = address.substringBefore('.').toIntOrNull() ?: return false
+        val second = address.split('.').getOrNull(1)?.toIntOrNull() ?: return false
+        return first == 10 ||
+            first == 127 ||
+            (first == 100 && second in 64..127) ||
+            (first == 172 && second in 16..31) ||
+            (first == 192 && second == 168) ||
+            first == 0 ||
+            first >= 224
+    }
 
     private fun isCidr(value: String): Boolean {
         val parts = value.split('/', limit = 2)

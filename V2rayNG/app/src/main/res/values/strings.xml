@@ -905,10 +905,14 @@
     <string name="public_intro">The app collects free configs from open lists, removes the unsafe ones, tries each on your own connection, puts the ones that work in the \"Public configs\" tab and connects to the fastest.</string>
     <string name="public_warning">These servers belong to strangers. Do not use them for banking or other sensitive work.</string>
     <string name="public_kinds">Config types</string>
-    <string name="public_count">How many to keep: %1$s</string>
+    <string name="public_count">How many you want: %1$s</string>
+    <string name="public_count_exact">Type a number:</string>
     <string name="public_start">Get configs</string>
     <string name="public_step_fetch">Getting the lists…</string>
-    <string name="public_step_try">Tried %1$s of %2$s • reachable: %3$s</string>
+    <string name="public_step_try">%1$d of %2$d ready — %3$d tried</string>
+    <string name="public_reached">%1$d of %2$d ready and added to the list</string>
+    <string name="public_short">Only %1$d of %2$d could be found; the rest of the pool did not answer on your connection</string>
+    <string name="public_step_round">Round %1$d: %2$d of %3$d ready</string>
     <string name="public_stopping">Enough — keeping what has been found…</string>
     <string name="public_none">No server could be reached from this connection. Change the types or try another network.</string>
     <string name="public_origin_saved">No way to the sources; using the list saved last time.</string>

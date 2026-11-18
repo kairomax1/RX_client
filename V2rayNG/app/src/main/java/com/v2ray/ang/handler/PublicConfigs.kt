@@ -86,6 +86,19 @@ object PublicConfigs {
     private const val CANDIDATES_CEILING = 1_200
 
     /**
+     * How many times the lists are looked at again for the number asked for.
+     *
+     * One round measures a batch; when fewer carried than were wanted, the next
+     * round takes a different slice of the pool and measures that. The ceiling is
+     * what stops a phone grinding through thousands of dead addresses: after
+     * this many rounds what was found is what there is, and it is handed over.
+     */
+    private const val MAX_ROUNDS = 12
+
+    /** The smallest batch worth raising tunnels for. */
+    private const val ROUND_MIN = 20
+
+    /**
      * The group a candidate is put in while it is being measured. It is a real
      * group only because a config has to belong to one to be imported; it is not
      * a tab and must never be drawn as one, so [isInternalGroup] answers for it
@@ -599,12 +612,23 @@ object PublicConfigs {
         val kinds = Kind.entries.filter { it.name in names }.toSet().ifEmpty { Kind.entries.toSet() }
         return Options(
             kinds = kinds,
-            count = MmkvManager.decodeSettingsInt(KEY_COUNT, 50).coerceIn(10, MAX_COUNT),
+            // The saved figure is taken as saved. It used to be pulled up to at
+            // least 10, so a number below ten could not be kept.
+            count = acceptedCount(MmkvManager.decodeSettingsInt(KEY_COUNT, 20)),
             mux = false,
             fragment = false,
             game = GamingMode.isEnabled(),
         )
     }
+
+    /**
+     * The number actually worked towards, from what the owner set.
+     *
+     * One place, so the figure on the screen, the figure in the log and the figure
+     * the search aims at cannot disagree — which they did: the slider offered a
+     * number, the collection clamped it to 150, and neither said so.
+     */
+    fun acceptedCount(count: Int): Int = count.coerceIn(1, MAX_COUNT)
 
     // ---------- Collecting ----------
 
@@ -624,120 +648,188 @@ object PublicConfigs {
     }
 
     /**
-     * Gets the lists, keeps the safe links of the chosen sorts, and puts into the
-     * public group exactly [Options.count] configs that were each made to carry
-     * real bytes on this connection, best first.
+     * Fills the public group with the number of configs its owner asked for, each
+     * one made to carry real bytes on this very connection.
      *
-     * The order of the work is the point. Three times the wanted number were
-     * imported before, then a real test dropped the ones that did not work —
-     * which meant a screen full of configs that had never carried anything, a
-     * first connection that had to wait for the test to sort them out, and a
-     * group that could hold more than was asked for. Now the count is worked
-     * towards from the other end: candidates are measured one at a time and a
-     * config only goes in when it carried a download and was quickest of what
-     * has been measured. The group is emptied first and filled exactly once, so
-     * a second collection replaces the first instead of adding to it.
+     * The number is a target, not a suggestion. Rounds repeat — read the lists,
+     * try the addresses, measure what answered, keep what carried — until the
+     * count is reached or the pool is exhausted. The earlier version measured a
+     * single batch and kept whatever survived it, so asking for twenty could end
+     * with two, as the log shows; and the ceiling of 150 meant a number above
+     * that was never even attempted.
+     *
+     * Three things are deliberate. The group is emptied once, before the first
+     * round, so a second collection replaces the first rather than adding to it.
+     * It then grows only with configs already proven on this line, so the tab
+     * never shows an address that has not carried anything. And every round takes
+     * a different slice of the pool, because the head of a list has just been
+     * tried and failed.
      */
     fun collect(context: Context, options: Options, cancelled: AtomicBoolean, onProgress: (Progress) -> Unit): Outcome {
         onProgress(Progress(null, 0, 0, 0))
         val first = download(context, small = true)
-        val origin = when {
+        var origin = when {
             first.answered > 0 -> Origin.Fresh
             first.lines.size >= 50 -> Origin.Saved
             else -> Origin.Bundled
         }
         if (origin == Origin.Fresh) MmkvManager.encodeSettings(KEY_CHECKED, System.currentTimeMillis())
-        val wanted = options.count.coerceIn(1, MAX_COUNT)
-        val seen = HashSet<String>()
-        val reachable = ArrayList<Link>()
-        var found = 0
-        var tried = 0
-        val pool = Executors.newFixedThreadPool(TESTING_AT_ONCE)
-
-        // Candidates to measure, and the arithmetic is the whole point here.
-        // Of the 144 candidates tried in the log, 60 answered a connection and
-        // only 2 of those carried a download: one in thirty of the addresses that
-        // look good actually works. Asking for 20 and measuring 60 therefore
-        // returned 2, and the screen honestly said "2 of the 20 asked for". A
-        // candidate is cheap to try (a TCP connect) and expensive to measure (a
-        // tunnel raise and a download), so enough are tried to make the expensive
-        // part count, and the search stops as soon as the wanted number has
-        // carried — the work is bounded by what succeeds, not by a guess.
-        val candidatesWanted = (wanted * CANDIDATES_PER_WANTED)
-            .coerceIn(wanted, minOf(CANDIDATES_CEILING, wanted + 400))
-        // The cheap pre-check only has to hand over more than will be measured, so
-        // that a few dead addresses do not leave the measurement short: twice the
-        // wanted number is enough, and it keeps the "tried" figure near what the
-        // work actually needs instead of eight times it.
-        val reachableWanted = (wanted * 2).coerceIn(wanted, candidatesWanted)
-
-        fun tryAll(lines: List<String>) {
-            val links = select(lines.asSequence(), options.kinds, options.game, seen)
-            found += links.size
-            onProgress(Progress(origin, found, tried, reachable.size, wanted))
-            for (batch in links.chunked(TESTING_AT_ONCE)) {
-                if (cancelled.get() || reachable.size >= reachableWanted || tried >= MAX_TRIED) break
-                val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
-                batch.forEachIndexed { index, link -> if (runCatching { answers[index].get() }.getOrDefault(false)) reachable.add(link) }
-                tried += batch.size
-                onProgress(Progress(origin, found, tried, reachable.size, wanted))
-            }
-        }
-
-        try {
-            tryAll(if (origin == Origin.Bundled) context.assets.open(ASSET).bufferedReader().use { it.readLines() } else first.lines)
-            // Not enough from the short lists: the large ones are read as well.
-            if (reachable.size < reachableWanted && !cancelled.get()) tryAll(download(context, small = false).lines)
-        } finally {
-            pool.shutdownNow()
-        }
-        // A server that answered nothing over TCP is no candidate; one that answered
-        // is measured properly below, which is the only test that decides.
-        val candidates = select(reachable.asSequence().map { it.raw }, options.kinds).take(candidatesWanted)
-        AppLog.info(
-            AppLog.Section.Other,
-            "Public configs: list ${origin.name.lowercase()}, $found safe links of the chosen sorts" +
-                (if (options.game) " (game mode)" else "") + ", $tried tried, " +
-                "${candidates.size} good enough to be measured properly",
-        )
-        if (candidates.isEmpty()) return Outcome(0, origin)
-
+        val wanted = acceptedCount(options.count)
         MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
         MmkvManager.encodeSettings(KEY_COUNT, wanted)
 
-        // Measured before they are imported. Importing first and measuring second is
-        // what left the group holding configs that had never carried a byte.
-        val kept = runBlocking { verify(context, candidates, wanted, options.verify, cancelled) { verified, carried ->
-            onProgress(Progress(origin, found, tried, reachable.size, wanted, verified, carried))
-        } }
+        // Emptied once, before the first round, so this collection replaces the
+        // last one instead of piling onto it; filled from here on only with
+        // configs already proven on this line.
+        MmkvManager.clearServerList(GROUP_ID)
+
+        val kept = mutableListOf<Link>()
+        val keptRaws = HashSet<String>()
+        val seen = HashSet<String>()
+        var found = 0
+        var tried = 0
+        var measured = 0
+        var carried = 0
+        var rounds = 0
+        var emptyRound = false
+        var imported = 0
+
+        fun report() {
+            onProgress(Progress(origin, found, tried, kept.size, wanted, measured, carried))
+        }
+
+        while (!cancelled.get() && kept.size < wanted && rounds < MAX_ROUNDS && !emptyRound) {
+            rounds++
+            val lines = if (rounds == 1) {
+                if (origin == Origin.Bundled) context.assets.open(ASSET).bufferedReader().use { it.readLines() }
+                else first.lines
+            } else {
+                // A fresh look at the lists each round. It is cheap, and it also
+                // survives a list that answered with nothing the round before.
+                val next = download(context, small = true)
+                if (next.answered > 0) origin = Origin.Fresh
+                next.lines
+            }
+
+            val batch = selectFresh(lines, options, seen, rounds)
+            if (batch.isEmpty()) {
+                // Nothing in these lists that has not been tried already. The
+                // search is over: what was found is what there is.
+                emptyRound = true
+                continue
+            }
+            found += batch.size
+            report()
+
+            val reachable = quickCheck(batch, options, cancelled) { count -> tried += count; report() }
+            val candidates = select(reachable.asSequence().map { it.raw }, options.kinds)
+            if (candidates.isEmpty()) continue
+
+            // Measured properly, the only test that decides. Everything that
+            // carried is kept, still running, so the loop can reach the target.
+            val carriedNow = runBlocking {
+                verify(context, candidates, wanted - kept.size, options.verify, cancelled) { verified, carriedSoFar ->
+                    measured += verified
+                    carried += carriedSoFar
+                    report()
+                }
+            }
+            // Each round's proven configs are imported together, so the group
+            // grows while the search is still running — which is what "add them by
+            // itself when it reaches the number" means to the person watching.
+            val fresh = carriedNow.filter { keptRaws.add(it.first.raw) }.map { it.first }
+            kept += fresh
+            imported += importIntoGroup(context, fresh.map { it.raw })
+            report()
+        }
+
         if (kept.isEmpty()) {
-            // "Enough" before anything carried is not a failure of the line, and
-            // saying so would send its owner looking for a fault that is not
-            // there. What was measured is reported as it stands.
             if (cancelled.get()) {
-                AppLog.info(
-                    AppLog.Section.Other,
-                    "Public configs: stopped on request after ${candidates.size} candidates, nothing had carried yet",
-                )
+                AppLog.info(AppLog.Section.Other, "Public configs: stopped on request; nothing had carried yet")
                 return Outcome(0, origin)
             }
-            AppLog.error(AppLog.Section.Other, "Public configs: none of the ${candidates.size} measured configs carried anything on this line")
+            AppLog.error(
+                AppLog.Section.Other,
+                "Public configs: none of the $measured measured carried anything on this line",
+            )
             return Outcome(0, origin)
         }
 
-        // Emptied once, then filled once, so a second collection replaces the first
-        // instead of adding to it.
-        MmkvManager.clearServerList(GROUP_ID)
         val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
         group.remarks = context.getString(R.string.public_group_name)
         MmkvManager.encodeSubscription(GROUP_ID, group)
-        val added = AngConfigManager.importBatchConfig(kept.joinToString("\n") { it.first.raw }, GROUP_ID, true).first
         setFresh(false)
         AppLog.info(
             AppLog.Section.Other,
-            "Public configs: ${kept.size} of the $wanted asked for, each made to carry real bytes here",
+            "Public configs: $imported of the $wanted asked for after $rounds round(s), " +
+                "$tried tried, $measured measured, each made to carry real bytes here",
         )
-        return Outcome(added, origin)
+        return Outcome(imported, origin)
+    }
+
+    /**
+     * The links in [lines] that have not been tried yet, in the chosen sorts.
+     *
+     * Rounds after the first take a different slice of the pool rather than the
+     * same head of the list: the head has already been tried and failed, so
+     * looking there again would burn a round to find nothing.
+     */
+    private fun selectFresh(
+        lines: List<String>,
+        options: Options,
+        seen: HashSet<String>,
+        round: Int,
+    ): List<Link> {
+        val all = select(lines.asSequence(), options.kinds, options.game, seen)
+        if (all.isEmpty()) return all
+        // How many to take this round: enough that a round is worth the tunnel it
+        // raises, and growing, since the pool that works is small.
+        val size = (options.count.coerceIn(1, MAX_COUNT) * CANDIDATES_PER_WANTED)
+            .coerceIn(ROUND_MIN, CANDIDATES_CEILING)
+        val offset = ((round - 1) * size) % all.size
+        return all.subList(offset, minOf(offset + size, all.size))
+    }
+
+    /**
+     * Imports raw links into the public group, keeping whatever is already there.
+     *
+     * Returns how many the store really took. The caller counts the group by that
+     * rather than by how many links it hoped to add: an import can drop one — a
+     * duplicate, a link the parser now refuses — and the screen would then promise
+     * a number the tab does not hold.
+     */
+    private fun importIntoGroup(context: Context, raws: List<String>): Int {
+        if (raws.isEmpty()) return 0
+        val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
+        group.remarks = context.getString(R.string.public_group_name)
+        MmkvManager.encodeSubscription(GROUP_ID, group)
+        return runCatching {
+            AngConfigManager.importBatchConfig(raws.joinToString("\n"), GROUP_ID, true).first
+        }.getOrDefault(0)
+    }
+
+    /** A TCP connect to each candidate, a few at a time; the cheap half of the test. */
+    private fun quickCheck(
+        links: List<Link>,
+        options: Options,
+        cancelled: AtomicBoolean,
+        onCount: (tried: Int) -> Unit,
+    ): List<Link> {
+        val reachable = java.util.Collections.synchronizedList(mutableListOf<Link>())
+        val pool = Executors.newFixedThreadPool(TESTING_AT_ONCE)
+        try {
+            for (batch in links.chunked(TESTING_AT_ONCE)) {
+                if (cancelled.get() || reachable.size >= links.size) break
+                val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
+                batch.forEachIndexed { index, link ->
+                    if (runCatching { answers[index].get() }.getOrDefault(false)) reachable.add(link)
+                }
+                onCount(batch.size)
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+        return reachable.toList()
     }
 
     /**

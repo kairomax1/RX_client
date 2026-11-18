@@ -2,8 +2,10 @@
 # One CIDR per line, kept fresh from the list that is published for this purpose.
 # A site that is answered from one of these is answered from the phone's own line:
 # quicker, and billed at half of what traffic abroad costs.
-10.0.0.0/8
-100.64.0.0/10
+# Private ranges are deliberately absent: 10.0.0.0/8 is where the filtering
+# page lives (10.10.34.x) and 100.64.0.0/10 is the carrier's own NAT. Treating
+# them as Iranian is what sent filtered sites out on the home line, where they
+# are blocked — the fault that stopped WhatsApp and Telegram opening.
 103.111.69.0/24
 103.111.71.0/24
 103.130.144.0/24

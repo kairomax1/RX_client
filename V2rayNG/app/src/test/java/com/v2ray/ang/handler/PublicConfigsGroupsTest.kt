@@ -1,5 +1,6 @@
 package com.v2ray.ang.handler
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -31,5 +32,18 @@ class PublicConfigsGroupsTest {
         // The screen offered up to this number and the collection quietly stopped
         // at 150 regardless: the asked-for number has to be reachable.
         assertTrue(PublicConfigs.MAX_COUNT >= 2220) { "2220 is what she was shown asking for" }
+    }
+
+    @Test
+    fun aNumberBelowTheCeilingIsNeverQuietlyReduced() {
+        // What went wrong was not the ceiling alone but that the number the owner
+        // set was replaced by one the code preferred. Every number up to the
+        // ceiling must survive as itself.
+        for (n in listOf(1, 20, 50, 150, 151, 500, 2220, PublicConfigs.MAX_COUNT)) {
+            assertEquals(n, PublicConfigs.acceptedCount(n), "the number asked for must be the number used")
+        }
+        // And something absurd is clamped rather than accepted or crashed on.
+        assertEquals(PublicConfigs.MAX_COUNT, PublicConfigs.acceptedCount(999_999))
+        assertEquals(1, PublicConfigs.acceptedCount(0))
     }
 }
