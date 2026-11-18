@@ -1,6 +1,7 @@
 package com.v2ray.ang.handler
 
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.dto.entities.RulesetItem
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -35,16 +36,31 @@ class GamingModeIranTest {
 
     @Test
     fun anIranianNameIsSettledBeforeTheTunnelledListIsConsulted() {
-        val rules = GamingMode.rulesets()
+        // The pieces a device would supply, given here so the order can be seen
+        // without a store: a filtered rule, a game rule, and the country's own.
+        val filtered = RulesetItem(
+            remarks = "Gaming: filtered and restricted sites",
+            outboundTag = AppConfig.TAG_PROXY,
+            domain = listOf("domain:example.org"),
+        )
+        val games = RulesetItem(
+            remarks = "Gaming: games on the phone's own line",
+            outboundTag = AppConfig.TAG_DIRECT,
+            domain = listOf("domain:game.example"),
+        )
+        val rules = GamingMode.ordered(listOf(games, filtered), GamingMode.iranianRule())
+
         val iranianAt = rules.indexOfFirst { it.remarks == GamingMode.IRAN_RULE }
-        // The rule that carries the filtered and restricted lists, whichever words
-        // it happens to use: it is the one that sends a name out on the tunnel.
-        val tunnelledAt = rules.indexOfFirst { it.remarks?.contains("filtered and restricted") == true }
-        assertTrue(iranianAt >= 0 && tunnelledAt >= 0)
-        // The order is the decision: whichever rule a name reaches first owns it.
-        // Iran first means a site cannot show one address to one of its names and
-        // another to the next — which is the split that leaked a foreign address.
-        assertTrue(iranianAt < tunnelledAt) { "Iranian names must be matched before filtered ones" }
+        val filteredAt = rules.indexOfFirst { it === filtered }
+        assertTrue(iranianAt >= 0 && filteredAt >= 0)
+        // Whichever a name reaches first owns it. Iran first means a site cannot
+        // show one address to one of its names and another to the next.
+        assertTrue(iranianAt < filteredAt) { "Iranian names must be matched before filtered ones" }
+        // And the owner's choice about a game still beats both, because it is a
+        // choice about latency rather than about a name.
+        assertTrue(rules.indexOfFirst { it === games } < iranianAt)
+        // Nothing is lost on the way: every rule given is in the result.
+        assertTrue(games in rules && filtered in rules)
     }
 
     @Test

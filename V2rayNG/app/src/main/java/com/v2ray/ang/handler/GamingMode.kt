@@ -440,6 +440,25 @@ object GamingMode {
             return plain
         }
 
+        return ordered(base, iranian)
+    }
+
+    /**
+     * Puts the rules in the one order that keeps a site on one line.
+     *
+     * Three claims can be made about the same name, and whichever rule it reaches
+     * first owns it. The country's own claim is settled first, because a name of
+     * this country is Iranian whether or not a list of filtered services has also
+     * heard of it: if the filtered rule won, one name of a site could leave on the
+     * tunnel and another on the home line, and the site would see two different
+     * addresses — which is exactly the split that showed a foreign address on a
+     * site being visited from here. After that the owner's choice for games, then
+     * the services that can only be answered from outside, then everything else on
+     * the home line.
+     *
+     * Kept separate from the lists themselves so the order can be read and tested.
+     */
+    internal fun ordered(base: List<RulesetItem>, iranian: RulesetItem): MutableList<RulesetItem> {
         val rules = mutableListOf<RulesetItem>()
         if (adDomains.isNotEmpty()) {
             rules += RulesetItem(
@@ -448,18 +467,6 @@ object GamingMode {
                 domain = adDomains,
             )
         }
-        // The order decides which line a name takes, and three claims can be made
-        // about the same name. What is settled once and for all is the country's
-        // own: a `.ir` name, or a name this country serves, is Iranian whether or
-        // not some list of filtered services has also heard of it. If that were
-        // not so, one name of a site could leave on the tunnel and another on the
-        // home line, and the site would see two different addresses — which is
-        // exactly the split that showed a foreign address on a site that was
-        // being visited from here.
-        //
-        // After that comes the choice the owner made for games, which is a choice
-        // about latency rather than about a name; then the services that can only
-        // be answered from outside; then everything else on the home line.
         val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
         val games = base.firstOrNull { it.remarks?.startsWith("Gaming: games") == true }
         val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
