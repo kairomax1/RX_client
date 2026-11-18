@@ -247,8 +247,11 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         quotaJob?.cancel()
         quotaJob = viewModelScope.launch {
             while (isActive) {
-                if (FirefoxVpnStore.loadAccounts(this@FirefoxVpnActivity).isNotEmpty()) {
-                    FirefoxVpnManager.liveQuota(this@FirefoxVpnActivity)?.let { (limit, remaining) ->
+                // This is the view model, not the activity: the application is the
+                // context that lives as long as the account does.
+                val context = getApplication<Application>()
+                if (FirefoxVpnStore.loadAccounts(context).isNotEmpty()) {
+                    FirefoxVpnManager.liveQuota(context)?.let { (limit, remaining) ->
                         val left = remaining.coerceIn(0L, limit)
                         _state.update { state ->
                             // Recorded whether or not a tunnel is up: the allowance is
