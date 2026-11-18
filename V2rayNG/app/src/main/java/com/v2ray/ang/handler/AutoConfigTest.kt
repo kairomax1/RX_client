@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import libv2ray.CoreCallbackHandler
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -83,6 +84,22 @@ object AutoConfigTest {
     private fun save(guid: String, value: Stored) {
         storage.encode(guid, "${value.pingMs},${value.speedKbps ?: ""}")
     }
+
+    /**
+     * Carries real bytes through this config right now, and says how quickly.
+     *
+     * A ping is only a handshake: a UDP sort — WireGuard above all — answers a
+     * handshake and then moves no data at all when its MTU is wrong or its
+     * carrier's NAT entry is gone, which is exactly the state that was reported
+     * as "it pings and does not work". Only a download can tell the difference,
+     * so this is what decides whether a config is offered to anybody.
+     *
+     * @return kbit/s measured, or null when nothing came through in [timeoutMillis].
+     */
+    suspend fun probe(context: Context, guid: String, timeoutMillis: Long = 14_000L): Int? =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMillis) { measureSpeed(context, guid) }?.takeIf { it > 0 }
+        }
 
     /** Download speed of one config in kbit/s, or null when nothing could be measured. */
     private suspend fun measureSpeed(context: Context, guid: String): Int? = withContext(Dispatchers.IO) {

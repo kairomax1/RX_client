@@ -152,7 +152,9 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val pingDone: Int = 0,
         val pingTotal: Int = 0,
         /** The phone's VPN permission is being asked for; the core cannot start without it. */
-        val askVpnPermission: Boolean = false
+        val askVpnPermission: Boolean = false,
+        /** What the tunnel has carried since it came up, read from the relay itself. */
+        val usage: FirefoxVpnRelay.Usage? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -163,7 +165,64 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
 
     init {
         loadState()
+        adoptRunningTunnel()
+        watchUsage()
     }
+
+    /**
+     * A tunnel that is up is the phone's, not this screen's. Coming back to the
+     * screen used to draw an idle page with a live tunnel behind it, and the
+     * user's next attempt to connect tore that working tunnel down first — which
+     * is why leaving and returning looked like being cut off.
+     *
+     * The check is the service's own answer, and the port is the one that was
+     * written down when the tunnel came up, so nothing is assumed from a screen
+     * that may have been away for an hour.
+     */
+    private fun adoptRunningTunnel() {
+        val context = getApplication<Application>()
+        if (!ServiceRuntimeState.isRunning(context)) return
+        val port = FirefoxVpnStore.loadTunnelPort(context)
+        if (port <= 0) return
+        val country = FirefoxVpnStore.loadTunnelCountry(context) ?: return
+        val name = FirefoxVpnStore.loadTunnelName(context).orEmpty().ifEmpty { country }
+        val info = FirefoxVpnManager.ConnectionInfo(
+            proxyHost = "",
+            proxyPort = 0,
+            proxyPassToken = "",
+            countryName = name,
+            quotaRemaining = 0L,
+            quotaLimit = 0L,
+            localPort = port,
+        )
+        _state.update {
+            it.copy(
+                connectionInfo = info,
+                selectedCountryCode = it.selectedCountryCode ?: country,
+                tested = null,
+            )
+        }
+        startMonitor(port)
+        AppLog.info(AppLog.Section.Connection, "Firefox VPN: an existing tunnel to $name is still up; keeping it")
+    }
+
+    /**
+     * Reads the relay's own byte counter four times a second while a tunnel is up.
+     * The number comes from the bytes that actually passed, so it is the traffic
+     * used and not an estimate.
+     */
+    private fun watchUsage() {
+        usageJob?.cancel()
+        usageJob = viewModelScope.launch {
+            while (isActive) {
+                val up = _state.value.connectionInfo != null
+                _state.update { it.copy(usage = if (up) FirefoxVpnRelay.usage() else null) }
+                delay(1_000)
+            }
+        }
+    }
+
+    private var usageJob: Job? = null
 
     private fun loadState() {
         val accounts = FirefoxVpnStore.loadAccounts(getApplication())
@@ -476,6 +535,19 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         }
         connectJob?.cancel()
         connectJob = viewModelScope.launch {
+            // Asking to connect while a tunnel is already up is not a reason to tear
+            // it down: the running one is re-used when it is the location asked for,
+            // and only replaced when it is not.
+            val current = _state.value.connectionInfo
+            val wanted = _state.value.selectedCountryCode
+            if (current != null && ServiceRuntimeState.isRunning(getApplication()) && current.localPort > 0 &&
+                (wanted == null || FirefoxVpnStore.loadTunnelCountry(getApplication()) == wanted)
+            ) {
+                AppLog.info(AppLog.Section.Connection, "Firefox VPN: the tunnel that is up is the one asked for; keeping it")
+                _state.update { it.copy(tested = null, error = null) }
+                startMonitor(current.localPort)
+                return@launch
+            }
             _state.update {
                 it.copy(
                     isConnecting = true,
@@ -487,6 +559,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 )
             }
             stopTunnel()
+            FirefoxVpnStore.clearTunnel(getApplication())
 
             val pass = passFor(account)
             if (pass == null) {
@@ -687,6 +760,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             "Firefox VPN: verified through ${info.countryName} (relay ${info.localPort})"
         )
         FirefoxVpnStore.saveSelectedCountry(getApplication(), countryCode)
+        FirefoxVpnStore.saveTunnel(getApplication(), info.localPort, countryCode, info.countryName)
         return info
     }
 
@@ -781,6 +855,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         monitor?.cancel()
         connectJob?.cancel()
         stopTunnel()
+        FirefoxVpnStore.clearTunnel(getApplication())
         _state.update { it.copy(connectionInfo = null, tested = null) }
         AppLog.info(AppLog.Section.Connection, "Firefox VPN disconnected")
     }
@@ -984,6 +1059,11 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
 
                 state.connectionInfo?.let { info ->
                     item { TunnelState(tested = state.tested, country = info.countryName) }
+                }
+                // What this tunnel has carried, read from the relay itself. A plan with
+                // a limit is spent without warning otherwise.
+                state.usage?.let { usage ->
+                    item { UsageCard(usage) }
                 }
 
                 if (state.isConnecting) {
@@ -1224,6 +1304,56 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
 }
 
 // ── Pieces ────────────────────────────────────────────────────────
+
+/**
+ * Live reading of what the tunnel has carried. Below it, the plan's own remaining
+ * quota when Mozilla's pass reported one — the app cannot ask for it again while a
+ * tunnel is up, so the number is what was known when it came up plus what the relay
+ * has moved since.
+ */
+@Composable
+private fun UsageCard(usage: FirefoxVpnRelay.Usage) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface.copy(alpha = 0.5f))
+            .border(1.dp, colors.onSurface.copy(alpha = 0.12f), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.firefox_vpn_usage_used),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(
+                R.string.firefox_vpn_usage_values,
+                rxBytes(usage.down),
+                rxBytes(usage.up),
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurface,
+        )
+        val minutes = ((System.currentTimeMillis() - usage.sinceMillis) / 60_000L).coerceAtLeast(0L)
+        Text(
+            text = stringResource(R.string.firefox_vpn_usage_open, minutes.toString(), usage.open.toString()),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+    }
+}
+
+/** A byte count a person reads: 1.4 MB, 812 kB, 12 B. */
+private fun rxBytes(bytes: Long): String = when {
+    bytes < 1_000 -> "$bytes B"
+    bytes < 1_000_000 -> String.format(java.util.Locale.US, "%.0f kB", bytes / 1_000.0)
+    bytes < 1_000_000_000 -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000.0)
+    else -> String.format(java.util.Locale.US, "%.2f GB", bytes / 1_000_000_000.0)
+}
 
 @Composable
 private fun SectionTitle(text: String) {

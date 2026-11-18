@@ -52,17 +52,37 @@ import java.net.InetSocketAddress
 object CoreServiceManager {
 
     /** How often the tunnel is asked, quietly, whether it still carries anything. */
-    private const val WATCH_EVERY_MILLIS = 60_000L
+    private const val WATCH_EVERY_MILLIS = 45_000L
 
     /**
      * How many empty answers in a row are answered by taking another config.
      *
      * Three, not two: a phone that loses its signal for a moment, or a network
-     * that is merely slow, must not be answered by tearing the tunnel down. A
-     * whole minute between questions and three of them unanswered is a config
-     * that is gone, not one that is catching its breath.
+     * that is merely slow, must not be answered by tearing the tunnel down.
+     *
+     * A question the phone could not ask at all — because the phone itself has
+     * no connection, or because the tunnel was being rebuilt — is not counted:
+     * it says nothing about the config, and a config was being thrown away for
+     * the state of the phone.
      */
     private const val WATCH_MISSES_BEFORE_MOVING = 3
+
+    /**
+     * The addresses the watch asks through the tunnel. Any one of them
+     * answering means the config carries traffic, so a single site being
+     * blocked on this line — which is the ordinary state of affairs on the
+     * lines this app is for — is not mistaken for a dead config. A 204 answer
+     * is small enough to cost nothing every few minutes.
+     */
+    private val WATCH_PROBES = listOf(
+        "https://cp.cloudflare.com/generate_204",
+        "https://www.gstatic.com/generate_204",
+        "https://connectivitycheck.gstatic.com/generate_204",
+        "https://detectportal.firefox.com/success.txt",
+    )
+
+    /** A short rest before a moved-to config is raised, so the old tunnel is really gone. */
+    private const val RESTART_AFTER_MILLIS = 1_200L
 
     /** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
     private const val FIREFOX_VPN_GUID = "firefox-vpn"
@@ -275,14 +295,20 @@ object CoreServiceManager {
             while (isActive) {
                 kotlinx.coroutines.delay(WATCH_EVERY_MILLIS)
                 if (!isRunning() || isReloading) continue
-                val answered = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl()) >= 0 }.getOrDefault(false) ||
-                    runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl(true)) >= 0 }.getOrDefault(false)
-                if (answered) {
+                // Without a connection of its own the phone cannot ask anything,
+                // and a silence now would be the phone's, not the config's.
+                if (!phoneIsOnline(service)) continue
+                val verdict = askThroughTunnel(service)
+                if (verdict == Verdict.Carries) {
                     misses = 0
+                    Failover.settle()
                     continue
                 }
+                if (verdict == Verdict.Unreachable) continue
                 misses++
                 if (misses < WATCH_MISSES_BEFORE_MOVING) continue
+                // The config answered nothing three times while the phone itself was
+                // online: it is gone. Another one of its group is taken.
                 val next = nextConfigAfter(guid)
                 if (next == null) {
                     AppLog.error(AppLog.Section.Connection, "The config stopped answering and there is no other one left in its group")
@@ -297,12 +323,50 @@ object CoreServiceManager {
                 // Stopping cancels this watcher, so the restart runs on its own.
                 CoroutineScope(Dispatchers.Default).launch {
                     control.stopService()
-                    kotlinx.coroutines.delay(500L)
+                    kotlinx.coroutines.delay(RESTART_AFTER_MILLIS)
                     LauncherManager.startService(service)
                 }
                 return@launch
             }
         }
+    }
+
+    /** What one question through the tunnel came back with. */
+    private enum class Verdict { Carries, Silent, Unreachable }
+
+    /**
+     * Asks every address in [WATCH_PROBES] through the tunnel and stops at the
+     * first that answers. A phone with no connection of its own is reported as
+     * [Verdict.Unreachable] rather than as a silent config, because the two are
+     * different failures with different answers and only one of them is the
+     * config's.
+     */
+    private suspend fun askThroughTunnel(context: Context?): Verdict {
+        var asked = false
+        for (address in WATCH_PROBES) {
+            if (!phoneIsOnline(context)) return Verdict.Unreachable
+            val millis = runCatching { coreController.measureDelay(address) }.getOrDefault(-1L)
+            if (millis >= 0L) return Verdict.Carries
+            // -1 was the old "nothing came back", and the core also throws when it
+            // was never asked; both are a silence of some kind, and the caller
+            // decides whether it counts.
+            asked = true
+        }
+        return if (asked) Verdict.Silent else Verdict.Unreachable
+    }
+
+    /**
+     * True when the phone has a network of its own. Asked of the system rather
+     * than guessed from a failure, so a dropped signal never spends a move.
+     */
+    private fun phoneIsOnline(context: Context?): Boolean = try {
+        val manager = context?.getSystemService(android.net.ConnectivityManager::class.java)
+        val network = manager?.activeNetwork ?: return true
+        val caps = manager.getNetworkCapabilities(network) ?: return true
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Exception) {
+        // Nothing to ask: do not let a system call decide the config's fate.
+        true
     }
 
     /**

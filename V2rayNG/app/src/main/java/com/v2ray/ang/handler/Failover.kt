@@ -17,7 +17,7 @@ package com.v2ray.ang.handler
 object Failover {
 
     /** How many configs one round may go through. */
-    private const val MAX_MOVES = 3
+    private const val MAX_MOVES = 5
 
     /** How long a connection has to carry traffic before the round is forgotten. */
     const val SETTLE_MILLIS = 60_000L
@@ -31,6 +31,18 @@ object Failover {
     @Synchronized
     fun reset() {
         tried.clear()
+        moves = 0
+    }
+
+    /**
+     * A config that carried traffic has earned the right to be judged again:
+     * what it proved is that it works, and a bad patch of line a minute later
+     * is not the same as a config that never worked. Without this a config that
+     * came back after a dropped signal kept the round it was in and was moved
+     * away from while it was working.
+     */
+    @Synchronized
+    fun settle() {
         moves = 0
     }
 
@@ -49,8 +61,13 @@ object Failover {
         if (!canMove()) return null
         val pool = guids.filter { guid -> guid.isNotBlank() && guid != current && guid !in tried }
         if (pool.isEmpty()) return null
+        // A config that was measured and answered comes first, quickest first; then
+        // one that was never measured, in the order the group holds it, because an
+        // unmeasured config in a sorted group is more promising than a measured one
+        // that was already slow.
         val measured = pool.filter { pingOf(it) > 0L }.sortedBy { pingOf(it) }
-        return measured.firstOrNull() ?: pool.firstOrNull()
+        val unknown = pool.filter { pingOf(it) <= 0L }
+        return measured.firstOrNull() ?: unknown.firstOrNull()
     }
 
     /** Remembers that [guid] is being tried now. */

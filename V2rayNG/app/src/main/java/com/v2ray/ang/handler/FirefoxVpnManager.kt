@@ -111,14 +111,23 @@ object FirefoxVpnManager {
         countryCode: String?
     ): ConnectResult = withContext(Dispatchers.IO) {
         val countries = FirefoxVpnServers.fetchServerList()
+        // A location that was chosen is the location that is used. The list is
+        // fetched again here, and the code that was saved a moment ago used to be
+        // matched against it loosely enough that a missing entry fell back to the
+        // recommended one — so choosing a country could land anywhere, which is
+        // exactly what was reported. A code that is not in the list is an error to
+        // be said out loud, not a reason to pick another one.
         val country = countries.firstOrNull { it.code == countryCode }
-            ?: FirefoxVpnServers.pickRecommended(countries)
-        val countryName = country?.name ?: "Recommended"
+        if (countryCode != null && countryCode != FirefoxVpnServers.RECOMMENDED_CODE && country == null) {
+            return@withContext ConnectResult.Error("no-such-country:$countryCode")
+        }
+        val chosenCountry = country ?: FirefoxVpnServers.pickRecommended(countries)
+        val countryName = chosenCountry?.name ?: "Recommended"
 
         // Nearest first: the list names several addresses for one location and
         // does not say which of them is close, so the tunnel used to be given
         // whichever came first. The relay still falls back down the list.
-        val endpoints = FirefoxVpnServers.nearestFirst(endpointsOf(countries, country, pass))
+        val endpoints = FirefoxVpnServers.nearestFirst(endpointsOf(countries, chosenCountry, pass))
         if (endpoints.isEmpty()) {
             return@withContext ConnectResult.Error("no-address")
         }
@@ -151,7 +160,7 @@ object FirefoxVpnManager {
      */
     private fun endpointsOf(
         countries: List<FirefoxVpnServers.Country>,
-        country: FirefoxVpnServers.Country?,
+        chosenCountry: FirefoxVpnServers.Country?,
         pass: FirefoxVpnGuardian.ProxyPass
     ): List<FirefoxVpnRelay.Endpoint> {
         val list = mutableListOf<FirefoxVpnRelay.Endpoint>()
@@ -167,11 +176,20 @@ object FirefoxVpnManager {
                 .take(limit)
                 .forEach { server -> add(server.connectHost, server.tunnelPort, item.name) }
         }
-        addCountry(country, 2)
-        val recommended = FirefoxVpnServers.pickRecommended(countries)
-        if (recommended != null && recommended.code != country?.code) addCountry(recommended, 1)
+        // Only the chosen country's own addresses, and enough of them to survive one
+        // being refused. A recommended location is added only when there was no
+        // choice at all — otherwise "choose Germany" could be answered by a tunnel
+        // that leaves somewhere else, which is what made the choice look random.
+        addCountry(chosenCountry, 4)
+        if (chosenCountry == null) {
+            val recommended = FirefoxVpnServers.pickRecommended(countries)
+            if (recommended != null) addCountry(recommended, 2)
+        }
+        // The address named in the pass is the last resort: it is a working door
+        // even when the list is stale, and refusing it because it is somewhere else
+        // would leave a phone with no tunnel at all.
         add(pass.proxyHost, pass.proxyPort, "the pass")
-        return list.take(4)
+        return list.take(5)
     }
 
     /** Creates a new account ID. */

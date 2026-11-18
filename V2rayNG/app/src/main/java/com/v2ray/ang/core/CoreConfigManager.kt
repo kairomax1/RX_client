@@ -18,6 +18,7 @@ import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -34,6 +35,11 @@ object CoreConfigManager {
      * Build the runtime configuration for normal startup.
      */
     fun getV2rayConfig(context: Context, guid: String): ConfigResult {
+        // Mux and fragment are one set of settings that the core reads while it
+        // builds an outbound, so they have to be the ones this config was
+        // measured with. Setting them here means a config change can never be
+        // connected with the previous config's answer.
+        Tuning.applyFor(guid)
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
                 ?: return ConfigResult(
@@ -61,6 +67,7 @@ object CoreConfigManager {
      * The core flow is reused, then non-essential sections are removed.
      */
     fun getV2rayConfig4Speedtest(context: Context, guid: String): ConfigResult {
+        Tuning.applyFor(guid)
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
                 ?: return ConfigResult(

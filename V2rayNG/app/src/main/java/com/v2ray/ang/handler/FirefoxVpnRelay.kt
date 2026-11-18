@@ -169,6 +169,26 @@ object FirefoxVpnRelay {
     @Volatile
     private var lastFailureLogAt = 0L
 
+    /** Bytes carried since the relay was started: down is what the phone received. */
+    private val bytesDown = java.util.concurrent.atomic.AtomicLong(0)
+    private val bytesUp = java.util.concurrent.atomic.AtomicLong(0)
+    private val startedAt = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** One reading of the counter, taken when it is asked for. */
+    data class Usage(val down: Long, val up: Long, val sinceMillis: Long, val open: Int)
+
+    /**
+     * What this tunnel has carried so far. Counted where the bytes pass, in
+     * [pump], so the number is the real traffic and not an estimate: that is the
+     * only figure worth showing somebody on a plan with a limit.
+     */
+    fun usage(): Usage = Usage(
+        down = bytesDown.get(),
+        up = bytesUp.get(),
+        sinceMillis = startedAt.get(),
+        open = openSockets.size,
+    )
+
     /**
      * Starts the relay and returns the loopback port the core should use.
      * [cloudflareAddress] is the user's own Worker; without it the proxy is
@@ -188,6 +208,9 @@ object FirefoxVpnRelay {
         this.shape = SHAPES[0]
         this.problem = null
         failures.set(0)
+        bytesDown.set(0)
+        bytesUp.set(0)
+        startedAt.set(System.currentTimeMillis())
 
         val server = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         serverSocket = server
@@ -565,9 +588,9 @@ object FirefoxVpnRelay {
             // silent after the connection was announced.
             val pipe = upstream
             val back = thread(name = "firefox-vpn-down", isDaemon = true) {
-                pump(pipe.input, toClient)
+                pump(pipe.input, toClient, down = true)
             }
-            pump(fromClient, pipe.output)
+            pump(fromClient, pipe.output, down = false)
             try {
                 back.join(2000)
             } catch (_: Exception) {
@@ -823,7 +846,7 @@ object FirefoxVpnRelay {
         return if (authority.contains(':')) authority else "$authority:80"
     }
 
-    private fun pump(input: InputStream, output: OutputStream) {
+    private fun pump(input: InputStream, output: OutputStream, down: Boolean) {
         val buffer = ByteArray(PUMP_BUFFER_BYTES)
         while (true) {
             val read = try {
@@ -835,6 +858,7 @@ object FirefoxVpnRelay {
             try {
                 output.write(buffer, 0, read)
                 output.flush()
+                if (down) bytesDown.addAndGet(read.toLong()) else bytesUp.addAndGet(read.toLong())
             } catch (_: Exception) {
                 break
             }

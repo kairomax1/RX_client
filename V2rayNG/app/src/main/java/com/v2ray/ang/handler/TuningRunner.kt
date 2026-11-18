@@ -48,9 +48,14 @@ object TuningRunner {
             onPhase(Phase.Searching)
             AppLog.info(AppLog.Section.Connection, "Tuning: looking for the fastest settings")
             var best = Tuning.PLAIN
+            // The answer from last time leads the search and starts as the one to
+            // beat: a line that has not changed costs two attempts instead of five,
+            // and one that has changed is still found because the rest is measured.
+            val known = Tuning.best(guid)?.takeIf { !Tuning.stale(guid) }
+            if (known != null) best = known
             var bestMillis = Long.MAX_VALUE
 
-            for (choice in Tuning.plan(profile)) {
+            for (choice in Tuning.plan(profile, known)) {
                 coroutineContext.ensureActive()
                 Tuning.apply(choice)
                 val millis = withChoice(context) { Tuning.measure() }

@@ -176,4 +176,38 @@ object FirefoxVpnStore {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getString("active_account", null)
     }
+
+    // ── The tunnel that is up ─────────────────────────────────────
+    //
+    // The screen is not the tunnel. Leaving it used to leave nothing behind that
+    // knew a tunnel was up, so coming back drew a screen with no connection on it
+    // — and the next screen that did draw one saw a tunnel nobody was watching,
+    // which is the "it is cut when I come back" that was reported. The fact is
+    // written down where the service itself can be asked about it afterwards.
+
+    fun saveTunnel(context: Context, localPort: Int, countryCode: String, countryName: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("tunnel_port", localPort)
+            .putString("tunnel_country", countryCode)
+            .putString("tunnel_name", countryName)
+            .apply()
+    }
+
+    fun loadTunnelPort(context: Context): Int =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getInt("tunnel_port", 0)
+
+    fun loadTunnelCountry(context: Context): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString("tunnel_country", null)
+
+    fun loadTunnelName(context: Context): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString("tunnel_name", null)
+
+    fun clearTunnel(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .remove("tunnel_port")
+            .remove("tunnel_country")
+            .remove("tunnel_name")
+            .apply()
+    }
 }

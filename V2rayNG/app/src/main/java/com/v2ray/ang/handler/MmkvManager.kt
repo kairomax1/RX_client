@@ -420,7 +420,11 @@ object MmkvManager {
         val subId = getSubscriptionId(subscriptionId)
         val serverList = decodeServerList(subId)
 
-        // Remove all servers in the list
+        // Remove all servers in the list. The empties have to be written
+        // explicitly: clearing the decoded list and encoding it again writes back
+        // exactly what was read, so the profiles stayed on disk and every refresh
+        // added its batch to the ones already there — which is what "it keeps
+        // adding more and more of them" was.
         serverList.forEach { guid ->
             if (getSelectServer() == guid) {
                 mainStorage.remove(KEY_SELECTED_SERVER)
@@ -429,8 +433,21 @@ object MmkvManager {
             serverAffStorage.remove(guid)
         }
 
-        serverList.clear()
-        encodeServerList(serverList, subId)
+        encodeServerList(ArrayList(), subId)
+    }
+
+    /**
+     * Empties a group and keeps its place in the list. Unlike [removeServerViaSubid]
+     * the group itself stays, so the tab does not disappear while it is being refilled.
+     */
+    fun clearServerList(subscriptionId: String) {
+        val subId = getSubscriptionId(subscriptionId)
+        decodeServerList(subId).forEach { guid ->
+            if (getSelectServer() == guid) mainStorage.remove(KEY_SELECTED_SERVER)
+            profileFullStorage.remove(guid)
+            serverAffStorage.remove(guid)
+        }
+        encodeServerList(ArrayList(), subId)
     }
 
     /**

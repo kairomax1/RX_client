@@ -211,9 +211,14 @@ class MainViewModel(
 
     private var tuningNoticeJob: Job? = null
 
-    /** True when this config has never had its mux and fragment settings measured here. */
+    /**
+     * True when this config's mux and fragment settings have never been measured
+     * here, or were measured so long ago that the answer is no longer about this
+     * line. Every new config therefore gets its own search, which is what "the
+     * settings are not checked when the config changes" was about.
+     */
     fun needsTuning(guid: String?): Boolean =
-        guid != null && Tuning.best(guid) == null
+        guid != null && (Tuning.best(guid) == null || Tuning.stale(guid))
 
     /** Selects the built-in Aether profile and connects through it. */
     fun connectAether() {

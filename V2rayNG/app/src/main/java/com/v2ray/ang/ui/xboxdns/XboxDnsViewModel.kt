@@ -21,7 +21,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-enum class ScanPhase { Idle, Sweeping, Proving, Done }
+enum class ScanPhase { Idle, OwnLine, Sweeping, Proving, Done }
 
 data class XboxDnsUiState(
     val phase: ScanPhase = ScanPhase.Idle,
@@ -41,6 +41,14 @@ data class XboxDnsUiState(
     val ordinary: List<XboxDns.Proven> = emptyList(),
     val stopped: Boolean = false,
     val purpose: XboxDns.Purpose = XboxDns.Purpose.Xbox,
+    /** What this line does with the names by itself, asked before any server is touched. */
+    val ownLine: XboxDns.OwnLine? = null,
+    /**
+     * Every server that answered, with what it did for the app, measured. This is
+     * the list shown: it starts with what works on this line and ends with what
+     * only answers.
+     */
+    val all: List<XboxDns.Proven> = emptyList(),
 )
 
 class XboxDnsViewModel(application: Application) : AndroidViewModel(application) {
@@ -72,15 +80,31 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun scan(flag: AtomicBoolean, purpose: XboxDns.Purpose) {
         val context = getApplication<Application>()
+
+        // First: what does this line do by itself? Everything after this is
+        // judged against that answer, and it is what decides whether the relays
+        // are the answer or only an option.
+        _state.update { it.copy(phase = ScanPhase.OwnLine) }
+        val own = runCatching { XboxDns.ownLine(flag) }.getOrNull()
+        _state.update { it.copy(ownLine = own) }
+        if (own != null) {
+            AppLog.info(
+                AppLog.Section.Other,
+                "DNS scan: this line's own resolver answered ${own.resolved} of ${XboxDns.APP_NAMES.size} " +
+                    "Xbox names" + (if (own.millis > 0) " in ${own.millis} ms" else "") +
+                    if (own.answers) "; Xbox already works here without a relay" else "; Xbox does not answer here without help",
+            )
+        }
+
         runCatching { XboxDns.updateList(context) }
         val named = XboxDns.loadNamed(context)
         val addresses = XboxDns.loadAll(context, named)
-        _state.update { it.copy(total = addresses.size) }
+        _state.update { it.copy(total = addresses.size, phase = ScanPhase.Sweeping) }
         AppLog.info(
             AppLog.Section.Other,
             "DNS scan for ${purpose.name}: asking ${addresses.size} servers",
         )
-        val own: (Int) -> Boolean = XboxDns::isMicrosoft
+        val ownOfLine: (Int) -> Boolean = XboxDns::isServiceSpace
 
         val heard = ConcurrentLinkedQueue<XboxDns.Heard>()
         val answered = AtomicInteger(0)
@@ -100,10 +124,20 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
         val asked = _state.value.asked
         val byAddress = all.associateBy { XboxDns.toText(it.address) }
         val common = XboxDns.commonAddresses(all, maxOf(COMMON_FLOOR, all.size / COMMON_SHARE))
-        val suspects = all.filter { XboxDns.isSuspect(it, common, own) }.map { XboxDns.toText(it.address) }
+
+        // What answered on this line comes first, in the order it answered; what
+        // looks like it might help comes after it. The order matters because the
+        // examination is cut off when time runs out, and the servers that did
+        // answer are the ones this line can actually use.
+        val answeredFirst = all.sortedBy { it.millis }.map { XboxDns.toText(it.address) }
+        val suspects = all.filter { XboxDns.isSuspect(it, common, ownOfLine) }.map { XboxDns.toText(it.address) }
         // Known anti-sanction services are examined even when the sweep missed their answer.
         val known = named.filter { it.kind == XboxDns.Kind.Sanction }.flatMap { listOf(it.primary, it.secondary) }.filter { it.isNotEmpty() }
-        val candidates = (known + suspects).distinct()
+        // Bounded: the examination raises a real TLS connection per name, so a
+        // sweep where thousands answered cannot all be examined in the time a
+        // person is willing to watch. What answered quickest comes first, so the
+        // cut falls on the slowest — the ones least likely to be worth having.
+        val candidates = (answeredFirst + suspects + known).distinct().take(EXAMINE_LIMIT)
         AppLog.info(
             AppLog.Section.Other,
             "DNS scan: ${all.size} of $asked answered, ${common.size} addresses are what everyone gives, " +
@@ -149,25 +183,35 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        // What is shown: everything that answered, in the order the sweep heard
+        // it — which is the order this line can reach them in — with the relays
+        // named as such. Nothing that answered is thrown away for being slow:
+        // a second server that answers is an alternative on a line where the
+        // first one may be cut off an hour from now.
         val isRelay = relayAddresses.toSet()
-        val plain = all.filter { XboxDns.toText(it.address) !in isRelay }
         val namedAddresses = named.flatMap { listOf(it.primary, it.secondary) }.toSet()
-        val shown = plain.filter { XboxDns.toText(it.address) in namedAddresses } +
-            plain.filter { XboxDns.toText(it.address) !in namedAddresses }.sortedBy { it.millis }.take(ORDINARY_KEPT)
-        val ordinary = shown.map { reply ->
+        val everyAnswered = all.sortedWith(
+            compareByDescending<XboxDns.Heard> { XboxDns.toText(it.address) in isRelay }
+                .thenBy { XboxDns.toText(it.address) in namedAddresses == false }
+                .thenBy { it.millis }
+        ).map { reply ->
             val address = XboxDns.toText(reply.address)
             XboxDns.Proven(
                 address = address,
                 name = named.firstOrNull { it.primary == address || it.secondary == address }?.name.orEmpty(),
                 partner = "",
-                redirects = false,
+                redirects = address in isRelay,
                 passed = 0,
                 millis = reply.millis,
             )
         }
         val relays = merge(_state.value.relays, named)
-        AppLog.info(AppLog.Section.Other, "DNS scan finished: ${relays.size} servers that help, ${plain.size} ordinary resolvers")
-        _state.update { it.copy(relays = relays, ordinary = merge(ordinary, named)) }
+        val ordinary = merge(everyAnswered.filterNot { it.redirects }, named)
+        AppLog.info(
+            AppLog.Section.Other,
+            "DNS scan finished: ${relays.size} servers that relay the app, ${ordinary.size} servers that answer here",
+        )
+        _state.update { it.copy(relays = relays, ordinary = ordinary, all = relays + ordinary) }
     }
 
     /**
@@ -194,8 +238,9 @@ class XboxDnsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private companion object {
-        const val ORDINARY_KEPT = 15
         const val EXAMINING_AT_ONCE = 24
+        /** How many servers one scan examines for real; the quickest answerers first. */
+        const val EXAMINE_LIMIT = 350
         /** An address is "what everyone gives" when more servers than this give it... */
         const val COMMON_FLOOR = 10
         /** ...or more than one in this many of those that answered. */

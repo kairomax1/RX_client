@@ -85,14 +85,75 @@ object XboxDns {
     /** What the user wants a DNS server for. */
     enum class Purpose { Xbox }
 
-    /** Lists of open DNS servers, renewed by their makers every day; read by [updateList]. */
+    /**
+     * Lists of open DNS servers, renewed by their makers every day or so; read by
+     * [updateList]. They are read as a group and whatever answers is kept, so a
+     * list that stops being published costs nothing and a list that is added
+     * costs one request.
+     *
+     * They are deliberately from everywhere, not from one country: what a server
+     * does for a game depends on where it sits and which way its owner has it
+     * configured, and no one country's list has the ones that answer a given
+     * line. Two lists are per-country so a phone whose line is in one of them
+     * starts with the neighbours it is most likely to reach.
+     */
     private val LIST_SOURCES = listOf(
+        // Open resolvers, from the four lists that are actually kept up to date.
         "https://raw.githubusercontent.com/proabiral/Fresh-Resolvers/master/resolvers.txt",
         "https://raw.githubusercontent.com/rix4uni/resolvers/main/resolvers.txt",
         "https://raw.githubusercontent.com/trickest/resolvers/main/resolvers.txt",
         "https://raw.githubusercontent.com/blechschmidt/massdns/master/lists/resolvers.txt",
+        // By country: a scan then starts with the neighbours this line is most
+        // likely to reach, which is what a phone in one of these countries needs
+        // most and what a phone anywhere else simply ignores.
         "https://public-dns.info/nameserver/ir.txt",
+        "https://public-dns.info/nameserver/tr.txt",
+        "https://public-dns.info/nameserver/ru.txt",
+        "https://public-dns.info/nameserver/ae.txt",
+        "https://public-dns.info/nameserver/sa.txt",
+        "https://public-dns.info/nameserver/iq.txt",
+        "https://public-dns.info/nameserver/pk.txt",
+        "https://public-dns.info/nameserver/in.txt",
+        "https://public-dns.info/nameserver/de.txt",
+        "https://public-dns.info/nameserver/nl.txt",
+        "https://public-dns.info/nameserver/fr.txt",
+        "https://public-dns.info/nameserver/gb.txt",
+        "https://public-dns.info/nameserver/se.txt",
+        "https://public-dns.info/nameserver/fi.txt",
+        "https://public-dns.info/nameserver/pl.txt",
+        "https://public-dns.info/nameserver/ua.txt",
+        "https://public-dns.info/nameserver/us.txt",
+        "https://public-dns.info/nameserver/ca.txt",
+        "https://public-dns.info/nameserver/br.txt",
+        "https://public-dns.info/nameserver/sg.txt",
+        "https://public-dns.info/nameserver/hk.txt",
+        "https://public-dns.info/nameserver/jp.txt",
+        "https://public-dns.info/nameserver/au.txt",
     )
+
+    /**
+     * Resolvers by name, the well-known ones and the ones that are worth having
+     * when the lists above cannot be reached at all. They cost nothing and mean
+     * a scan is never empty, which is what a phone behind a filter that blocks
+     * GitHub would otherwise get.
+     */
+    private val KNOWN_RESOLVERS = listOf(
+        "1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "149.112.112.112",
+        "208.67.222.222", "208.67.220.220", "94.140.14.14", "94.140.15.15",
+        "76.76.2.0", "76.76.10.0", "64.6.64.6", "64.6.65.6", "77.88.8.8", "77.88.8.1",
+        "84.200.69.80", "84.200.70.40", "185.228.168.9", "185.228.169.9",
+        "156.154.70.1", "156.154.71.1", "8.26.56.26", "8.20.247.20",
+        "4.2.2.1", "4.2.2.2", "4.2.2.3", "4.2.2.4", "4.2.2.5", "4.2.2.6",
+        "195.46.39.39", "195.46.39.40", "216.146.35.35", "216.146.36.36",
+        "74.82.42.42", "1.1.1.2", "1.1.1.3", "9.9.9.10", "9.9.9.11",
+        "178.22.122.100", "185.51.200.2", "10.202.10.202", "10.202.10.102",
+        "94.140.14.140", "94.140.14.141", "45.90.28.0", "45.90.30.0",
+        "2.56.220.2", "194.242.2.2", "86.54.11.13", "86.54.11.100",
+        "1.12.12.12", "45.11.45.11", "91.239.100.100", "89.233.43.71",
+    )
+
+    /** The named servers as address-and-name lines, ready for [parseAddresses]. */
+    private fun knownResolvers(): List<String> = KNOWN_RESOLVERS
     private const val EXTRA_FILE = "rx-dns-extra.txt"
     private const val KEY_LIST_CHECKED = "rx_dns_list_checked"
     private const val LIST_EVERY_MILLIS = 15 * 60 * 1000L
@@ -119,6 +180,9 @@ object XboxDns {
             known.addAll(parseAddresses(body).filterNot { isUnroutable(it) })
             MmkvManager.encodeSettings(tagKey, answer.tag)
         }
+        // The named ones are always there, so a phone that cannot reach a single
+        // list still has a spread of servers to sweep.
+        knownResolvers().forEach { toInt(it)?.let(known::add) }
         if (known.size != before) runCatching { file.writeText(known.joinToString("\n") { toText(it) }) }
         AppLog.info(AppLog.Section.Other, "DNS scanner: $answered of ${LIST_SOURCES.size} server lists answered, ${known.size - before} new servers, ${known.size} beyond the bundled ones")
         return known.size
@@ -151,6 +215,33 @@ object XboxDns {
     ).map { (first, bits) -> toInt(first)!! to (-1 shl (32 - bits)) }
 
     internal fun isMicrosoft(address: Int): Boolean = MICROSOFT.any { (first, mask) -> address and mask == first }
+
+    /**
+     * The content networks the answers of ordinary servers come from. These are not
+     * "somebody else's Microsoft": they are the edges Fastly, Cloudflare, Akamai and
+     * Amazon answer on, and an address there is the edge everybody was already
+     * given, not a relay somebody set up.
+     */
+    private val CONTENT_NETWORKS = listOf(
+        // Fastly, which serves the Xbox service's own edge.
+        "151.101.0.0" to 16, "199.232.0.0" to 16, "23.235.32.0" to 20, "185.31.16.0" to 22,
+        // Cloudflare.
+        "104.16.0.0" to 13, "104.24.0.0" to 14, "172.64.0.0" to 13, "162.158.0.0" to 15,
+        "188.114.96.0" to 20, "190.93.240.0" to 20, "197.234.240.0" to 22, "198.41.128.0" to 17,
+        "103.21.244.0" to 22, "103.22.200.0" to 22, "103.31.4.0" to 22, "141.101.64.0" to 18,
+        "108.162.192.0" to 18, "173.245.48.0" to 20, "131.0.72.0" to 22,
+        // Akamai.
+        "23.32.0.0" to 11, "23.192.0.0" to 11, "96.6.0.0" to 16, "104.64.0.0" to 11,
+        // Amazon CloudFront.
+        "13.32.0.0" to 13, "13.224.0.0" to 14, "52.84.0.0" to 15, "54.182.0.0" to 16,
+        "99.84.0.0" to 16, "18.64.0.0" to 11, "205.251.192.0" to 19,
+        // Google's edge, which answers for a great many names.
+        "142.250.0.0" to 15, "172.217.0.0" to 16, "216.58.192.0" to 19, "74.125.0.0" to 16,
+    ).map { (first, bits) -> toInt(first)!! to (-1 shl (32 - bits)) }
+
+    /** True for an address that belongs to one of the networks that serve the answers everyone gets. */
+    internal fun isServiceSpace(address: Int): Boolean =
+        isMicrosoft(address) || CONTENT_NETWORKS.any { (first, mask) -> address and mask == first }
 
     fun toText(address: Int): String =
         "${address ushr 24 and 0xFF}.${address ushr 16 and 0xFF}.${address ushr 8 and 0xFF}.${address and 0xFF}"
@@ -282,12 +373,24 @@ object XboxDns {
         return givenBy.filterValues { it > limit }.keys
     }
 
-    /** True for an address that could be a relay: reachable, not Microsoft's, not what everyone gives. */
-    internal fun isUnusual(address: Int, common: Set<Int>, own: (Int) -> Boolean = ::isMicrosoft): Boolean =
+    /**
+     * True for an address that could be a relay: reachable, not the service's own,
+     * not what everyone gives.
+     *
+     * "The service's own" is not only Microsoft's space. A relay for Xbox Live can
+     * sit in any content network — Cloudflare, Fastly, Akamai, Amazon — and the
+     * filter used to be Microsoft's addresses alone, so a relay in one of those was
+     * invisible on some networks and taken for a relay on others. That is what made
+     * the scan behave as if it were written for one line in one country. The list
+     * is now the networks that serve the answers everybody gets, and the sweep's own
+     * [common] set still does the real work: an address that most servers give is
+     * not a relay, whoever owns it.
+     */
+    internal fun isUnusual(address: Int, common: Set<Int>, own: (Int) -> Boolean = ::isServiceSpace): Boolean =
         !isUnroutable(address) && address !in common && !own(address)
 
     /** True when a sweep reply holds an address worth examining. */
-    fun isSuspect(heard: Heard, common: Set<Int>, own: (Int) -> Boolean = ::isMicrosoft): Boolean =
+    fun isSuspect(heard: Heard, common: Set<Int>, own: (Int) -> Boolean = ::isServiceSpace): Boolean =
         heard.answers.any { list -> list.any { isUnusual(it, common, own) } }
 
     /**
@@ -390,6 +493,59 @@ object XboxDns {
             sending.set(false)
             listener.join(SWEEP_TAIL_MILLIS + 1500)
         }
+    }
+
+    /**
+     * What this line itself does with the names the app asks for, before any
+     * server of the list is touched.
+     *
+     * The scan used to start by sweeping thousands of servers and only then
+     * asking whether anything helped, so a line that answers Xbox perfectly well
+     * on its own was answered by a page of relays it did not need, and a line
+     * that cannot reach Xbox at all was given the same page. This asks the
+     * phone's own resolver first: if Xbox answers here, that is said plainly and
+     * the servers are shown as what they are — an option, not a repair. If it
+     * does not, the relays are the whole point and are put first.
+     */
+    data class OwnLine(
+        /** True when the phone's own resolver gave an address for at least one name. */
+        val answers: Boolean,
+        /** How many of [APP_NAMES] the phone itself could resolve. */
+        val resolved: Int,
+        /** Milliseconds the phone's own resolver took, averaged over what it answered. */
+        val millis: Long,
+        /** Addresses the phone's own resolver gave for the first name it answered. */
+        val first: List<String>,
+    )
+
+    /**
+     * Asks the phone's own resolver the same names the sweep asks, and times it.
+     * Runs before the sweep, takes a second at most, and decides the order of
+     * what is shown afterwards.
+     */
+    fun ownLine(cancelled: AtomicBoolean = AtomicBoolean(false)): OwnLine {
+        var resolved = 0
+        var total = 0L
+        var first: List<String> = emptyList()
+        for (host in APP_NAMES) {
+            if (cancelled.get()) break
+            val started = System.nanoTime()
+            val answers = try {
+                InetAddress.getAllByName(host).mapNotNull { it.hostAddress?.takeIf { text -> text.count { it == '.' } == 3 } }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (answers.isEmpty()) continue
+            resolved++
+            total += (System.nanoTime() - started) / 1_000_000
+            if (first.isEmpty()) first = answers
+        }
+        return OwnLine(
+            answers = resolved > 0,
+            resolved = resolved,
+            millis = if (resolved == 0) 0L else total / resolved,
+            first = first,
+        )
     }
 
     /** The IPv4 addresses [server] gives for [host]; null when it does not answer. */

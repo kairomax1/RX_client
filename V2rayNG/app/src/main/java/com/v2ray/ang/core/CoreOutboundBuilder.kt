@@ -241,8 +241,15 @@ object CoreOutboundBuilder {
         return outboundBean
     }
 
-    /** Mobile carriers drop the NAT entry of a silent UDP flow within a minute; this keeps it. */
-    private const val WIREGUARD_KEEP_ALIVE_SECONDS = 25
+    /**
+     * Mobile carriers drop the NAT entry of a silent UDP flow within a minute;
+     * this keeps it. Twenty-five seconds is the usual answer, but a carrier that
+     * is quicker than that — and several are — leaves the tunnel dead for the
+     * twenty seconds before the next packet, which is exactly the "it pings but
+     * then stops working" that was reported. Fifteen is cheap (a handshake-sized
+     * packet every fifteen seconds) and is under every carrier's timer.
+     */
+    private const val WIREGUARD_KEEP_ALIVE_SECONDS = 15
 
     /**
      * The packet size for a WireGuard tunnel. Configs ask for 1420, which fits plain Ethernet
@@ -251,10 +258,17 @@ object CoreOutboundBuilder {
      * anything above 1380 is brought down to it, a smaller wish is kept.
      */
     internal fun wireguardMtu(wanted: Int?): Int = when {
-        wanted == null || wanted > 1380 -> 1280
+        // A config that asks for more than fits a mobile path is brought down to
+        // the largest size that still does; 1280 is the IPv6 minimum and is safe
+        // everywhere, but it is also the slowest, so it is the floor rather than
+        // the default.
+        wanted == null || wanted > WIREGUARD_SAFE_MTU -> WIREGUARD_SAFE_MTU
         wanted < 1280 -> 1280
         else -> wanted
     }
+
+    /** Fits a PPPoE and a mobile path (1500 minus tunnel and carrier overhead). */
+    private const val WIREGUARD_SAFE_MTU = 1360
 
     private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
         val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
@@ -273,20 +287,6 @@ object CoreOutboundBuilder {
             ipv4Addresses.ifEmpty { listOf(AppConfig.WIREGUARD_LOCAL_ADDRESS_V4) }
         }
 
-        val rawDNS = profileItem.remoteDNS
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?.ifEmpty { null }
-            ?: listOf(AppConfig.WIREGUARD_LOCAL_REMOTE_DNS)
-
-        val remotes = if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true) {
-            rawDNS
-        } else {
-            val ipv4Dns = rawDNS.filter { !it.contains(":") }
-            ipv4Dns.ifEmpty { listOf(AppConfig.WIREGUARD_LOCAL_REMOTE_DNS) }
-        }
-
         outboundBean?.settings?.let { wireguard ->
             wireguard.secretKey = profileItem.secretKey
             wireguard.address = addresses
@@ -300,7 +300,13 @@ object CoreOutboundBuilder {
             wireguard.mtu = wireguardMtu(profileItem.mtu)
             // With IPv6 off, an endpoint name is not tried over an address family that leads nowhere.
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) != true) wireguard.domainStrategy = "ForceIPv4"
-            wireguard.remoteDNS = remotes
+            // The DNS a WireGuard outbound carries is asked inside the tunnel by the
+            // core, before routing is consulted — so a resolver written here answers
+            // every name, including the ones that must be answered at home, and
+            // the anti-sanction relays stop being used at all. Blank means the
+            // core asks through its own DNS section, which is the one that knows
+            // which names belong on which line.
+            wireguard.remoteDNS = emptyList()
             wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
         }
 

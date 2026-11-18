@@ -85,20 +85,56 @@ object Tuning {
     /**
      * The combinations worth measuring for this config, plainest first so that a
      * measurement cut short still leaves the config usable.
+     *
+     * [known] is what was found for this config last time. It is tried among the
+     * first two, because a line rarely changes from one hour to the next and
+     * the answer from last time is therefore the best guess at this time; the
+     * rest of the list is still measured, so a line that did change is noticed.
      */
-    fun plan(profile: ProfileItem?): List<Choice> {
+    fun plan(profile: ProfileItem?, known: Choice? = null): List<Choice> {
         val mux = supportsMux(profile)
         val fragment = supportsFragment(profile)
         if (!mux && !fragment) return listOf(PLAIN)
         val choices = mutableListOf(PLAIN)
+        // The one that won on this config before goes second: if it still wins,
+        // the search is over after two attempts instead of five.
+        if (known != null && known != PLAIN && (supportsMux(profile) || !known.mux) &&
+            (supportsFragment(profile) || !known.fragment)
+        ) {
+            choices += known
+        }
         if (fragment) choices += FRAGMENT
         if (mux) choices += MUX
         if (fragment) choices += FRAGMENT_FINE
         if (mux && fragment) choices += BOTH
-        return choices
+        return choices.distinctBy { it.key }
     }
 
     // ── Applying and remembering ──────────────────────────────────
+
+    /**
+     * The settings a choice is written into are global: the core reads one set
+     * when it builds an outbound. A choice found for one config was therefore
+     * being applied to whatever came next, which is why a config nobody had
+     * looked at was connected with the previous config's answer — the
+     * "mux and fragment are not checked when the config changes" that was
+     * reported. Every build now says which config it is for, and the settings are
+     * rewritten from that config's own answer first.
+     */
+
+    /** The combination this config should be built with; null when it was never measured. */
+    fun choiceFor(guid: String?): Choice? = if (guid.isNullOrBlank()) null else best(guid)
+
+    /**
+     * Writes the combination found for [guid] into the settings the core reads.
+     * A config that has never been measured gets the plain one: it is the
+     * config as its maker wrote it, which is what "not measured yet" has to
+     * mean. Called just before a config is built, so the settings always
+     * describe the config being built rather than whichever was built last.
+     */
+    fun applyFor(guid: String?) {
+        apply(choiceFor(guid) ?: PLAIN)
+    }
 
     /** Writes a combination into the settings the core reads when it builds an outbound. */
     fun apply(choice: Choice) {
@@ -116,14 +152,29 @@ object Tuning {
             allChoices.firstOrNull { it.key == key }
         }
 
+    /**
+     * How long an answer is trusted. A carrier changes its filtering between
+     * the morning and the evening, and a hotel Wi-Fi is not the phone's own
+     * line at all; an answer older than this is looked for again.
+     */
+    private const val TRUSTED_FOR_MILLIS = 12 * 60 * 60 * 1000L
+
     /** Remembers what won, so the same config is not measured again on the same line. */
     fun remember(guid: String, choice: Choice) {
         MmkvManager.encodeSettings(PREF_PREFIX + guid, choice.key)
+        MmkvManager.encodeSettings(PREF_PREFIX + "at_" + guid, System.currentTimeMillis())
     }
 
     /** Forgets it: the next connection looks again. */
     fun forget(guid: String) {
         MmkvManager.encodeSettings(PREF_PREFIX + guid, "")
+        MmkvManager.encodeSettings(PREF_PREFIX + "at_" + guid, 0L)
+    }
+
+    /** True when the answer for [guid] was found too long ago to be trusted now. */
+    fun stale(guid: String): Boolean {
+        val at = MmkvManager.decodeSettingsLong(PREF_PREFIX + "at_" + guid, 0L)
+        return at <= 0L || System.currentTimeMillis() - at > TRUSTED_FOR_MILLIS
     }
 
     /** Forgets every config: for when the phone moves to another network for good. */

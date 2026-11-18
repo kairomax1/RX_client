@@ -859,6 +859,9 @@
     <string name="xbox_dns_nameless">بی‌نام</string>
     <string name="xbox_dns_result_line">%1$s از %2$s نشانی Xbox  •  %3$s میلی‌ثانیه</string>
     <string name="xbox_dns_none">روی این اینترنت هیچ DNSی نشانی‌های برنامهٔ Xbox را از سرور خودش رد نکرد. یعنی هیچ‌کدام تحریم Xbox را دور نمی‌زند. روی یک اینترنت دیگر (وای‌فای یا سیم‌کارت دیگر) هم امتحان کن.</string>
+    <string name="xbox_dns_own_ok">خط خودت به %1$s از %2$s نامِ ایکس‌باکس جواب داد. یعنی ایکس‌باکس روی همین خط بدون واسطه کار می‌کند؛ سرورهای پایین فقط گزینه‌اند، نه تعمیر.</string>
+    <string name="xbox_dns_own_no">خط خودت به هیچ‌کدام از %2$s نامِ ایکس‌باکس جواب نداد (%1$s جواب داد). بدون واسطه، ایکس‌باکس روی این خط کار نمی‌کند.</string>
+    <string name="xbox_dns_own_millis">خط خودت در %1$s میلی‌ثانیه جواب داد</string>
     <string name="xbox_dns_relays_title">ضدتحریم‌ها (%1$s)</string>
     <string name="xbox_dns_show_plain">نمایش معمولی‌ها (%1$s)</string>
     <string name="xbox_dns_hide_plain">بستن معمولی‌ها</string>
@@ -902,6 +905,9 @@
     <string name="firefox_vpn_enter_email_code">کدی که به %1$s ارسال شده را وارد کن</string>
     <string name="firefox_vpn_enter_totp">کد احراز هویت خود را وارد کن</string>
     <string name="firefox_vpn_quota">مصرف %.1f گیگ از %.1f گیگ</string>
+    <string name="firefox_vpn_usage_used">حجمِ مصرفی روی این تونل</string>
+    <string name="firefox_vpn_usage_values">%1$s دریافتی · %2$s ارسالی</string>
+    <string name="firefox_vpn_usage_open">%1$s دقیقه روشن · %2$s اتصال</string>
     <string name="firefox_vpn_section_account">حساب</string>
     <string name="firefox_vpn_section_country">موقعیت</string>
     <string name="firefox_vpn_section_usage">مصرف</string>

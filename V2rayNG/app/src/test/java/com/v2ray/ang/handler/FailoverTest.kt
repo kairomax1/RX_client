@@ -48,15 +48,30 @@ class FailoverTest {
     }
 
     @Test
-    fun theRoundEndsAfterThreeMovesAndNothingIsOfferedAfterwards() {
+    fun theRoundEndsAfterFiveMovesAndNothingIsOfferedAfterwards() {
         assertTrue(Failover.canMove())
-        repeat(3) {
-            val picked = next("a")
+        val group = listOf("a", "b", "c", "d", "e", "f")
+        repeat(5) {
+            val picked = next("a", group)
             assertTrue(picked != null)
             Failover.moved(picked!!)
         }
         assertFalse(Failover.canMove())
-        assertNull(next("a"))
+        assertNull(next("a", group))
+    }
+
+    @Test
+    fun aConfigThatCarriedTrafficEarnsAFullRoundAgain() {
+        // Four moves in a row: the round is nearly spent.
+        val group = listOf("a", "b", "c", "d", "e", "f")
+        repeat(4) { Failover.moved(next("a", group)!!) }
+        assertTrue(next("a", group) != null)
+        // Then the config that was taken carries traffic, which is proof it works.
+        Failover.settle()
+        assertTrue(Failover.canMove())
+        // The configs already tried in the old round are not offered again on this
+        // line either, so the same three are not walked through twice.
+        assertEquals("f", next("a", group))
     }
 
     @Test

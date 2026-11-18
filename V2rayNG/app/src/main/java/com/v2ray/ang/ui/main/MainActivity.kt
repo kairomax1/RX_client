@@ -36,7 +36,6 @@ import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLog
-import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
@@ -316,12 +315,14 @@ class MainActivity : HelperBaseComponentActivity() {
         ) {
             checkAndRequestPermission(PermissionType.ACCESS_LOCAL_NETWORK) {}
         }
-        // A config that has never been measured on this line is measured first:
-        // which mux and fragment settings are fastest depends on the network.
-        // Not while gaming: a search raises and drops the tunnel once for each
-        // setting it tries, and a game is not improved by a phone that cannot
-        // settle. The last setting found for the config is what it gets.
-        if (!GamingMode.isEnabled() && mainViewModel.needsTuning(state.selectedGuid)) {
+        // Every config is measured on this line before it is used: which mux and
+        // fragment settings are fastest depends on the network, and the answer
+        // found for one config says nothing about the next. This used to be
+        // skipped while gaming, which is why a config could be played through
+        // carrying settings that lost packets; it now runs there too, and the
+        // one combination that was found for this config last time is tried
+        // first so the search is two attempts rather than five.
+        if (mainViewModel.needsTuning(state.selectedGuid)) {
             tuneThenConnect(state.selectedGuid.orEmpty())
             return
         }

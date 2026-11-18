@@ -22,8 +22,16 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Free public configs: collected from open lists, filtered for safety, tried on the user's own
@@ -50,6 +58,15 @@ object PublicConfigs {
     private const val REFRESH_MILLIS = 3 * 60 * 60 * 1000L
     private const val CONNECT_MILLIS = 2500
     private const val TESTING_AT_ONCE = 48
+
+    /** The group a candidate is put in while it is being measured; never shown. */
+    private const val PENDING_GROUP = "rx_public_pending"
+
+    /** How many candidates carry a real download at the same time. */
+    private const val VERIFY_AT_ONCE = 4
+
+    /** How long one candidate has to carry a small download before it is refused. */
+    private const val VERIFY_TIMEOUT_MILLIS = 18_000L
     private const val MAX_TRIED = 4000
     private const val MAX_BYTES = 3_000_000
 
@@ -67,9 +84,30 @@ object PublicConfigs {
     /** [direct]: reached straight over TCP or UDP, not through a web transport made for CDNs. */
     data class Link(val raw: String, val kind: Kind, val host: String, val port: Int, val direct: Boolean = true)
 
-    data class Options(val kinds: Set<Kind>, val count: Int, val mux: Boolean, val fragment: Boolean, val game: Boolean = false)
+    data class Options(
+        val kinds: Set<Kind>,
+        val count: Int,
+        val mux: Boolean,
+        val fragment: Boolean,
+        val game: Boolean = false,
+        /**
+         * Measure each config by carrying real bytes before it is kept. False only
+         * where a tunnel cannot be raised (a test, a build machine); every screen
+         * that talks to a person leaves it true, because a config that was not
+         * made to carry something is not known to work.
+         */
+        val verify: Boolean = true,
+    )
 
-    data class Progress(val origin: Origin?, val found: Int, val tried: Int, val reachable: Int)
+    data class Progress(
+        val origin: Origin?,
+        val found: Int,
+        val tried: Int,
+        val reachable: Int,
+        /** Configs measured by carrying real bytes so far, and how many carried. */
+        val verified: Int = 0,
+        val carried: Int = 0,
+    )
 
     data class Outcome(val added: Int, val origin: Origin)
 
@@ -117,7 +155,21 @@ object PublicConfigs {
         Source("MhdiTaheri/V2rayCollector_Py", "main", "sub/Mix/mix.txt"),
         Source("barry-far/V2ray-Config", "main", "Sub1.txt"),
         Source("barry-far/V2ray-Config", "main", "Sub2.txt"),
+        // Collected from channels that test before publishing, which is what the
+        // speed of a public group is really made of.
+        Source("Kwinshadow/TelegramV2rayCollector", "main", "sublinks/mix.txt"),
+        Source("Kwinshadow/TelegramV2rayCollector", "main", "sublinks/vless.txt"),
+        Source("w1770946466/Auto_proxy", "main", "Long_term_subscription_num"),
+        Source("w1770946466/Auto_proxy", "main", "Long_term_subscription_try"),
+        Source("mahdibland/ShadowsocksAggregator", "master", "Eternity.txt"),
+        Source("mahdibland/ShadowsocksAggregator", "master", "EternityAir.txt"),
+        Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/mix"),
+        Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/reality"),
         // Large lists, read only when the ones above were not enough.
+        Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/cdn", small = false),
+        Source("mahdibland/ShadowsocksAggregator", "master", "sub/sub_merge_base64.txt", small = false),
+        Source("mahdibland/ShadowsocksAggregator", "master", "sub/airport_sub_merge.txt", small = false),
+        Source("mahdibland/ShadowsocksAggregator", "master", "EternityBase", small = false),
         Source("sakha1370/OpenRay", "main", "output/site_access/all_sites.txt", small = false),
         Source("shabane/kamaji", "master", "hub/self/tested/merged.txt", small = false),
         Source("Delta-Kronecker/V2ray-Config", "main", "config/all_configs.txt", small = false),
@@ -424,7 +476,21 @@ object PublicConfigs {
         MmkvManager.encodeSettings(KEY_CHECKED, now)
         if (!download(context, small = true).changed) return false
         setFresh(true)
-        return true
+        // The lists changed, and the group is what is out of date: a dot on a button
+        // that only clears when somebody walks to the screen is not a refresh, and
+        // was why the public configs were the same ones weeks later.
+        val options = savedOptions()
+        val outcome = runCatching { collect(context, options, AtomicBoolean(false)) { } }.getOrNull()
+        if (outcome != null && outcome.added > 0) {
+            AppLog.info(
+                AppLog.Section.Other,
+                "Public configs: the group was renewed by itself, ${outcome.added} configs",
+            )
+            setFresh(false)
+            runCatching { SettingsChangeManager.makeSetupGroupTab() }
+            return true
+        }
+        return false
     }
 
     /** Looks at the lists every three hours, also while the app is closed. */
@@ -483,13 +549,19 @@ object PublicConfigs {
     }
 
     /**
-     * Gets the lists, keeps the safe links of the chosen sorts, tries each server from this
-     * connection and puts those that can be reached into the public group, replacing what was
-     * there. Three times the wanted number go in, because the real test that follows (a
-     * request through each config) drops many more; [prune] then keeps the best.
+     * Gets the lists, keeps the safe links of the chosen sorts, and puts into the
+     * public group exactly [Options.count] configs that were each made to carry
+     * real bytes on this connection, best first.
      *
-     * Servers that speak UDP (Hysteria, WireGuard) cannot be tried with a plain connection;
-     * only their address is looked at, and the real test decides.
+     * The order of the work is the point. Three times the wanted number were
+     * imported before, then a real test dropped the ones that did not work —
+     * which meant a screen full of configs that had never carried anything, a
+     * first connection that had to wait for the test to sort them out, and a
+     * group that could hold more than was asked for. Now the count is worked
+     * towards from the other end: candidates are measured one at a time and a
+     * config only goes in when it carried a download and was quickest of what
+     * has been measured. The group is emptied first and filled exactly once, so
+     * a second collection replaces the first instead of adding to it.
      */
     fun collect(context: Context, options: Options, cancelled: AtomicBoolean, onProgress: (Progress) -> Unit): Outcome {
         onProgress(Progress(null, 0, 0, 0))
@@ -500,19 +572,23 @@ object PublicConfigs {
             else -> Origin.Bundled
         }
         if (origin == Origin.Fresh) MmkvManager.encodeSettings(KEY_CHECKED, System.currentTimeMillis())
+        val wanted = options.count.coerceIn(1, MAX_COUNT)
         val seen = HashSet<String>()
-        val wanted = options.count * 3
         val reachable = ArrayList<Link>()
         var found = 0
         var tried = 0
         val pool = Executors.newFixedThreadPool(TESTING_AT_ONCE)
+
+        // Enough candidates to measure: the ones that answer a connection are only
+        // a start, and a download through each of them takes a few seconds.
+        val candidatesWanted = maxOf(wanted * 3, wanted + 10)
 
         fun tryAll(lines: List<String>) {
             val links = select(lines.asSequence(), options.kinds, options.game, seen)
             found += links.size
             onProgress(Progress(origin, found, tried, reachable.size))
             for (batch in links.chunked(TESTING_AT_ONCE)) {
-                if (cancelled.get() || reachable.size >= wanted || tried >= MAX_TRIED) break
+                if (cancelled.get() || reachable.size >= candidatesWanted || tried >= MAX_TRIED) break
                 val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
                 batch.forEachIndexed { index, link -> if (runCatching { answers[index].get() }.getOrDefault(false)) reachable.add(link) }
                 tried += batch.size
@@ -523,45 +599,154 @@ object PublicConfigs {
         try {
             tryAll(if (origin == Origin.Bundled) context.assets.open(ASSET).bufferedReader().use { it.readLines() } else first.lines)
             // Not enough from the short lists: the large ones are read as well.
-            if (reachable.size < wanted && !cancelled.get()) tryAll(download(context, small = false).lines)
+            if (reachable.size < candidatesWanted && !cancelled.get()) tryAll(download(context, small = false).lines)
         } finally {
             pool.shutdownNow()
         }
-        val chosen = select(reachable.asSequence().map { it.raw }, options.kinds).take(wanted)
+        // A server that answered nothing over TCP is no candidate; one that answered
+        // is measured properly below, which is the only test that decides.
+        val candidates = select(reachable.asSequence().map { it.raw }, options.kinds).take(candidatesWanted)
         AppLog.info(
             AppLog.Section.Other,
             "Public configs: list ${origin.name.lowercase()}, $found safe links of the chosen sorts" +
-                (if (options.game) " (game mode)" else "") + ", $tried tried, ${chosen.size} go to the real test",
+                (if (options.game) " (game mode)" else "") + ", $tried tried, " +
+                "${candidates.size} good enough to be measured properly",
         )
-        if (chosen.isEmpty()) return Outcome(0, origin)
+        if (candidates.isEmpty()) return Outcome(0, origin)
 
         MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
-        MmkvManager.encodeSettings(KEY_COUNT, options.count)
-        MmkvManager.removeServerViaSubid(GROUP_ID)
+        MmkvManager.encodeSettings(KEY_COUNT, wanted)
+
+        // Measured before they are imported. Importing first and measuring second is
+        // what left the group holding configs that had never carried a byte.
+        val kept = verify(context, candidates, wanted, options.verify, cancelled) { verified, carried ->
+            onProgress(Progress(origin, found, tried, reachable.size, verified, carried))
+        }
+        if (kept.isEmpty()) {
+            AppLog.error(AppLog.Section.Other, "Public configs: none of the ${candidates.size} measured configs carried anything on this line")
+            return Outcome(0, origin)
+        }
+
+        // Emptied once, then filled once, so a second collection replaces the first
+        // instead of adding to it.
+        MmkvManager.clearServerList(GROUP_ID)
         val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
         group.remarks = context.getString(R.string.public_group_name)
         MmkvManager.encodeSubscription(GROUP_ID, group)
-        val added = AngConfigManager.importBatchConfig(chosen.joinToString("\n") { it.raw }, GROUP_ID, true).first
+        val added = AngConfigManager.importBatchConfig(kept.joinToString("\n") { it.first.raw }, GROUP_ID, true).first
         setFresh(false)
+        AppLog.info(
+            AppLog.Section.Other,
+            "Public configs: ${kept.size} of the $wanted asked for, each made to carry real bytes here",
+        )
         return Outcome(added, origin)
     }
 
     /**
-     * After the real test: drops every config of the group that did not answer, keeps the
-     * [keep] quickest and names them by country. Returns how many stay.
+     * Measures candidates by raising a tunnel for each and downloading through it,
+     * and returns the quickest [wanted] that carried anything, with their speeds.
+     *
+     * A few run at once and the search stops as soon as [wanted] have carried: the
+     * point is a group that works, not a league table.
      */
-    fun prune(keep: Int): Int {
-        val all = MmkvManager.decodeServerList(GROUP_ID)
-        val best = all.mapNotNull { guid ->
-            (MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L).takeIf { it > 0 }?.let { guid to it }
-        }.sortedBy { it.second }.take(keep).map { it.first }
-        MmkvManager.removeServers(all.filter { it !in best }, GROUP_ID)
-        AppLog.info(AppLog.Section.Other, "Public configs: ${all.size} tested through the core, ${best.size} answered and stay")
-        runCatching { nameByCountry(best) }
-        return best.size
+    private suspend fun verify(
+        context: Context,
+        candidates: List<Link>,
+        wanted: Int,
+        verify: Boolean,
+        cancelled: AtomicBoolean,
+        onProgress: (verified: Int, carried: Int) -> Unit,
+    ): List<Pair<Link, Int>> = coroutineScope {
+        if (!verify) return@coroutineScope candidates.take(wanted).map { it to 0 }
+        val gate = Semaphore(VERIFY_AT_ONCE)
+        val carried = java.util.Collections.synchronizedList(mutableListOf<Pair<Link, Int>>())
+        val done = java.util.concurrent.atomic.AtomicInteger(0)
+        // Every measurement runs through one tunnel at a time: a core is a single
+        // engine with one routing table, so two configs raised at once would be
+        // measuring each other's traffic as well as their own.
+        val oneAtATime = Mutex()
+        candidates.map { link ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    if (cancelled.get() || carried.size >= wanted) return@withPermit
+                    val speed = oneAtATime.withLock { speedOf(context, link) }
+                    done.incrementAndGet()
+                    if (speed > 0) {
+                        carried.add(link to speed)
+                        AppLog.info(
+                            AppLog.Section.Other,
+                            "Public configs: ${link.kind.name} ${link.host} carried ${speed / 1000} kbit/s here",
+                        )
+                    }
+                    onProgress(done.get(), carried.size)
+                }
+            }
+        }.awaitAll()
+        carried.sortedByDescending { it.second }.take(wanted)
+    }
+
+    /**
+     * The speed [link] carries on this line, in kbit/s, or 0 when it carried
+     * nothing. The tunnel is raised privately for the measurement, so a running
+     * connection is not disturbed and nothing half-tested is ever left in the
+     * group the owner sees.
+     */
+    private suspend fun speedOf(context: Context, link: Link): Int {
+        val guid = privateImport(context, link) ?: return 0
+        return try {
+            AutoConfigTest.probe(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
+        } finally {
+            MmkvManager.removeServers(listOf(guid), PENDING_GROUP)
+        }
+    }
+
+    /**
+     * Puts [link] in a group of its own, so a tunnel can be raised for it without
+     * touching either the public group or the owner's own configs. Returns its GUID.
+     */
+    private fun privateImport(context: Context, link: Link): String? = try {
+        if (MmkvManager.decodeSubscription(PENDING_GROUP) == null) {
+            MmkvManager.encodeSubscription(
+                PENDING_GROUP,
+                SubscriptionItem(remarks = PENDING_GROUP, url = "", enabled = false),
+            )
+        }
+        MmkvManager.clearServerList(PENDING_GROUP)
+        AngConfigManager.importBatchConfig(link.raw, PENDING_GROUP, true)
+        MmkvManager.decodeServerList(PENDING_GROUP).firstOrNull()
+    } catch (e: Exception) {
+        null
     }
 
     /** The flag of a two-letter country code, or a globe when there is none. */
+    /**
+     * Keeps at most [keep] configs in the public group, the quickest of those that
+     * answered, and returns how many stay.
+     *
+     * A config that answered is kept even when it is not the quickest: an
+     * alternative is what makes a group useful an hour later, when the winner has
+     * been cut off. Only configs that answered nothing are dropped, and only the
+     * surplus beyond [keep] is trimmed after that.
+     */
+    fun prune(keep: Int): Int {
+        val all = MmkvManager.decodeServerList(GROUP_ID)
+        if (all.isEmpty()) return 0
+        val answered = all.filter { (MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L) > 0L }
+        val silent = all.filterNot { it in answered }
+        // The silent ones go first; then whichever answered are beyond the number asked for.
+        val overflow = (answered.size - keep).coerceAtLeast(0)
+        val drop = silent + answered.sortedByDescending { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }.take(overflow)
+        if (drop.isNotEmpty()) MmkvManager.removeServers(drop, GROUP_ID)
+        val kept = MmkvManager.decodeServerList(GROUP_ID)
+        AppLog.info(
+            AppLog.Section.Other,
+            "Public configs: ${all.size} measured, ${answered.size} answered, ${kept.size} kept" +
+                (if (drop.size > 0) " (${drop.size} dropped)" else ""),
+        )
+        if (kept.isNotEmpty()) runCatching { nameByCountry(kept) }
+        return kept.size
+    }
+
     internal fun flag(country: String): String =
         if (country.length != 2 || country.any { it !in 'A'..'Z' }) "\uD83C\uDF10"
         else country.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")

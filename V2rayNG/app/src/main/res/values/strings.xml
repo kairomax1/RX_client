@@ -887,6 +887,9 @@
     <string name="xbox_dns_nameless">Nameless</string>
     <string name="xbox_dns_result_line">%1$s of %2$s Xbox addresses  •  %3$s ms</string>
     <string name="xbox_dns_none">On this connection no DNS sent the addresses of the Xbox app through a relay of its own, so none of them gets around the Xbox block. Try another connection (Wi-Fi or another SIM) as well.</string>
+    <string name="xbox_dns_own_ok">Your own line answered %1$s of %2$s Xbox names. Game pass and the console should work here without a relay; the servers below are alternatives, not a repair.</string>
+    <string name="xbox_dns_own_no">Your own line answered none of the %2$s Xbox names (%1$s answered). Without a relay, Xbox cannot work on this connection.</string>
+    <string name="xbox_dns_own_millis">Your line answered in %1$s ms</string>
     <string name="xbox_dns_relays_title">Anti-sanction (%1$s)</string>
     <string name="xbox_dns_show_plain">Show ordinary ones (%1$s)</string>
     <string name="xbox_dns_hide_plain">Hide ordinary ones</string>
@@ -930,6 +933,9 @@
     <string name="firefox_vpn_enter_email_code">Enter the code sent to %1$s</string>
     <string name="firefox_vpn_enter_totp">Enter your authenticator code</string>
     <string name="firefox_vpn_quota">Used %.1f GB of %.1f GB</string>
+    <string name="firefox_vpn_usage_used">Traffic used on this tunnel</string>
+    <string name="firefox_vpn_usage_values">%1$s received · %2$s sent</string>
+    <string name="firefox_vpn_usage_open">Up for %1$s minutes · %2$s connections</string>
     <string name="firefox_vpn_section_account">Account</string>
     <string name="firefox_vpn_section_country">Location</string>
     <string name="firefox_vpn_section_usage">Usage</string>

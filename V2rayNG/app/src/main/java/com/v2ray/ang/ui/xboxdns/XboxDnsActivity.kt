@@ -151,6 +151,14 @@ private fun XboxDnsScreen(viewModel: XboxDnsViewModel, onBack: () -> Unit) {
                         )
                     }
                 } else {
+                    // What this line does by itself, said before any server is
+                    // offered: it is the difference between "you need a relay"
+                    // and "you do not, but here are some that answer".
+                    state.ownLine?.let { own ->
+                        item(key = "ownLine") {
+                            OwnLineCard(own)
+                        }
+                    }
                     item(key = "relaysTitle") {
                         SectionTitle(stringResource(R.string.xbox_dns_relays_title, state.relays.size.toString()), RelayGreen)
                     }
@@ -245,6 +253,51 @@ private fun Choice(text: String, chosen: Boolean, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     )
+}
+
+/**
+ * What this line itself does with the names, asked before any server was tried.
+ * A line that already answers Xbox does not need a relay to play; that is worth
+ * saying plainly, because it is the difference between a repair and an option.
+ */
+@Composable
+private fun OwnLineCard(own: XboxDns.OwnLine) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(16.dp)
+    val accent = if (own.answers) RelayGreen else WarnAmber
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface.copy(alpha = 0.55f))
+            .border(1.dp, accent.copy(alpha = 0.45f), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(
+                if (own.answers) R.string.xbox_dns_own_ok else R.string.xbox_dns_own_no,
+                own.resolved.toString(),
+                XboxDns.APP_NAMES.size.toString(),
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurface,
+        )
+        if (own.millis > 0) {
+            Text(
+                text = stringResource(R.string.xbox_dns_own_millis, own.millis.toString()),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+        if (own.first.isNotEmpty()) {
+            Text(
+                text = own.first.joinToString("  ·  "),
+                style = MaterialTheme.typography.bodySmall,
+                color = accent,
+            )
+        }
+    }
 }
 
 @Composable
