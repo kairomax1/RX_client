@@ -174,17 +174,33 @@ class MainViewModel(
      * configs and keeps the [keep] quickest that answered. The winner (ping, then a short real
      * download on the best few) is selected, and connected to when [connect] is set.
      */
+    /**
+     * Opens the public group on what the collection already measured.
+     *
+     * The collection measures every config by making it carry a download before
+     * it is kept, so there is nothing left to decide — it is already ordered
+     * best-first and each one that is in it answers. This used to start a second
+     * test over the whole group, which is where a link that had just been proven
+     * was thrown away for a slow ping and a group of twenty was left holding a
+     * dozen.
+     */
     fun testPublicConfigs(keep: Int, connect: Boolean) {
         viewModelScope.launch {
             setupGroupTab(forceRefresh = true).join()
             if (connect) subscriptionIdChanged(PublicConfigs.GROUP_ID)
-            publicConnect = connect
-            val others = withContext(ioDispatcher) {
-                dataSource.getSubscriptions().filter { it.guid != PublicConfigs.GROUP_ID }
-                    .flatMap { dataSource.getServerGuidList(it.guid) }.toSet()
+            publicConnect = false
+            applyAutoTestOrder(listOf(PublicConfigs.GROUP_ID))
+            if (connect) {
+                val head = dataSource.getServerGuidList(PublicConfigs.GROUP_ID).firstOrNull()
+                if (head != null) {
+                    updateSelectedGuid(head)
+                    _connectBestTick.update { it + 1 }
+                }
             }
-            publicKeep = keep
-            startAutoTest(others)
+            AppLog.info(
+                AppLog.Section.Other,
+                "Public configs: ${dataSource.getServerGuidList(PublicConfigs.GROUP_ID).size} already measured, opened on the best of them",
+            )
         }
     }
 

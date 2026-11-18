@@ -480,6 +480,16 @@ object PublicConfigs {
         // The lists changed, and the group is what is out of date: a dot on a button
         // that only clears when somebody walks to the screen is not a refresh, and
         // was why the public configs were the same ones weeks later.
+        //
+        // Only when nothing is connected. Filling the group means raising a tunnel
+        // for every candidate, and doing that under a running VPN would take the
+        // connection the owner is using away from them — the one thing a background
+        // job must never do. With a tunnel up, the list is marked as waiting and the
+        // group is renewed the next time the app is opened without one.
+        if (ServiceRuntimeState.isRunning(context)) {
+            AppLog.info(AppLog.Section.Other, "Public configs: the lists changed, but a tunnel is up; the group is renewed when it is not")
+            return false
+        }
         val options = savedOptions()
         val outcome = runCatching { collect(context, options, AtomicBoolean(false)) { } }.getOrNull()
         if (outcome != null && outcome.added > 0) {

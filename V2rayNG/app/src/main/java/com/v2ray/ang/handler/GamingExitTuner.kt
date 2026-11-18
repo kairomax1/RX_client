@@ -43,6 +43,10 @@ object GamingExitTuner {
         remarksSuffix: String,
     ): Long? = withContext(Dispatchers.IO) {
         if (!GamingMode.isEnabled()) return@withContext null
+        // Switching the exit while a tunnel is carrying traffic would cut the game
+        // the owner is in the middle of. The measurement waits for a moment when
+        // nothing is connected; the daily pass and the next switch-on catch it.
+        if (ServiceRuntimeState.isRunning(context)) return@withContext null
         fastestEdge(context, groupName, remarksSuffix) ?: fastestConfig()
     }
 
