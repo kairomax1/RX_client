@@ -392,7 +392,7 @@ object GamingMode {
         // the bundled names, and with nothing read there was no rule at all — so
         // a phone whose assets could not be opened tunnelled every Iranian site,
         // which is the wrong way round: the ending alone is a complete statement.
-        RulesetItem(
+        return RulesetItem(
             remarks = IRAN_RULE,
             outboundTag = AppConfig.TAG_DIRECT,
             // The names bundled with the app, then the core's own list of
