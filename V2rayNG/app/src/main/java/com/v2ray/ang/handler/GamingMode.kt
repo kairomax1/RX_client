@@ -283,7 +283,10 @@ object GamingMode {
     private fun hasCoreList(name: String): Boolean = try {
         val dir = Utils.userAssetPath(AngApplication.application)
         dir.isNotEmpty() && java.io.File(dir, name).exists()
-    } catch (_: Exception) {
+    } catch (_: Throwable) {
+        // No application and no asset directory is a real state — a unit test has
+        // neither — and it means the same thing as a missing file: this list is
+        // not on the phone, so nothing is claimed from it.
         false
     }
 

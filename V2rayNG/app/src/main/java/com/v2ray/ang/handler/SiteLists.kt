@@ -76,11 +76,17 @@ object SiteLists {
     private const val MAX_IPS = 20_000
 
     /** The names held from the last good answer; empty when there has been none. */
-    fun adDomains(): List<String> =
+    fun adDomains(): List<String> = try {
         MmkvManager.decodeSettingsString(PREF_ADS).orEmpty()
             .lineSequence()
             .filter { it.isNotBlank() }
             .toList()
+    } catch (e: Throwable) {
+        // Asked while the routing is being assembled; with no store to read there
+        // are simply no advert names, which is the same as having never fetched
+        // them. It must not take the tunnel down with it.
+        emptyList()
+    }
 
     /**
      * The names of the sites served from inside the country. What was fetched is
