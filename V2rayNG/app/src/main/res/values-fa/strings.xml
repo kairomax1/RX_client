@@ -755,7 +755,7 @@
     <string name="update_install_permission">اجازه بده RX VPN برنامه نصب کنه، بعد دوباره امتحان کن</string>
     <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>
     <string name="gaming_title">حالت گیمینگ</string>
-    <string name="gaming_about">همه چیز از کانفیگ رد می‌شود و هیچ چیز مستقیم نمی‌رود، پس هر سایت و برنامه و بازی فقط آی‌پیِ خروجِ کانفیگ را می‌بیند. تبلیغ‌ها هم بسته‌اند.</string>
+    <string name="gaming_about">هر چیزی که از اینجا باز می‌شود با نت خودت و آی‌پی ایران می‌رود. فیلترها، تحریم‌ها، بازی‌های بسته و سایت‌های هوش مصنوعی از کانفیگ باز می‌شوند. تبلیغ‌ها هم بسته‌اند و IPv6 هم داخل تونل گرفته می‌شود تا هیچ نشتی نباشد.</string>
     <string name="gaming_state_on">روشنه</string>
     <string name="gaming_state_off">خاموشه</string>
     <string name="gaming_turn_on">روشنش کن</string>
@@ -763,7 +763,9 @@
     <string name="gaming_back">برگرد</string>
     <string name="acc_ping_sort">پینگ همهٔ کانفیگ‌ها و مرتب‌سازی از کم به زیاد</string>
     <string name="gaming_use_aether">کانفیگ ندارم؛ با Aether وصل شو</string>
-    <string name="gaming_ip_current">همه چیز از کانفیگ می‌رود: هر سایت، هر برنامه و هر بازی که فیلتر یا تحریم است هم باز می‌شود. هیچ چیز مستقیم نمی‌رود، برای همین آی‌پیِ اینترنت خودت هیچ‌جا دیده نمی‌شود.</string>
+    <string name="gaming_ip_current">آی‌پی خودت ایرانی می‌ماند و همه چیزِ باز با نت خودت می‌رود. هر چیزی که فیلتر یا تحریم است — و بازی‌های فیلتر و تحریم‌شده و سایت‌های هوش مصنوعی — از کانفیگ باز می‌شود.</string>
+    <string name="gaming_switch_to_config">همه‌چیز از کانفیگ برود (آی‌پی کانفیگ)</string>
+    <string name="gaming_switch_to_own">برگرد به آی‌پی ایران (فقط فیلترها از کانفیگ)</string>
     <string name="gaming_aether_note">Aether داره راه پیدا می‌کنه؛ ممکنه تا یک دقیقه طول بکشه</string>
     <string name="notification_channel_sharing">شیرینگ</string>
     <string name="notification_channel_sharing_ask">دستگاهی می‌خواهد وصل شود</string>
@@ -878,6 +880,7 @@
     <string name="public_short">فقط %1$d از %2$d تا پیدا شد؛ بقیه‌ی کانفیگ‌های مخزن روی اینترنت تو جواب ندادند</string>
     <string name="public_step_round">دور %1$d: %2$d از %3$d آماده است</string>
     <string name="public_stopping">باشه، همین‌ها را نگه می‌دارم…</string>
+    <string name="public_no_line">اینترنت گوشی همین حالا وصل نیست. تا وصل نشود هیچ کانفیگی امتحان نمی‌شود و هیچ عددی بالا نمی‌رود.</string>
     <string name="public_none">از این اینترنت به هیچ سروری نرسیدیم. نوع‌ها را عوض کن یا با شبکه‌ی دیگری امتحان کن.</string>
     <string name="public_origin_saved">به منبع‌ها راه نبود؛ از فهرست ذخیره‌شده‌ی دفعه‌ی قبل استفاده شد.</string>
     <string name="public_origin_bundled">به منبع‌ها راه نبود؛ از فهرست داخل خود برنامه استفاده شد (ممکن است قدیمی باشد).</string>

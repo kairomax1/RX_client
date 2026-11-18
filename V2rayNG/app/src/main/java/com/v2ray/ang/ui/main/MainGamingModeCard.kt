@@ -132,12 +132,14 @@ fun MainGamingModeCard(
                         text = stringResource(if (state.enabled) R.string.gaming_turn_off else R.string.gaming_turn_on),
                         tone = if (state.enabled) RxPromptTone.Ghost else RxPromptTone.Silver,
                         onClick = {
-                            // One question fewer. There used to be a choice of
-                            // where games leave from, and "my own internet" put the
-                            // owner's own address on everything that then failed to
-                            // open. The mode has one answer now — the config carries
-                            // everything — so it is switched on and that is that.
-                            if (!state.enabled) onSetGameExit(GamingMode.EXIT_CONFIG)
+                            // Switching on goes to the mode as it is meant to be
+                            // used: the owner's Iranian address on everything that
+                            // works from here, and the config carrying exactly what
+                            // does not — filtered, sanctioned, blocked games and the
+                            // AI sites. The other way round (everything through the
+                            // config) stays one press away, never the default,
+                            // because it puts a foreign address on everything.
+                            if (!state.enabled) onSetGameExit(GamingMode.EXIT_OWN)
                             onSetEnabled(!state.enabled)
                             onChanged()
                         },
@@ -158,11 +160,29 @@ fun MainGamingModeCard(
                         )
                     }
                     RxPromptButton(
+                        text = stringResource(
+                            if (state.gameExit == GamingMode.EXIT_OWN) R.string.gaming_switch_to_config
+                            else R.string.gaming_switch_to_own
+                        ),
+                        tone = RxPromptTone.Ghost,
+                        onClick = {
+                            // The other way round, one press away and never on by
+                            // itself: everything through the config instead.
+                            onSetGameExit(
+                                if (state.gameExit == GamingMode.EXIT_OWN) GamingMode.EXIT_CONFIG
+                                else GamingMode.EXIT_OWN
+                            )
+                            onChanged()
+                        },
+                        modifier = fullWidth,
+                        order = 2,
+                    )
+                    RxPromptButton(
                         text = stringResource(R.string.sharing_title),
                         tone = RxPromptTone.Ghost,
                         onClick = { page = GamingPage.Sharing },
                         modifier = fullWidth,
-                        order = 2,
+                        order = 3,
                     )
                 }
             }

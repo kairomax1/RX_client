@@ -79,6 +79,11 @@ object PublicConfigs {
     private const val CONNECT_MILLIS = 2500
     private const val TESTING_AT_ONCE = 48
 
+    /** Where the presence of a line is checked, and how long that is waited for. */
+    private const val LINE_PROBE_HOST = "1.1.1.1"
+    private const val LINE_PROBE_PORT = 443
+    private const val LINE_PROBE_MILLIS = 4000
+
     /** How many addresses to try per config wanted, given that most of them fail. */
     private const val CANDIDATES_PER_WANTED = 8
 
@@ -661,11 +666,39 @@ object PublicConfigs {
         val address = InetAddress.getByName(link.host)
         when {
             isCloudflare(address.address) -> false
-            link.kind.udp -> true
+            // A UDP config cannot be judged by a TCP connect, so it is not judged
+            // here at all — it goes on to be measured properly. Answering true was
+            // counting it as "reached" without anything having been reached, and
+            // on a phone with no line at all it counted every UDP config.
+            link.kind.udp -> false
             else -> {
-                Socket().use { it.connect(InetSocketAddress(address, link.port), CONNECT_MILLIS) }
-                true
+                Socket().use {
+                    it.connect(InetSocketAddress(address, link.port), CONNECT_MILLIS)
+                    true
+                }
             }
+        }
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * True when this phone really has a line to the internet right now.
+     *
+     * Asked before any work starts, because every figure on the screen is a
+     * measurement and there is nothing to measure without a line. The screen used
+     * to raise its count with the internet switched off — the names of the
+     * configs could not be resolved, but each attempt was still counted as a test,
+     * so the number climbed while nothing had been tried at all. That is the one
+     * thing this figure must never do.
+     */
+    internal fun hasLine(): Boolean = try {
+        val socket = Socket()
+        try {
+            socket.connect(InetSocketAddress(LINE_PROBE_HOST, LINE_PROBE_PORT), LINE_PROBE_MILLIS)
+            true
+        } finally {
+            runCatching { socket.close() }
         }
     } catch (e: Exception) {
         false
@@ -690,6 +723,16 @@ object PublicConfigs {
      * tried and failed.
      */
     fun collect(context: Context, options: Options, cancelled: AtomicBoolean, onProgress: (Progress) -> Unit): Outcome {
+        // Nothing is measured without a line, and nothing is counted either. The
+        // screen used to climb with the internet switched off, because a name that
+        // could not be resolved still counted as a config that had been tested.
+        if (!hasLine()) {
+            AppLog.error(
+                AppLog.Section.Other,
+                "Public configs: no line to measure over; nothing was tried and nothing was counted",
+            )
+            return Outcome(0, Origin.Bundled).also { onProgress(Progress(null, 0, 0, 0)) }
+        }
         onProgress(Progress(null, 0, 0, 0))
         val first = download(context, small = true)
         var origin = when {
@@ -781,8 +824,11 @@ object PublicConfigs {
                         }
                     },
                 ) { verified, carriedSoFar ->
-                    measured += verified
-                    carried += carriedSoFar
+                    // `verified` is the number that really carried bytes — not the
+                    // number that was tried. That is the figure the screen shows,
+                    // so it can only move when something actually came through.
+                    measured = verified
+                    carried = carriedSoFar
                     report()
                 }
             }
@@ -891,10 +937,16 @@ object PublicConfigs {
             for (batch in links.chunked(TESTING_AT_ONCE)) {
                 if (cancelled.get() || reachable.size >= links.size) break
                 val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
+                // Counted as the batch is really worked through, and never counted
+                // twice: `onCount` used to be handed `batch.size` whether or not a
+                // single one of them could even be looked up.
+                var done = 0
                 batch.forEachIndexed { index, link ->
-                    if (runCatching { answers[index].get() }.getOrDefault(false)) reachable.add(link)
+                    val answered = runCatching { answers[index].get() }.getOrDefault(false)
+                    if (answered) reachable.add(link)
+                    done++
                 }
-                onCount(batch.size)
+                onCount(done)
             }
         } finally {
             pool.shutdownNow()
@@ -946,8 +998,8 @@ object PublicConfigs {
                         return@withPermit
                     }
                     val speed = oneAtATime.withLock { speedOf(context, link) }
-                    done.incrementAndGet()
                     if (speed > 0) {
+                        done.incrementAndGet()
                         carried.add(link to speed)
                         AppLog.info(
                             AppLog.Section.Other,
@@ -957,6 +1009,9 @@ object PublicConfigs {
                         // round: the one watching is meant to see the list grow.
                         onCarried(link)
                     }
+                    // Both figures are the same number on purpose: a config that
+                    // carried nothing was not measured, it was only attempted, and
+                    // an attempt is not worth showing.
                     onProgress(done.get(), carried.size)
                 }
             }

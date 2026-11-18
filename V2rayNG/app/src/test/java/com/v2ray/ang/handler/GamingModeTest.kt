@@ -32,12 +32,13 @@ class GamingModeTest {
         assertTrue("domain:youtube.com" in tunnelled.domain!!)
         assertTrue("domain:openai.com" in tunnelled.domain!!)
         assertTrue("domain:mysite.net" in tunnelled.domain!!)
-        // The last rule catches whatever no earlier rule did, and sends it out directly.
+        // The last rule catches whatever no earlier rule did, and sends it out on
+        // the phone's own line — the owner's Iranian address.
         assertEquals(AppConfig.TAG_DIRECT, rules.last().outboundTag)
         assertEquals("0-65535", rules.last().port)
-        // The tunnelled list must be consulted before the catch-all name rule.
-        val catchAll = rules.indexOfFirst { it.domain == listOf("regexp:.+") }
-        assertTrue(rules.indexOf(tunnelled) < catchAll)
+        // The tunnelled list is the first thing consulted, so a blocked name can
+        // never reach the rule that would send it out directly.
+        assertEquals(0, rules.indexOf(tunnelled))
     }
 
     @Test
@@ -81,6 +82,34 @@ class GamingModeTest {
     }
 
     @Test
+    fun theIranianLineTunnelsExactlyWhatCannotWorkFromHere() {
+        val rules = GamingMode.rulesets(gameExit = GamingMode.EXIT_OWN)
+        // What is filtered, sanctioned, a blocked game or an AI site goes through
+        // the config; everything else keeps the owner's own Iranian address.
+        val tunnelled = rules.first { it.remarks == "Gaming: filtered and restricted sites" }
+        assertEquals(AppConfig.TAG_PROXY, tunnelled.outboundTag)
+        val names = tunnelled.domain!!
+        listOf("chatgpt.com", "openai.com", "claude.ai", "youtube.com", "instagram.com", "telegram.org")
+            .forEach { assertTrue("domain:$it" in names, it) }
+        // Telegram is reached by bare address, so its networks are tunnelled too.
+        assertTrue(rules.any { it.outboundTag == AppConfig.TAG_PROXY && it.ip == GamingMode.TELEGRAM_NETWORKS })
+        // And nothing that leaves directly is a name that should have been tunnelled.
+        val directDomains = rules.filter { it.outboundTag == AppConfig.TAG_DIRECT }.flatMap { it.domain.orEmpty() }
+        assertTrue(directDomains.none { it in names })
+    }
+
+    @Test
+    fun theIranianLineIsTheDefaultAndTheConfigIsOneChoiceAway() {
+        // A phone that has never answered, and a phone whose answer was cleared:
+        // both are the Iranian line, which is the mode as it is meant to be used.
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(null))
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(""))
+        // The other way round is still there, and keeps one exit and nothing else.
+        val all = GamingMode.rulesets(gameExit = GamingMode.EXIT_CONFIG)
+        assertTrue(all.none { it.outboundTag == AppConfig.TAG_DIRECT })
+    }
+
+    @Test
     fun withTheConfigExitAddressTheWholeConnectionGoesThroughTheTunnel() {
         val rules = GamingMode.rulesets(gameExit = GamingMode.EXIT_CONFIG)
         // The last rule carries the whole connection: every name, every bare address, every port.
@@ -105,13 +134,13 @@ class GamingModeTest {
     }
 
     @Test
-    fun theDefaultIsEverythingThroughTheConfig() {
-        // A mode that is switched on without an answer must still keep one exit; the phone's own
-        // line is what "IP ایران" must never fall back to by accident.
+    fun theDefaultIsTheIranianLine() {
+        // "IP ایران": what works here stays here, and only what cannot work here
+        // is carried by the config.
         val rules = GamingMode.rulesets()
-        assertEquals(AppConfig.TAG_PROXY, rules.last().outboundTag)
+        assertEquals(AppConfig.TAG_DIRECT, rules.last().outboundTag)
         assertEquals("0-65535", rules.last().port)
-        assertTrue(rules.none { it.outboundTag == AppConfig.TAG_DIRECT })
+        assertTrue(rules.any { it.outboundTag == AppConfig.TAG_PROXY && it.domain != null })
     }
 
     @Test
@@ -122,11 +151,11 @@ class GamingModeTest {
 
     @Test
     fun switchingTheModeOffForgetsTheChoice() {
-        // Switching the mode off stores empty text, so the question is asked again. Until it is
-        // answered the exit is the config, never the owner's own line.
-        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit(""))
-        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit("   "))
+        // Switching the mode off stores empty text, so nothing is carried over into
+        // another session; with nothing stored the mode is the Iranian line.
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(""))
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit("   "))
         // A phone that has never answered the question has nothing stored at all.
-        assertEquals(GamingMode.EXIT_CONFIG, GamingMode.chosenExit(null))
+        assertEquals(GamingMode.EXIT_OWN, GamingMode.chosenExit(null))
     }
 }

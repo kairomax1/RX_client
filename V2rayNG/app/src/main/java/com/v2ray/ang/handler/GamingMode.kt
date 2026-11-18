@@ -52,20 +52,14 @@ object GamingMode {
     /** Games use the config's exit address: for games that are filtered, or region locked. */
     const val EXIT_CONFIG = "config"
 
-    /** Where games leave from right now; [EXIT_CONFIG] until the owner chooses otherwise. */
+    /** Where traffic leaves from right now; [EXIT_OWN] — the Iranian line — by default. */
     fun gameExit(): String = chosenExit(MmkvManager.decodeSettingsString(PREF_GAME_EXIT))
 
     /**
      * The exit a stored answer means. A missing answer, and the empty text written when the mode
-     * is switched off, both fall back to [EXIT_CONFIG]; anything else is kept as stored.
-     *
-     * The fallback is the config on purpose. A way into the mode exists that never asks the
-     * question — the Aether button switches it on directly — and answering "the phone's own
-     * line" on its behalf would put the owner's own address on everything they open, which is
-     * the one outcome the mode must never produce by accident. Choosing that line stays
-     * possible; it is never assumed.
+     * is switched off, both fall back to [EXIT_OWN]; anything else is kept as stored.
      */
-    internal fun chosenExit(stored: String?): String = stored.takeUnless { it.isNullOrBlank() } ?: EXIT_CONFIG
+    internal fun chosenExit(stored: String?): String = stored.takeUnless { it.isNullOrBlank() } ?: EXIT_OWN
 
     fun setGameExit(exit: String) {
         AppLog.info(
@@ -209,9 +203,28 @@ object GamingMode {
             )
         }
 
+        // ------------------------------------------------------------------
+        // The Iranian line: the owner's own address stays on everything that
+        // works from here, and only what cannot work from here goes through the
+        // config. Order is the whole of the promise, so it is written out.
+        // ------------------------------------------------------------------
         val rules = mutableListOf<RulesetItem>()
-        // A game that is shut here goes out before the rest of the games: it is the one choice
-        // that is not the owner's to make, because on the phone's own line it never connects.
+
+        // 1. Adverts and trackers. Never wanted, never fetched.
+        //    (Added in front by `ordered`, so it is deliberately not repeated here.)
+
+        // 2. A name that is filtered, sanctioned or region-locked is answered
+        //    through the config before anything else is looked at. This is the
+        //    rule that opens YouTube, Instagram, Telegram, Proton, the AI sites
+        //    and every blocked game — by name, inside the tunnel, whatever the
+        //    phone's own resolver would have said about it.
+        rules += RulesetItem(
+            remarks = TUNNELLED_RULE,
+            outboundTag = AppConfig.TAG_PROXY,
+            domain = tunnelled,
+        )
+
+        // 3. A game that is shut here, by the name its own launcher uses.
         blockedGameDomains.takeIf { it.isNotEmpty() }?.let { names ->
             rules += RulesetItem(
                 remarks = BLOCKED_GAMES_RULE,
@@ -219,32 +232,26 @@ object GamingMode {
                 domain = names,
             )
         }
-        // Games first, so a game host that also looks like a filtered one is still left on the
-        // phone's own line: that is the choice the owner made for them.
-        games?.let { rules += it }
-        // After the games on purpose: inside Iran the names of filtered sites are answered with
-        // a private address (10.10.34.x). Matching the name before the local-network rule keeps
-        // such a connection in the tunnel instead of sending it out directly.
-        rules += RulesetItem(
-            remarks = TUNNELLED_RULE,
-            outboundTag = AppConfig.TAG_PROXY,
-            domain = tunnelled,
-        )
-        // Telegram talks to bare addresses, so no site name is ever seen for it.
+
+        // 4. Telegram and every game server that is reached by a bare address,
+        //    so no site name is ever seen for them. An address cannot be matched
+        //    by name, which is why this rule exists at all.
         rules += RulesetItem(
             remarks = "Gaming: Telegram addresses",
             outboundTag = AppConfig.TAG_PROXY,
             ip = TELEGRAM_NETWORKS,
         )
+
+        // 5. The phone's own network — the router, the hotspot, another device on
+        //    it — stays on the phone's own line, because a tunnel cannot carry it
+        //    and there is nothing to leak by leaving it there.
         rules += localNetwork
-        // Named explicitly so that their names are also resolved outside the tunnel.
+
+        // 6. Everything else: the owner's own address, on the owner's own line.
+        //    One rule for every remaining name and every remaining address, so
+        //    nothing can fall through to a second exit that was never chosen.
         rules += RulesetItem(
-            remarks = "Gaming: every other site",
-            outboundTag = AppConfig.TAG_DIRECT,
-            domain = listOf("regexp:.+"),
-        )
-        rules += RulesetItem(
-            remarks = "Gaming: everything else",
+            remarks = "Gaming: everything else on the phone's own line",
             outboundTag = AppConfig.TAG_DIRECT,
             port = "0-65535",
         )
@@ -316,9 +323,10 @@ object GamingMode {
     /**
      * The rules in the one order that keeps every connection on one exit.
      *
-     * Adverts are blocked first, because they are never wanted. Then, in the mode's
-     * own order, the games whose line the owner chose, the services that can only
-     * be answered from outside, and everything else.
+     * Adverts are blocked first, because they are never wanted. Then the services
+     * that can only be answered from outside — a blocked name has to reach the
+     * tunnel before anything could send it out directly — then the games whose
+     * line the owner chose, and everything else in the mode's own order.
      *
      * Kept separate from the lists themselves so the order can be read and tested.
      */
@@ -331,12 +339,15 @@ object GamingMode {
                 domain = adDomains,
             )
         }
+        // The services that can only be answered from outside come first: a
+        // blocked name must reach the tunnel before any rule that could send it
+        // out directly. Then the games whose line the owner chose, then the rest.
+        val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
         val blockedGames = base.firstOrNull { it.remarks == BLOCKED_GAMES_RULE }
         val games = base.firstOrNull { it.remarks?.startsWith("Gaming: games") == true }
-        val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
+        tunnelled?.let { rules += it }
         blockedGames?.let { rules += it }
         games?.let { rules += it }
-        tunnelled?.let { rules += it }
         rules += base.filterNot { it === blockedGames || it === games || it === tunnelled }
         return rules
     }

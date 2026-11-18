@@ -783,7 +783,7 @@
     <string name="update_install_permission">Allow RX VPN to install apps, then try again</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
     <string name="gaming_title">Gaming mode</string>
-    <string name="gaming_about">Everything goes through your config \u2014 nothing goes out directly \u2014 so every site, app and game sees the config\'s address and only that. Adverts are blocked.</string>
+    <string name="gaming_about">Everything that opens from here does so on your own line and your own Iranian address. Anything filtered, sanctioned, blocked or an AI site opens through the config. Adverts are blocked, and IPv6 is claimed by the tunnel so nothing leaks.</string>
     <string name="gaming_state_on">On</string>
     <string name="gaming_state_off">Off</string>
     <string name="gaming_turn_on">Turn it on</string>
@@ -791,7 +791,9 @@
     <string name="gaming_back">Back</string>
     <string name="acc_ping_sort">Ping all configs and sort from lowest ping</string>
     <string name="gaming_use_aether">I have no config; connect with Aether</string>
-    <string name="gaming_ip_current">Everything goes through the config: every site, app and game opens, including the ones that are filtered or sanctioned. Nothing goes out directly, so your own address is never seen.</string>
+    <string name="gaming_ip_current">Your own Iranian address stays on everything that works from here. Anything filtered or sanctioned \u2014 including blocked games and the AI sites \u2014 opens through the config.</string>
+    <string name="gaming_switch_to_config">Send everything through the config (the config\'s IP)</string>
+    <string name="gaming_switch_to_own">Back to the Iranian IP (only the blocked things through the config)</string>
     <string name="gaming_aether_note">Aether is finding a route; this can take up to a minute</string>
     <string name="notification_channel_sharing">Sharing</string>
     <string name="notification_channel_sharing_ask">A device asks to connect</string>
@@ -906,6 +908,7 @@
     <string name="public_short">Only %1$d of %2$d could be found; the rest of the pool did not answer on your connection</string>
     <string name="public_step_round">Round %1$d: %2$d of %3$d ready</string>
     <string name="public_stopping">Enough — keeping what has been found…</string>
+    <string name="public_no_line">The phone has no connection right now. Until it does, no config is tested and no number moves.</string>
     <string name="public_none">No server could be reached from this connection. Change the types or try another network.</string>
     <string name="public_origin_saved">No way to the sources; using the list saved last time.</string>
     <string name="public_origin_bundled">No way to the sources; using the list shipped inside the app (may be old).</string>

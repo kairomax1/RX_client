@@ -76,6 +76,8 @@ data class PublicConfigsState(
     val stopping: Boolean = false,
     val progress: PublicConfigs.Progress? = null,
     val outcome: PublicConfigs.Outcome? = null,
+    /** True when the work was refused because the phone has no line right now. */
+    val noLine: Boolean = false,
 )
 
 class PublicConfigsViewModel(application: Application) : AndroidViewModel(application) {
@@ -103,8 +105,15 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
         if (_state.value.running) return
         val flag = AtomicBoolean(false)
         cancelled = flag
-        _state.update { it.copy(running = true, progress = null, outcome = null) }
+        // Asked before the screen says it is working. With no line there is
+        // nothing to measure, so the screen says that instead of counting attempts
+        // that never left the phone.
+        _state.update { it.copy(running = true, progress = null, outcome = null, noLine = false) }
         viewModelScope.launch(Dispatchers.IO) {
+            if (!PublicConfigs.hasLine()) {
+                _state.update { it.copy(running = false, noLine = true) }
+                return@launch
+            }
             val outcome = runCatching {
                 PublicConfigs.collect(getApplication(), _state.value.options, flag) { progress ->
                     _state.update { it.copy(progress = progress) }
@@ -222,6 +231,17 @@ private fun PublicConfigsScreen(
             ) {
                 Text(stringResource(R.string.public_intro), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                 Text(stringResource(R.string.public_warning), style = MaterialTheme.typography.bodyMedium, color = WarnAmber)
+
+                // Said before anything else, because it is the one answer that
+                // explains itself: with no line there is nothing to measure, and no
+                // number on this screen may move until there is.
+                if (state.noLine) {
+                    Text(
+                        stringResource(R.string.public_no_line),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = WarnAmber,
+                    )
+                }
 
                 if (state.running || state.outcome != null) {
                     val progress = state.progress
