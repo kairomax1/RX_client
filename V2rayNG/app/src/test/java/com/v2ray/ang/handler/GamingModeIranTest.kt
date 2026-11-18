@@ -19,14 +19,13 @@ class GamingModeIranTest {
     @Test
     fun everyNameOfThisCountryGoesOutOnTheHomeLine() {
         val rule = iranianRule()
-        assertTrue(rule != null, "the Iranian rule must be built")
-        assertEquals(AppConfig.TAG_DIRECT, rule!!.outboundTag)
+        assertEquals(AppConfig.TAG_DIRECT, rule.outboundTag)
         assertTrue("regexp:.*\\.ir$" in rule.domain!!, "a .ir name is Iranian by definition")
     }
 
     @Test
     fun theEndingIsAnchoredSoForeignNamesAreNotCaught() {
-        val names = iranianRule()!!.domain!!
+        val names = iranianRule().domain!!
         // Nothing that would sweep up the whole internet: no bare ".com" pattern
         // and no "match anything" expression may appear in this rule, or every
         // site in the world would be sent out on the home line.

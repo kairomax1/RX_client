@@ -383,10 +383,15 @@ object GamingMode {
      *
      * Built in one place so the decision can be read and tested: a name ending in
      * `.ir` is Iranian by definition, and so is anything on a list of names this
-     * country serves. Null when no list of them could be read at all, in which
-     * case nothing is claimed rather than everything.
+     * country serves. It is never null: the ending is enough on its own, and a
+     * rule that disappears when a list is missing sends the country's own sites
+     * out through the tunnel.
      */
-    internal fun iranianRule(): RulesetItem? = if (iranDomains.isNotEmpty()) {
+    internal fun iranianRule(): RulesetItem {
+        // The rule is built even when no list could be read. It used to depend on
+        // the bundled names, and with nothing read there was no rule at all — so
+        // a phone whose assets could not be opened tunnelled every Iranian site,
+        // which is the wrong way round: the ending alone is a complete statement.
         RulesetItem(
             remarks = IRAN_RULE,
             outboundTag = AppConfig.TAG_DIRECT,
@@ -402,8 +407,6 @@ object GamingMode {
                 ).distinct(),
             ip = (IRAN_ADDRESSES + SiteLists.iranIpRanges() + coreIranAddresses()).distinct(),
         )
-    } else {
-        null
     }
 
     /** What the Iranian rule is called in the list the screen shows. */
@@ -432,7 +435,7 @@ object GamingMode {
         val iranian = iranianRule()
         if (!isEnabled()) {
             val plain = mutableListOf<RulesetItem>()
-            iranian?.let { plain += it }
+            plain += iranian
             plain += base
             return plain
         }
@@ -462,7 +465,7 @@ object GamingMode {
         val tunnelled = base.firstOrNull { it.remarks == TUNNELLED_RULE }
         blockedGames?.let { rules += it }
         games?.let { rules += it }
-        iranian?.let { rules += it }
+        rules += iranian
         tunnelled?.let { rules += it }
         rules += base.filterNot { it === blockedGames || it === games || it === tunnelled }
         return rules
