@@ -731,4 +731,6 @@
     <string name="notification_action_disconnect">Disconnect my config</string>
     <string name="notification_action_reconnect">Refresh my config</string>
     <string name="public_game">Game mode</string>
+    <string name="public_disconnected">ইন্টারনেট বিচ্ছিন্ন হয়েছে; পরীক্ষা বন্ধ করা হয়েছে।</string>
+    <string name="public_disconnected_saved">ইন্টারনেট বিচ্ছিন্ন হয়েছে — যাচাই করা %2$dটির মধ্যে %1$dটি কনফিগ তালিকায় সংরক্ষণ করা হয়েছে।</string>
 </resources>

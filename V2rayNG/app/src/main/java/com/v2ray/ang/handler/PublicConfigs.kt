@@ -1,6 +1,8 @@
 package com.v2ray.ang.handler
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -11,6 +13,8 @@ import androidx.work.WorkerParameters
 import com.google.gson.JsonParser
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.core.CoreConfigManager
+import com.v2ray.ang.core.CoreNativeManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.util.Utils
@@ -21,13 +25,17 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,52 +86,36 @@ object PublicConfigs {
      * of dead addresses.
      */
     private const val REBUILD_MILLIS = 6 * 60 * 60 * 1000L
-    private const val CONNECT_MILLIS = 2500
+    private const val CONNECT_MILLIS = 1200
     private const val TESTING_AT_ONCE = 48
 
     /** Where the presence of a line is checked, and how long that is waited for. */
-    private const val LINE_PROBE_HOST = "1.1.1.1"
-    private const val LINE_PROBE_PORT = 443
-    private const val LINE_PROBE_MILLIS = 4000
+    private val LINE_PROBE_ENDPOINTS = listOf(
+        "1.1.1.1" to 443,
+        "8.8.8.8" to 443,
+        "9.9.9.9" to 443,
+    )
+    private const val LINE_PROBE_MILLIS = 2200
 
-    /** How many addresses to try per config wanted, given that most of them fail. */
-    private const val CANDIDATES_PER_WANTED = 8
+    /** Fast download budget so fetching lists never stalls before testing begins. */
+    private const val DOWNLOAD_THREADS = 16
+    private const val DOWNLOAD_BUDGET_MILLIS = 10_000L
+    private const val FETCH_CONNECT_MILLIS = 2500
+    private const val FETCH_READ_MILLIS = 4500
 
-    /** A ceiling on trying, so a large number asked for does not search for ever. */
-    private const val CANDIDATES_CEILING = 1_200
+    /** Pipelined chunk bounds for streaming TCP pre-check into parallel Xray verification. */
+    private const val CHUNK_MIN = 40
+    private const val CHUNK_MAX = 80
+    private const val FALLBACK_MEASURE = 20
 
-    /**
-     * How many times the lists are looked at again for the number asked for.
-     *
-     * One round measures a batch; when fewer carried than were wanted, the next
-     * round takes a different slice of the pool and measures that. The ceiling is
-     * what stops a phone grinding through thousands of dead addresses: after
-     * this many rounds what was found is what there is, and it is handed over.
-     */
-    private const val MAX_ROUNDS = 12
-
-    /** The smallest batch worth raising tunnels for. */
-    private const val ROUND_MIN = 20
-
-    /**
-     * How many addresses are measured properly when the cheap check answers nothing.
-     *
-     * On a network that refuses a bare TCP connect, every candidate fails the
-     * cheap check, and measuring the whole batch would mean raising a tunnel for
-     * each of them one after another — hours of a screen that looks stuck. This is
-     * enough to find the ones that work on such a network and small enough that a
-     * round still finishes while the owner is watching.
-     */
-    private const val FALLBACK_MEASURE = 32
+    /** How many consecutive probe failures trigger an active line check. */
+    private const val STREAK_LINE_CHECK = 12
+    private const val LINE_RECHECK_MIN_GAP_MILLIS = 3000L
 
     /**
      * The longest one collection runs before it hands over what it has.
-     *
-     * Every round is real work and a phone can grind for an hour; a number that
-     * is not reached by then is better answered with what did carry than with a
-     * screen that never stops.
      */
-    private const val MAX_DURATION_MILLIS = 12 * 60 * 1000L
+    private const val MAX_DURATION_MILLIS = 8 * 60 * 1000L
 
     /**
      * The group a candidate is put in while it is being measured. It is a real
@@ -151,31 +143,27 @@ object PublicConfigs {
     }
 
     /**
-     * How many candidates are worked on at the same time.
+     * How many candidates are probed through Xray in parallel.
      *
-     * The tunnel itself is still raised for one config at a time — the core is a
-     * single engine with one routing table — but the cheap connect check in front
-     * of it and the imports behind it are not the core's work, and doing them for
-     * one address at a time was most of the waiting.
+     * `measureOutboundDelay` runs isolated Xray checks concurrently, so dead or
+     * blocked configs fail and move straight to the next candidate in parallel,
+     * while the single-engine `CoreController` byte-transfer confirmation runs
+     * only on candidates that already answered on the user's real internet.
      */
-    private const val VERIFY_AT_ONCE = 6
+    private const val VERIFY_AT_ONCE = 16
 
-    /** How long a bare connection to a candidate's address is waited for. */
-    private const val QUICK_CONNECT_MILLIS = 1500
+    /** How long a bare TCP connection to a candidate's address is waited for. */
+    private const val QUICK_CONNECT_MILLIS = 1200
 
     /**
-     * How long one candidate has to carry a small download before it is refused.
-     *
-     * A config that works answers in a few hundred milliseconds, and the download
-     * that decides it is capped at three and a half seconds of reading. Eighteen
-     * seconds was the ceiling on the whole thing and was mostly spent waiting for
-     * a tunnel that was never going to open, which is why counting ten of them
-     * took as long as it did. An address that cannot accept a connection never
-     * reaches this point at all: [answers] refuses it first.
+     * How long one candidate has to carry real bytes in the confirmation probe.
      */
-    private const val VERIFY_TIMEOUT_MILLIS = 9_000L
+    private const val VERIFY_TIMEOUT_MILLIS = 5_000L
     private const val MAX_TRIED = 4000
     private const val MAX_BYTES = 3_000_000
+
+    private val pendingGroupLock = Any()
+    private val groupWriteLock = Any()
 
     enum class Kind(val schemes: List<String>, val udp: Boolean) {
         Vless(listOf("vless"), false),
@@ -222,7 +210,7 @@ object PublicConfigs {
         val pool: Int = 0,
     )
 
-    data class Outcome(val added: Int, val origin: Origin)
+    data class Outcome(val added: Int, val origin: Origin, val disconnected: Boolean = false)
 
     /**
      * One list of share links in a GitHub repository. The [small] ones are short or already
@@ -583,10 +571,16 @@ object PublicConfigs {
 
     internal class Answer(val code: Int, val body: String?, val tag: String?)
 
-    internal fun fetch(address: String, knownTag: String? = null, post: String? = null): Answer = try {
+    internal fun fetch(
+        address: String,
+        knownTag: String? = null,
+        post: String? = null,
+        connectTimeoutMs: Int = 8000,
+        readTimeoutMs: Int = 12000,
+    ): Answer = try {
         val connection = URL(address).openConnection() as HttpURLConnection
-        connection.connectTimeout = 8000
-        connection.readTimeout = 12000
+        connection.connectTimeout = connectTimeoutMs
+        connection.readTimeout = readTimeoutMs
         if (knownTag != null) connection.setRequestProperty("If-None-Match", knownTag)
         if (post != null) {
             connection.doOutput = true
@@ -617,21 +611,61 @@ object PublicConfigs {
     /**
      * The lines of the wanted sources. A source that did not change since the last time costs
      * one short request (its ETag is kept); one that cannot be reached, on GitHub or on the
-     * mirror, gives its kept copy.
+     * mirror, gives its kept copy. Stops quickly when [cancelled] is set, skips raw.githubusercontent.com
+     * for the rest of the pass once it proves blocked, and caps wall time so testing starts fast.
      */
-    private fun download(context: Context, small: Boolean): Listing {
+    private fun download(
+        context: Context,
+        small: Boolean,
+        cancelled: AtomicBoolean? = null,
+        minLinksDesired: Int = Int.MAX_VALUE,
+    ): Listing {
+        if (cancelled?.get() == true) return Listing(emptyList(), 0, false)
         val sources = SOURCES.filter { it.small == small }
-        val pool = Executors.newFixedThreadPool(8)
+        val pool = Executors.newFixedThreadPool(DOWNLOAD_THREADS)
+        val results = ConcurrentLinkedQueue<Triple<List<String>, Boolean, Boolean>>()
+        val finishedSources = java.util.Collections.synchronizedSet(HashSet<String>())
+        val completedTasks = AtomicInteger(0)
+        val answeredCount = AtomicInteger(0)
+        val totalLinks = AtomicInteger(0)
+        val rawGithubFailures = AtomicInteger(0)
+        val rawGithubSuccesses = AtomicInteger(0)
+        val startedAt = System.currentTimeMillis()
         try {
-            val tasks = sources.map { source ->
-                Callable {
+            sources.forEach { source ->
+                pool.submit {
+                    if (cancelled?.get() == true) {
+                        completedTasks.incrementAndGet()
+                        return@submit
+                    }
                     val file = cacheFile(context, source)
                     val tagKey = KEY_TAG + file.name
                     val kept = if (file.exists()) runCatching { file.readLines() }.getOrNull() else null
-                    val answer = fetch(source.address, MmkvManager.decodeSettingsString(tagKey).takeIf { kept != null })
-                    val body = answer.body ?: if (answer.code == 304) null else fetch(source.mirror).body
+                    val skipRaw = rawGithubSuccesses.get() == 0 && rawGithubFailures.get() >= 3
+                    val answer = if (skipRaw) {
+                        Answer(0, null, null)
+                    } else {
+                        fetch(
+                            source.address,
+                            MmkvManager.decodeSettingsString(tagKey).takeIf { kept != null },
+                            connectTimeoutMs = FETCH_CONNECT_MILLIS,
+                            readTimeoutMs = FETCH_READ_MILLIS,
+                        ).also {
+                            if (it.code == 0) rawGithubFailures.incrementAndGet()
+                            else rawGithubSuccesses.incrementAndGet()
+                        }
+                    }
+                    if (cancelled?.get() == true) {
+                        completedTasks.incrementAndGet()
+                        return@submit
+                    }
+                    val body = answer.body ?: if (answer.code == 304) null else fetch(
+                        source.mirror,
+                        connectTimeoutMs = FETCH_CONNECT_MILLIS,
+                        readTimeoutMs = FETCH_READ_MILLIS,
+                    ).body
                     val lines = body?.let { toLines(it) }
-                    when {
+                    val item = when {
                         lines != null && lines.isNotEmpty() -> {
                             runCatching { file.writeText(lines.joinToString("\n")) }
                             MmkvManager.encodeSettings(tagKey, answer.tag.takeIf { answer.body != null })
@@ -639,20 +673,48 @@ object PublicConfigs {
                         }
                         else -> Triple(kept.orEmpty(), answer.code == 304, false)
                     }
+                    finishedSources.add(source.address)
+                    results.add(item)
+                    if (item.second) answeredCount.incrementAndGet()
+                    totalLinks.addAndGet(item.first.size)
+                    completedTasks.incrementAndGet()
                 }
             }
-            val results = pool.invokeAll(tasks, 60, TimeUnit.SECONDS)
-                .map { runCatching { it.get() }.getOrDefault(Triple(emptyList(), false, false)) }
-            val answered = results.count { it.second }
-            AppLog.info(
-                AppLog.Section.Other,
-                "Public configs: ${if (small) "short" else "large"} lists, $answered of ${sources.size} sources answered " +
-                    "(${results.count { it.third }} changed), ${results.sumOf { it.first.size }} links",
-            )
-            return Listing(results.flatMap { it.first }, answered, results.any { it.third })
+            val deadline = startedAt + DOWNLOAD_BUDGET_MILLIS
+            while (completedTasks.get() < sources.size && System.currentTimeMillis() < deadline) {
+                if (cancelled?.get() == true) break
+                val elapsed = System.currentTimeMillis() - startedAt
+                if (minLinksDesired < Int.MAX_VALUE && elapsed >= 2000L &&
+                    answeredCount.get() >= 18 && totalLinks.get() >= minLinksDesired
+                ) {
+                    break
+                }
+                try {
+                    Thread.sleep(50)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
         } finally {
             pool.shutdownNow()
         }
+        val list = results.toMutableList()
+        if (cancelled?.get() != true && finishedSources.size < sources.size) {
+            sources.filterNot { it.address in finishedSources }.forEach { source ->
+                val file = cacheFile(context, source)
+                if (file.exists()) {
+                    val kept = runCatching { file.readLines() }.getOrNull().orEmpty()
+                    if (kept.isNotEmpty()) list.add(Triple(kept, false, false))
+                }
+            }
+        }
+        val answered = list.count { it.second }
+        AppLog.info(
+            AppLog.Section.Other,
+            "Public configs: ${if (small) "short" else "large"} lists, $answered of ${sources.size} sources answered " +
+                "(${list.count { it.third }} changed), ${list.sumOf { it.first.size }} links",
+        )
+        return Listing(list.flatMap { it.first }, answered, list.any { it.third })
     }
 
     /**
@@ -759,16 +821,26 @@ object PublicConfigs {
 
     // ---------- Collecting ----------
 
+    /** True when the device currently reports an active network with internet capability. */
+    internal fun isNetworkAvailable(context: Context?): Boolean {
+        if (context == null) return true
+        return runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return@runCatching true
+            val network = cm.activeNetwork ?: return@runCatching false
+            val caps = cm.getNetworkCapabilities(network) ?: return@runCatching false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }.getOrDefault(true)
+    }
+
     /** True when the server is not behind Cloudflare and, for TCP sorts, accepts a connection. */
     private fun reaches(link: Link): Boolean = try {
         val address = InetAddress.getByName(link.host)
         when {
             isCloudflare(address.address) -> false
-            // A UDP config cannot be judged by a TCP connect, so it is not judged
-            // here at all — it goes on to be measured properly. Answering true was
-            // counting it as "reached" without anything having been reached, and
-            // on a phone with no line at all it counted every UDP config.
-            link.kind.udp -> false
+            // UDP protocols (WireGuard, Hysteria2) cannot be checked with a TCP connect;
+            // once DNS resolves outside Cloudflare, let Xray probe them directly.
+            link.kind.udp -> true
             else -> {
                 Socket().use {
                     it.connect(InetSocketAddress(address, link.port), CONNECT_MILLIS)
@@ -783,73 +855,119 @@ object PublicConfigs {
     /**
      * True when this phone really has a line to the internet right now.
      *
-     * Asked before any work starts, because every figure on the screen is a
-     * measurement and there is nothing to measure without a line. The screen used
-     * to raise its count with the internet switched off — the names of the
-     * configs could not be resolved, but each attempt was still counted as a test,
-     * so the number climbed while nothing had been tried at all. That is the one
-     * thing this figure must never do.
+     * Checks ConnectivityManager first for instant offline detection, then races
+     * multiple external endpoints so a single blocked IP does not look offline
+     * while an offline router still returns false quickly.
      */
-    internal fun hasLine(): Boolean = try {
-        val socket = Socket()
-        try {
-            socket.connect(InetSocketAddress(LINE_PROBE_HOST, LINE_PROBE_PORT), LINE_PROBE_MILLIS)
-            true
+    internal fun hasLine(context: Context? = null): Boolean {
+        if (!isNetworkAvailable(context)) return false
+        val pool = Executors.newFixedThreadPool(LINE_PROBE_ENDPOINTS.size)
+        val connected = AtomicBoolean(false)
+        val latch = java.util.concurrent.CountDownLatch(LINE_PROBE_ENDPOINTS.size)
+        return try {
+            LINE_PROBE_ENDPOINTS.forEach { (host, port) ->
+                pool.submit {
+                    try {
+                        Socket().use { socket ->
+                            socket.connect(InetSocketAddress(host, port), LINE_PROBE_MILLIS)
+                            if (connected.compareAndSet(false, true)) {
+                                while (latch.count > 0) latch.countDown()
+                            }
+                        }
+                    } catch (_: Exception) {
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+            }
+            latch.await(LINE_PROBE_MILLIS + 300L, TimeUnit.MILLISECONDS)
+            connected.get()
+        } catch (_: Exception) {
+            false
         } finally {
-            runCatching { socket.close() }
+            pool.shutdownNow()
         }
-    } catch (e: Exception) {
-        false
+    }
+
+    private val lineCheckLock = Any()
+
+    private fun checkLineOrAbort(
+        context: Context,
+        cancelled: AtomicBoolean,
+        disconnected: AtomicBoolean,
+        lastCheckAt: AtomicLong,
+    ): Boolean {
+        if (disconnected.get()) return false
+        val now = System.currentTimeMillis()
+        if (now - lastCheckAt.get() < LINE_RECHECK_MIN_GAP_MILLIS) return true
+        synchronized(lineCheckLock) {
+            if (disconnected.get()) return false
+            val recheckNow = System.currentTimeMillis()
+            if (recheckNow - lastCheckAt.get() < LINE_RECHECK_MIN_GAP_MILLIS) return true
+            lastCheckAt.set(recheckNow)
+            if (!hasLine(context)) {
+                disconnected.set(true)
+                cancelled.set(true)
+                AppLog.error(AppLog.Section.Other, "Public configs: internet disconnected; stopping immediately")
+                return false
+            }
+            return true
+        }
     }
 
     /**
      * Fills the public group with the number of configs its owner asked for, each
-     * one made to carry real bytes on this very connection.
+     * one tested on the user's real internet connection before it is kept.
      *
-     * The number is a target, not a suggestion. Rounds repeat — read the lists,
-     * try the addresses, measure what answered, keep what carried — until the
-     * count is reached or the pool is exhausted. The earlier version measured a
-     * single batch and kept whatever survived it, so asking for twenty could end
-     * with two, as the log shows; and the ceiling of 150 meant a number above
-     * that was never even attempted.
-     *
-     * Three things are deliberate. The group is emptied once, before the first
-     * round, so a second collection replaces the first rather than adding to it.
-     * It then grows only with configs already proven on this line, so the tab
-     * never shows an address that has not carried anything. And every round takes
-     * a different slice of the pool, because the head of a list has just been
-     * tried and failed.
+     * Uses pipelined chunks: fast parallel TCP pre-filtering feeds 16-way parallel
+     * Xray round-trip checks (`measureOutboundDelay`), and only configs that answer
+     * through Xray undergo real-byte download confirmation. Stops immediately if
+     * the user's internet disconnects.
      */
-    fun collect(context: Context, options: Options, cancelled: AtomicBoolean, onProgress: (Progress) -> Unit): Outcome {
-        // Nothing is measured without a line, and nothing is counted either. The
-        // screen used to climb with the internet switched off, because a name that
-        // could not be resolved still counted as a config that had been tested.
-        if (!hasLine()) {
+    fun collect(
+        context: Context,
+        options: Options,
+        cancelled: AtomicBoolean,
+        disconnected: AtomicBoolean = AtomicBoolean(false),
+        onProgress: (Progress) -> Unit,
+    ): Outcome {
+        if (!hasLine(context)) {
+            disconnected.set(true)
             AppLog.error(
                 AppLog.Section.Other,
                 "Public configs: no line to measure over; nothing was tried and nothing was counted",
             )
-            return Outcome(0, Origin.Bundled).also { onProgress(Progress(null, 0, 0, 0)) }
+            return Outcome(0, Origin.Bundled, disconnected = true).also { onProgress(Progress(null, 0, 0, 0)) }
         }
         onProgress(Progress(null, 0, 0, 0))
-        val first = download(context, small = true)
+        val wanted = acceptedCount(options.count)
+        MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
+        MmkvManager.encodeSettings(KEY_COUNT, wanted)
+
+        val first = download(
+            context = context,
+            small = true,
+            cancelled = cancelled,
+            minLinksDesired = maxOf(wanted * 20, 800),
+        )
+        if (disconnected.get() || (cancelled.get() && !hasLine(context))) {
+            disconnected.set(true)
+            return Outcome(0, Origin.Bundled, disconnected = true)
+        }
+        if (cancelled.get()) {
+            return Outcome(0, Origin.Bundled, disconnected = false)
+        }
+
         var origin = when {
             first.answered > 0 -> Origin.Fresh
             first.lines.size >= 50 -> Origin.Saved
             else -> Origin.Bundled
         }
         if (origin == Origin.Fresh) MmkvManager.encodeSettings(KEY_CHECKED, System.currentTimeMillis())
-        val wanted = acceptedCount(options.count)
-        MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
-        MmkvManager.encodeSettings(KEY_COUNT, wanted)
 
         // Emptied when the first config proves itself, not before the first
         // round, so this collection replaces the last one instead of piling onto
-        // it — and only once there is something to replace it with. Clearing at
-        // the start meant a check that carried nothing, which is the ordinary
-        // result on a filtered line and how every round in the log ends, left the
-        // tab empty: pressing "collect" wiped the configs the owner already had
-        // and handed back nothing.
+        // it — and only once there is something to replace it with.
         val previous = MmkvManager.decodeServerList(GROUP_ID)
         var replaced = false
 
@@ -859,63 +977,83 @@ object PublicConfigs {
         var found = 0
         var tried = 0
         var measured = 0
-        // How many configs are really in the tab. This is the figure the screen
-        // shows, and it is the tab's own count — not the number that carried, which
-        // can be a duplicate the store refused.
+        val verifiedCounter = AtomicInteger(0)
+        // How many configs are really in the tab.
         var carried = 0
         var rounds = 0
-        var emptyRound = false
         var imported = 0
         var poolSize = 0
+        val lastLineCheckAt = AtomicLong(System.currentTimeMillis())
 
         fun report() {
             onProgress(Progress(origin, found, tried, kept.size, wanted, measured, carried, rounds, poolSize))
         }
 
+        val initialLines = if (origin == Origin.Bundled) {
+            context.assets.open(ASSET).bufferedReader().use { it.readLines() }
+        } else {
+            first.lines
+        }
+        val queue = ArrayDeque(select(initialLines.asSequence(), options.kinds, options.game, seen))
+        poolSize = queue.size
+        var triedLarge = false
+        var triedBundled = origin == Origin.Bundled
+        val chunkSize = (wanted * 4).coerceIn(CHUNK_MIN, CHUNK_MAX)
         val deadline = System.currentTimeMillis() + MAX_DURATION_MILLIS
-        // Progress is measured by what this collection added, not by how big the
-        // tab is: the old group is only cleared once something proves itself, so
-        // for the first part of the search the tab is still the previous list and
-        // its size says nothing about how far this run has got.
-        while (!cancelled.get() && carried < wanted && rounds < MAX_ROUNDS && !emptyRound &&
-            System.currentTimeMillis() < deadline
-        ) {
-            rounds++
-            val lines = if (rounds == 1) {
-                if (origin == Origin.Bundled) context.assets.open(ASSET).bufferedReader().use { it.readLines() }
-                else first.lines
-            } else {
-                // A fresh look at the lists each round. It is cheap, and it also
-                // survives a list that answered with nothing the round before.
-                val next = download(context, small = true)
-                if (next.answered > 0) origin = Origin.Fresh
-                next.lines
+
+        while (!cancelled.get() && !disconnected.get() && carried < wanted && System.currentTimeMillis() < deadline) {
+            if (!isNetworkAvailable(context)) {
+                disconnected.set(true)
+                cancelled.set(true)
+                break
+            }
+            if (queue.isEmpty()) {
+                if (!triedLarge) {
+                    triedLarge = true
+                    val large = download(
+                        context = context,
+                        small = false,
+                        cancelled = cancelled,
+                        minLinksDesired = maxOf((wanted - carried) * 20, 1000),
+                    )
+                    if (large.answered > 0) origin = Origin.Fresh
+                    val extra = select(large.lines.asSequence(), options.kinds, options.game, seen)
+                    queue.addAll(extra)
+                    poolSize += extra.size
+                }
+                if (queue.isEmpty() && !triedBundled) {
+                    triedBundled = true
+                    val bundledLines = runCatching {
+                        context.assets.open(ASSET).bufferedReader().use { it.readLines() }
+                    }.getOrDefault(emptyList())
+                    val extra = select(bundledLines.asSequence(), options.kinds, options.game, seen)
+                    queue.addAll(extra)
+                    poolSize += extra.size
+                }
+                if (queue.isEmpty()) break
             }
 
-            val batch = selectFresh(lines, options, seen)
-            poolSize = select(lines.asSequence(), options.kinds, options.game).size
-            if (batch.isEmpty()) {
-                // Nothing in these lists that has not been tried already. The
-                // search is over: what was found is what there is.
-                emptyRound = true
-                continue
+            rounds++
+            val batch = ArrayList<Link>(chunkSize)
+            while (batch.size < chunkSize && queue.isNotEmpty()) {
+                batch.add(queue.removeFirst())
             }
+            if (batch.isEmpty()) break
             found += batch.size
             report()
 
             val reachable = quickCheck(batch, options, cancelled) { count -> tried += count; report() }
-            // When the cheap check answers nothing — a line that refuses a plain
-            // TCP connect to all of them, which is what a filtered network does —
-            // the batch itself is measured instead of being thrown away. Measuring
-            // is the only test that decides, and it knows how to raise a tunnel
-            // over a transport the bare socket cannot reach.
-            val candidates = select(reachable.asSequence().map { it.raw }, options.kinds)
-                .ifEmpty { batch.take(FALLBACK_MEASURE) }
+            if (cancelled.get() || disconnected.get()) break
+
+            if (reachable.isEmpty() && !checkLineOrAbort(context, cancelled, disconnected, lastLineCheckAt)) {
+                break
+            }
+
+            // When the cheap TCP check answers nothing on a line that blocks raw
+            // connects, measure a slice directly through Xray instead of dropping all.
+            val candidates = reachable.ifEmpty { batch.take(FALLBACK_MEASURE) }
             if (candidates.isEmpty()) continue
 
-            // Measured properly, the only test that decides. A config that carried
-            // goes into the group straight away — while the round is still running,
-            // which is what "add them by itself" means to the person watching.
             val carriedNow = runBlocking {
                 verify(
                     context = context,
@@ -923,132 +1061,80 @@ object PublicConfigs {
                     wanted = (wanted - carried).coerceAtLeast(1),
                     verify = options.verify,
                     cancelled = cancelled,
+                    disconnected = disconnected,
                     deadline = deadline,
-                    onCarried = { link, profile ->
+                    verifiedCounter = verifiedCounter,
+                    lastLineCheckAt = lastLineCheckAt,
+                    onCarried = { link, profile, pingMs, speed ->
                         val isNew = synchronized(kept) { keptRaws.add(link.raw).also { if (it) kept += link } }
                         if (isNew) {
-                            // The first proven config is the moment the old group
-                            // is out of date. Until then nothing is touched.
-                            if (!replaced) {
-                                MmkvManager.clearServerList(GROUP_ID)
-                                replaced = true
+                            synchronized(groupWriteLock) {
+                                // The first proven config is the moment the old group
+                                // is out of date. Until then nothing is touched.
+                                if (!replaced) {
+                                    MmkvManager.clearServerList(GROUP_ID)
+                                    replaced = true
+                                }
+                                val added = importIntoGroup(context, profile, link.raw, pingMs, speed)
+                                imported += added
+                                if (added > 0) carried += added
                             }
-                            val added = importIntoGroup(context, profile, link.raw)
-                            imported += added
-                            // The figure on the screen is the number of configs that
-                            // really went into the tab. It was reporting the size of
-                            // the proof list instead, so a config that carried was
-                            // added to the tab while the screen still said zero —
-                            // press the button, watch it count nothing, go back to
-                            // the list and find two new ones. What is said and what
-                            // is done are now the same number.
-                            if (added > 0) carried += added
                             report()
                         }
                     },
                 ) { verified, _ ->
-                    // `verified` is the number a tunnel was actually opened over —
-                    // the real work, which moves whether or not anything came
-                    // through. The number of configs that went into the tab is
-                    // counted in `onCarried`, from what the store really took, and
-                    // is deliberately not taken from the measurement: the two are
-                    // different numbers, and mixing them is what made the screen
-                    // say zero while the tab grew.
                     measured = verified
                     report()
                 }
             }
-            // The callback above already put them in; this is only the count the
-            // round settled on, for the log.
             val fresh = carriedNow.filter { it.first.raw in keptRaws }.map { it.first }
             report()
             if (fresh.isEmpty() && kept.isEmpty()) {
-                // A whole round measured and nothing carried. Nothing is added and
-                // the screen says so rather than raising a number for nothing.
                 AppLog.info(
                     AppLog.Section.Other,
-                    "Public configs: round $rounds measured ${candidates.size} and none carried",
+                    "Public configs: chunk $rounds measured ${candidates.size} and none carried",
                 )
             }
         }
 
         if (kept.isEmpty()) {
-            // Nothing carried, so nothing was replaced: the configs already in the
-            // tab are still there, untouched. Said out loud, because the difference
-            // between an empty tab and an untouched one is the difference between a
-            // list that was lost and a check that found nothing new.
             if (previous.isNotEmpty()) {
                 AppLog.info(
                     AppLog.Section.Other,
                     "Public configs: nothing carried this time; the ${previous.size} already in the tab were left as they were",
                 )
             }
+            if (disconnected.get()) {
+                AppLog.error(AppLog.Section.Other, "Public configs: stopped because the internet disconnected")
+                return Outcome(0, origin, disconnected = true)
+            }
             if (cancelled.get()) {
                 AppLog.info(AppLog.Section.Other, "Public configs: stopped on request; nothing had carried yet")
-                return Outcome(0, origin)
+                return Outcome(0, origin, disconnected = false)
             }
             AppLog.error(
                 AppLog.Section.Other,
                 "Public configs: none of the $measured measured carried anything on this line",
             )
-            return Outcome(0, origin)
+            return Outcome(0, origin, disconnected = false)
         }
 
         val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
         group.remarks = context.getString(R.string.public_group_name)
         MmkvManager.encodeSubscription(GROUP_ID, group)
+        runCatching { AutoConfigTest.sortGroup(GROUP_ID) }
         setFresh(false)
         AppLog.info(
             AppLog.Section.Other,
-            "Public configs: $imported of the $wanted asked for after $rounds round(s). " +
-                "The pool had $poolSize; $tried were checked, $measured were measured by " +
-                "carrying real bytes on this line, and each one in the group did carry",
+            "Public configs: $imported of the $wanted asked for after $rounds chunk(s). " +
+                "The pool had $poolSize; $tried were checked, $measured were tested via Xray on this line" +
+                (if (disconnected.get()) " (stopped when internet disconnected)" else ""),
         )
-        return Outcome(imported, origin)
-    }
-
-    /**
-     * The links in [lines] that have not been tried yet, in the chosen sorts.
-     *
-     * Rounds after the first take a different slice of the pool rather than the
-     * same head of the list: the head has already been tried and failed, so
-     * looking there again would burn a round to find nothing.
-     */
-    private fun selectFresh(
-        lines: List<String>,
-        options: Options,
-        seen: HashSet<String>,
-    ): List<Link> {
-        // `select` records every link it looks at in `seen`, whether or not it is
-        // taken. That was the fault behind the screen that said "0 of 0" and then
-        // sat still: the first round marked the whole pool as already tried, so the
-        // second round found nothing, the loop ended, and nothing had been measured
-        // at all. Here the pool is selected from on every round and only the batch
-        // that is actually handed out is marked, so the next round still has the
-        // rest to work with.
-        val all = select(lines.asSequence(), options.kinds, options.game)
-            .filterNot { it.raw in seen }
-        if (all.isEmpty()) return emptyList()
-        // How many to take this round: enough that a round is worth the tunnel it
-        // raises, since the addresses that work are a small share of the pool.
-        val size = (options.count.coerceIn(1, MAX_COUNT) * CANDIDATES_PER_WANTED)
-            .coerceIn(ROUND_MIN, CANDIDATES_CEILING)
-        // `all` already holds only what has not been handed out, so the head of it
-        // is always new work. Taking a slice at a rotating offset used to skip
-        // links once the list shrank, because the offset was measured against a
-        // pool that was no longer the same size.
-        val batch = all.take(size)
-        batch.forEach { seen.add(it.raw) }
-        return batch
+        return Outcome(imported, origin, disconnected = disconnected.get())
     }
 
     /**
      * Imports raw links into the public group, keeping whatever is already there.
-     *
-     * Returns how many the store really took. The caller counts the group by that
-     * rather than by how many links it hoped to add: an import can drop one — a
-     * duplicate, a link the parser now refuses — and the screen would then promise
-     * a number the tab does not hold.
      */
     private fun importIntoGroup(context: Context, raws: List<String>): Int {
         if (raws.isEmpty()) return 0
@@ -1061,16 +1147,16 @@ object PublicConfigs {
     }
 
     /**
-     * Puts one measured config into the tab, using the form that was measured.
-     *
-     * The raw link is only the fallback. The measured copy carries the settings
-     * the tunnel was actually raised with — the ones Tuning settled on from this
-     * line — so a config that carried in the test carries when it is picked. It is
-     * a link the same app has just accepted, but it is stored as a payload of its
-     * own rather than re-parsed, because re-parsing is the step that has been
-     * known to refuse a link the measurement had already used.
+     * Puts one measured config into the tab, recording its measured ping and speed
+     * so the list is immediately ranked best-first.
      */
-    private fun importIntoGroup(context: Context, profile: ProfileItem?, raw: String): Int {
+    private fun importIntoGroup(
+        context: Context,
+        profile: ProfileItem?,
+        raw: String,
+        pingMs: Long = 0L,
+        speedKbps: Int = 0,
+    ): Int {
         val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
         group.remarks = context.getString(R.string.public_group_name)
         MmkvManager.encodeSubscription(GROUP_ID, group)
@@ -1085,19 +1171,20 @@ object PublicConfigs {
                     subscriptionId = GROUP_ID,
                     append = true,
                 )
+                if (pingMs > 0L) {
+                    MmkvManager.encodeServerTestDelayMillis(guid, pingMs)
+                    AutoConfigTest.record(guid, pingMs, speedKbps.takeIf { it > 0 })
+                }
                 guid
             }.getOrNull()
         }
         if (measured != null) {
-            // Counted from the group itself: whatever the store did, the figure on
-            // the screen is the number of entries the tab now holds beyond what it
-            // held a moment ago.
             return (MmkvManager.decodeServerList(GROUP_ID).size - before).coerceAtLeast(0)
         }
         return importIntoGroup(context, listOf(raw))
     }
 
-    /** A TCP connect to each candidate, a few at a time; the cheap half of the test. */
+    /** Fast parallel TCP pre-check; rejects unreachable hosts before starting Xray. */
     private fun quickCheck(
         links: List<Link>,
         options: Options,
@@ -1109,10 +1196,13 @@ object PublicConfigs {
         try {
             for (batch in links.chunked(TESTING_AT_ONCE)) {
                 if (cancelled.get() || reachable.size >= links.size) break
-                val answers = pool.invokeAll(batch.map { link -> Callable { reaches(link) } })
-                // Counted as the batch is really worked through, and never counted
-                // twice: `onCount` used to be handed `batch.size` whether or not a
-                // single one of them could even be looked up.
+                val answers = pool.invokeAll(
+                    batch.map { link ->
+                        Callable {
+                            if (cancelled.get()) false else reaches(link)
+                        }
+                    },
+                )
                 var done = 0
                 batch.forEachIndexed { index, link ->
                     val answered = runCatching { answers[index].get() }.getOrDefault(false)
@@ -1128,11 +1218,8 @@ object PublicConfigs {
     }
 
     /**
-     * Measures candidates by raising a tunnel for each and downloading through it,
-     * and returns the quickest [wanted] that carried anything, with their speeds.
-     *
-     * A few run at once and the search stops as soon as [wanted] have carried: the
-     * point is a group that works, not a league table.
+     * Tests candidates in parallel through Xray on the user's real internet (`measureOutboundDelay`),
+     * skips failed configs immediately, and confirms real byte transfer on those that answer.
      */
     private suspend fun verify(
         context: Context,
@@ -1140,62 +1227,90 @@ object PublicConfigs {
         wanted: Int,
         verify: Boolean,
         cancelled: AtomicBoolean,
+        disconnected: AtomicBoolean = AtomicBoolean(false),
         deadline: Long = Long.MAX_VALUE,
-        onCarried: (Link, ProfileItem?) -> Unit = { _, _ -> },
+        verifiedCounter: AtomicInteger = AtomicInteger(0),
+        lastLineCheckAt: AtomicLong = AtomicLong(System.currentTimeMillis()),
+        onCarried: (Link, ProfileItem?, Long, Int) -> Unit = { _, _, _, _ -> },
         onProgress: (verified: Int, carried: Int) -> Unit,
     ): List<Pair<Link, Int>> = coroutineScope {
         if (!verify) {
-            // No tunnel can be raised here (a test, a build machine). Nothing is
-            // claimed as measured; the candidates are handed over as they are so
-            // the caller's own accounting still works.
             return@coroutineScope candidates.take(wanted).map { it to 0 }
         }
         val gate = Semaphore(VERIFY_AT_ONCE)
         val carried = java.util.Collections.synchronizedList(mutableListOf<Pair<Link, Int>>())
-        val done = java.util.concurrent.atomic.AtomicInteger(0)
-        // The tunnel is raised for one candidate at a time: a core is a single
-        // engine with one routing table, so two configs raised at once would be
-        // measuring each other's traffic as well as their own. Everything around
-        // it — the connect check, the import, the teardown — runs in parallel, so
-        // the waiting is the tunnel's own time and nothing else.
+        val done = verifiedCounter
+        val consecutiveFailures = AtomicInteger(0)
         val oneAtATime = Mutex()
+        val delayTestUrl = SettingsManager.getDelayTestUrl()
         candidates.map { link ->
             async(Dispatchers.IO) {
-                // Checked before the gate as well as after it: when the owner says
-                // "enough", the candidates still queued must fall away at once
-                // instead of taking a permit only to return it.
-                if (cancelled.get() || carried.size >= wanted) return@async
+                if (cancelled.get() || disconnected.get() || carried.size >= wanted) return@async
                 gate.withPermit {
-                    // The deadline is checked here as well as between rounds: one
-                    // candidate can take eighteen seconds, and a round must not run
-                    // for an hour past the moment the work was meant to stop.
-                    if (cancelled.get() || carried.size >= wanted || System.currentTimeMillis() >= deadline) {
+                    if (cancelled.get() || disconnected.get() || carried.size >= wanted ||
+                        System.currentTimeMillis() >= deadline
+                    ) {
                         return@withPermit
                     }
-                    val measuredNow = oneAtATime.withLock { measure(context, link) }
-                    val speed = measuredNow.speed
-                    // Every candidate handed to a tunnel counts as measured, whether
-                    // or not it carried. Only counting the successes made the figure
-                    // on the screen the same as the number found, so a round that
-                    // tried eighty-one and carried none could read "81 measured" for
-                    // work that never opened a tunnel — a counter that cannot move
-                    // independently of the successes is not a progress figure.
-                    done.incrementAndGet()
-                    if (speed > 0) {
-                        carried.add(link to speed)
-                        AppLog.info(
-                            AppLog.Section.Other,
-                            "Public configs: ${link.kind.name} ${link.host} carried ${speed / 1000} kbit/s here",
-                        )
-                        // Into the tab the moment it is proven, not at the end of the
-                        // round: the one watching is meant to see the list grow.
-                        onCarried(link, measuredNow.profile)
+                    val guid = privateImportSingle(link)
+                    if (guid == null) {
+                        done.incrementAndGet()
+                        onProgress(done.get(), carried.size)
+                        return@withPermit
                     }
-                    // Attempts, and of those how many carried. The two have to be
-                    // able to differ: that difference is the only thing on the
-                    // screen that tells a search which is working from one which
-                    // is not reaching anything.
-                    onProgress(done.get(), carried.size)
+                    try {
+                        val built = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
+                        if (!built.status) {
+                            done.incrementAndGet()
+                            onProgress(done.get(), carried.size)
+                            return@withPermit
+                        }
+                        var pingMs = CoreNativeManager.measureOutboundDelay(built.content, delayTestUrl)
+                        if (pingMs <= 0L && link.kind.udp && !cancelled.get() && !disconnected.get()) {
+                            delay(200)
+                            pingMs = CoreNativeManager.measureOutboundDelay(built.content, delayTestUrl)
+                        }
+                        if (pingMs <= 0L) {
+                            done.incrementAndGet()
+                            if (consecutiveFailures.incrementAndGet() >= STREAK_LINE_CHECK) {
+                                checkLineOrAbort(context, cancelled, disconnected, lastLineCheckAt)
+                            }
+                            onProgress(done.get(), carried.size)
+                            return@withPermit
+                        }
+                        if (cancelled.get() || disconnected.get() || carried.size >= wanted ||
+                            System.currentTimeMillis() >= deadline
+                        ) {
+                            return@withPermit
+                        }
+                        val speed = oneAtATime.withLock {
+                            if (cancelled.get() || disconnected.get() || carried.size >= wanted ||
+                                System.currentTimeMillis() >= deadline
+                            ) {
+                                0
+                            } else {
+                                AutoConfigTest.probeFast(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
+                            }
+                        }
+                        done.incrementAndGet()
+                        if (speed > 0) {
+                            consecutiveFailures.set(0)
+                            carried.add(link to speed)
+                            AppLog.info(
+                                AppLog.Section.Other,
+                                "Public configs: ${link.kind.name} ${link.host} carried $speed kbit/s (${pingMs}ms) here",
+                            )
+                            val proved = MmkvManager.decodeServerConfig(guid)
+                            onCarried(link, proved, pingMs, speed)
+                        } else if (consecutiveFailures.incrementAndGet() >= STREAK_LINE_CHECK) {
+                            checkLineOrAbort(context, cancelled, disconnected, lastLineCheckAt)
+                        }
+                        onProgress(done.get(), carried.size)
+                    } finally {
+                        synchronized(pendingGroupLock) {
+                            runCatching { MmkvManager.removeServers(listOf(guid), PENDING_GROUP) }
+                        }
+                    }
                 }
             }
         }.awaitAll()
@@ -1203,87 +1318,24 @@ object PublicConfigs {
     }
 
     /**
-     * True when [link]'s address accepts a connection on this line.
-     *
-     * Only the sorts whose first byte is a TCP connection are asked: Hysteria and
-     * WireGuard speak UDP, so their honesty can only be established by raising
-     * them, and they are measured as before.
+     * Puts one [link] into [PENDING_GROUP] with a unique GUID without disturbing
+     * other parallel workers, returning that GUID or null if import failed.
      */
-    private fun answers(link: Link): Boolean {
-        if (link.kind == Kind.Hysteria || link.kind == Kind.WireGuard) return true
-        return try {
-            Socket().use { socket -> socket.connect(InetSocketAddress(link.host, link.port), QUICK_CONNECT_MILLIS) }
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /**
-     * The speed [link] carries on this line, in kbit/s, or 0 when it carried
-     * nothing. The tunnel is raised privately for the measurement, so a running
-     * connection is not disturbed and nothing half-tested is ever left in the
-     * group the owner sees.
-     */
-    private suspend fun measure(context: Context, link: Link): Carried {
-        // A tunnel is the expensive half of a measurement: raising one and
-        // timing out on it takes many seconds, and on a filtered line most
-        // addresses never accept a connection at all. One bare TCP connect
-        // answers the same question in a second and a half, on the same line, so
-        // the tunnel is saved for what is actually listening. This is what makes
-        // the count move at a pace worth watching.
-        if (!answers(link)) {
-            AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host}:${link.port} did not accept a connection")
-            return Carried(null, 0)
-        }
-        val guid = privateImport(context, link)
-        if (guid == null) {
-            // A link the app's own importer will not take cannot be tunnelled at
-            // all. Written down at debug level, because a whole round of them is
-            // the difference between "nothing on this line carries" and "nothing
-            // was ever tried".
-            AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} could not be imported")
-            return Carried(null, 0)
-        }
-        return try {
-            val speed = AutoConfigTest.probe(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
-            if (speed <= 0) {
-                AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} opened and carried nothing")
-                return Carried(null, 0)
+    private fun privateImportSingle(link: Link): String? = synchronized(pendingGroupLock) {
+        try {
+            if (MmkvManager.decodeSubscription(PENDING_GROUP) == null) {
+                MmkvManager.encodeSubscription(
+                    PENDING_GROUP,
+                    SubscriptionItem(remarks = PENDING_GROUP, url = "", enabled = false),
+                )
             }
-            // The config that was proved is handed back on the way out, together
-            // with what it carried, rather than being thrown away with the
-            // scratch group. The proven form is the one Tuning has just settled
-            // on from this line's own measurements — which is why it is the copy
-            // that belongs in the tab.
-            Carried(MmkvManager.decodeServerConfig(guid), speed)
+            val before = MmkvManager.decodeServerList(PENDING_GROUP).toHashSet()
+            val added = AngConfigManager.importBatchConfig(link.raw, PENDING_GROUP, true).first
+            if (added <= 0) return null
+            MmkvManager.decodeServerList(PENDING_GROUP).firstOrNull { it !in before }
         } catch (e: Exception) {
-            AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} failed: ${e.message.orEmpty().take(120)}")
-            Carried(null, 0)
-        } finally {
-            MmkvManager.removeServers(listOf(guid), PENDING_GROUP)
+            null
         }
-    }
-
-    /** A measured candidate: the config as it was proved, and the speed it carried. */
-    private class Carried(val profile: ProfileItem?, val speed: Int)
-
-    /**
-     * Puts [link] in a group of its own, so a tunnel can be raised for it without
-     * touching either the public group or the owner's own configs. Returns its GUID.
-     */
-    private fun privateImport(context: Context, link: Link): String? = try {
-        if (MmkvManager.decodeSubscription(PENDING_GROUP) == null) {
-            MmkvManager.encodeSubscription(
-                PENDING_GROUP,
-                SubscriptionItem(remarks = PENDING_GROUP, url = "", enabled = false),
-            )
-        }
-        MmkvManager.clearServerList(PENDING_GROUP)
-        AngConfigManager.importBatchConfig(link.raw, PENDING_GROUP, true)
-        MmkvManager.decodeServerList(PENDING_GROUP).firstOrNull()
-    } catch (e: Exception) {
-        null
     }
 
     /** The flag of a two-letter country code, or a globe when there is none. */

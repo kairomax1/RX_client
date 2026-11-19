@@ -46,9 +46,15 @@ object AutoConfigTest {
     // in fact carrying. The floor and the window are both smaller now, and the
     // window is shorter than the deadline the caller gives the whole probe.
     private const val PAYLOAD_BYTES = 300_000
+    private const val FAST_PAYLOAD_BYTES = 65_536
     private const val MAX_DOWNLOAD_MS = 3_500L
+    private const val FAST_MAX_DOWNLOAD_MS = 2_000L
     private val PAYLOAD_URLS = listOf(
         "https://speed.cloudflare.com/__down?bytes=$PAYLOAD_BYTES",
+        "https://cachefly.cachefly.net/1mb.test",
+    )
+    private val FAST_PAYLOAD_URLS = listOf(
+        "https://speed.cloudflare.com/__down?bytes=$FAST_PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
     )
 
@@ -88,6 +94,10 @@ object AutoConfigTest {
         ConfigBadges.Score(guid, ping, parts.getOrNull(1)?.toIntOrNull())
     }
 
+    fun record(guid: String, pingMs: Long, speedKbps: Int?) {
+        save(guid, Stored(pingMs = pingMs, speedKbps = speedKbps))
+    }
+
     private fun save(guid: String, value: Stored) {
         storage.encode(guid, "${value.pingMs},${value.speedKbps ?: ""}")
     }
@@ -108,8 +118,17 @@ object AutoConfigTest {
             withTimeoutOrNull(timeoutMillis) { measureSpeed(context, guid) }?.takeIf { it > 0 }
         }
 
+    /**
+     * Fast real-byte transfer check for bulk candidate verification after a
+     * proxy has already passed an Xray round-trip probe.
+     */
+    suspend fun probeFast(context: Context, guid: String, timeoutMillis: Long = 5_000L): Int? =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMillis) { measureSpeed(context, guid, fast = true) }?.takeIf { it > 0 }
+        }
+
     /** Download speed of one config in kbit/s, or null when nothing could be measured. */
-    private suspend fun measureSpeed(context: Context, guid: String): Int? = withContext(Dispatchers.IO) {
+    private suspend fun measureSpeed(context: Context, guid: String, fast: Boolean = false): Int? = withContext(Dispatchers.IO) {
         val port = runCatching { ServerSocket(0).use { it.localPort } }.getOrNull() ?: return@withContext null
         val config = probeConfig(context, guid, port) ?: return@withContext null
         val controller = try {
@@ -122,8 +141,8 @@ object AutoConfigTest {
         try {
             controller.startLoop(config, 0)
             if (!controller.isRunning) return@withContext null
-            delay(250) // let the local door open
-            download(port)
+            delay(if (fast) 100L else 250L) // let the local door open
+            download(port, fast)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -149,7 +168,10 @@ object AutoConfigTest {
         return json.toString()
     }
 
-    private fun download(port: Int): Int? {
+    private fun download(port: Int, fast: Boolean = false): Int? {
+        val payloadBytes = if (fast) FAST_PAYLOAD_BYTES else PAYLOAD_BYTES
+        val maxDownloadMs = if (fast) FAST_MAX_DOWNLOAD_MS else MAX_DOWNLOAD_MS
+        val urls = if (fast) FAST_PAYLOAD_URLS else PAYLOAD_URLS
         val client = OkHttpClient.Builder()
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port)))
             // Two seconds to the local door, and a read that only has to be
@@ -157,13 +179,20 @@ object AutoConfigTest {
             // is still a working config. The whole call is bounded so that a
             // candidate can never hold the round for longer than its share.
             .connectTimeout(2, TimeUnit.SECONDS)
-            .readTimeout(4, TimeUnit.SECONDS)
-            .callTimeout(MAX_DOWNLOAD_MS + 1_500L, TimeUnit.MILLISECONDS)
+            .readTimeout(if (fast) 2500L else 4000L, TimeUnit.MILLISECONDS)
+            .callTimeout(maxDownloadMs + (if (fast) 1_200L else 1_500L), TimeUnit.MILLISECONDS)
             .build()
         try {
-            for (url in PAYLOAD_URLS) {
-                val speed = runCatching { downloadOnce(client, url) }.getOrNull()
-                if (speed != null) return speed
+            for (url in urls) {
+                val attempt = try {
+                    downloadOnce(client, url, payloadBytes, maxDownloadMs)
+                } catch (_: Throwable) {
+                    // When fast-probing, a socket/timeout failure means the tunnel
+                    // itself stalled; move on immediately instead of waiting a second timeout.
+                    if (fast) return null
+                    null
+                }
+                if (attempt != null) return attempt
             }
             return null
         } finally {
@@ -172,7 +201,7 @@ object AutoConfigTest {
         }
     }
 
-    private fun downloadOnce(client: OkHttpClient, url: String): Int? {
+    private fun downloadOnce(client: OkHttpClient, url: String, payloadBytes: Int, maxDownloadMs: Long): Int? {
         val request = Request.Builder().url(url).header("Cache-Control", "no-cache").build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
@@ -181,11 +210,11 @@ object AutoConfigTest {
             var total = 0L
             // The clock starts at the first byte so the handshake does not count as slowness.
             val started = System.nanoTime()
-            while (total < PAYLOAD_BYTES) {
+            while (total < payloadBytes) {
                 val read = input.read(buffer)
                 if (read < 0) break
                 total += read
-                if ((System.nanoTime() - started) / 1_000_000 > MAX_DOWNLOAD_MS) break
+                if ((System.nanoTime() - started) / 1_000_000 > maxDownloadMs) break
             }
             val millis = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
             // 4 kB is a fifth of a second at 4 kbit/s: enough to prove the tunnel

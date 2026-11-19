@@ -983,4 +983,6 @@
     <string name="rx_tuning_done">پیداشون کردم، دارم وصل می‌شم</string>
     <string name="title_pref_auto_failover">رفتنِ خودکار به کانفیگِ بعدی</string>
     <string name="summary_pref_auto_failover">وقتی کانفیگی که وصل است از کار می‌افتد، برنامه بی‌صدا کانفیگِ دیگری از همان گروه را وصل می‌کند.</string>
+    <string name="public_disconnected">اینترنت قطع شد؛ تست کانفیگ‌ها متوقف شد.</string>
+    <string name="public_disconnected_saved">اینترنت قطع شد — %1$d از %2$d کانفیگِ تست‌شده در فهرست نگه داشته شد.</string>
 </resources>

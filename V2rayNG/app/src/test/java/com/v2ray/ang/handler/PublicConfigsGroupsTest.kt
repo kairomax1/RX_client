@@ -40,11 +40,15 @@ class PublicConfigsGroupsTest {
     @Test
     fun theCounterCountsAttemptsAndNotOnlySuccesses() {
         val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
-        val body = source.substringAfter("val speed = oneAtATime.withLock { speedOf(context, link) }")
+        val body = source.substringAfter("val speed = oneAtATime.withLock {")
             .substringBefore("onProgress(done.get(), carried.size)")
         assertTrue(
             body.indexOf("done.incrementAndGet()") < body.indexOf("if (speed > 0)"),
             "the attempt must be counted before, and independently of, the success",
+        )
+        assertTrue(
+            source.contains("if (pingMs <= 0L)") && source.substringAfter("if (pingMs <= 0L)").substringBefore("return@withPermit").contains("done.incrementAndGet()"),
+            "a failed Xray probe must count the attempt and move straight to the next candidate",
         )
     }
 
@@ -82,13 +86,25 @@ class PublicConfigsGroupsTest {
         assertFalse(callback.contains("carried = "), "the measurement must not decide how many were added")
     }
 
-    /** A dead address must be refused by a connect, not by an eighteen-second tunnel. */
+    /** A dead address must be refused quickly and parallel Xray probes must filter before the tunnel download check. */
     @Test
     fun aDeadAddressCostsAConnectAndNotATunnel() {
         val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
-        assertTrue(source.contains("if (!answers(link))"))
-        assertTrue(source.contains("QUICK_CONNECT_MILLIS = 1500"))
-        assertTrue(source.contains("VERIFY_TIMEOUT_MILLIS = 9_000L"))
+        assertTrue(source.contains("CONNECT_MILLIS = 1200"))
+        assertTrue(source.contains("VERIFY_AT_ONCE = 16"))
+        assertTrue(source.contains("VERIFY_TIMEOUT_MILLIS = 5_000L"))
+        assertTrue(source.contains("CoreNativeManager.measureOutboundDelay"))
+        assertTrue(source.contains("AutoConfigTest.probeFast"))
+    }
+
+    @Test
+    fun disconnectStopsCollectionAndPreventsAutoConnect() {
+        val handlerSource = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        val activitySource = java.io.File("src/main/java/com/v2ray/ang/ui/publicconfigs/PublicConfigsActivity.kt").readText()
+        assertTrue(handlerSource.contains("checkLineOrAbort"))
+        assertTrue(handlerSource.contains("isNetworkAvailable"))
+        assertTrue(activitySource.contains("registerDefaultNetworkCallback"))
+        assertTrue(activitySource.contains("!outcome.disconnected"))
     }
 
     @Test

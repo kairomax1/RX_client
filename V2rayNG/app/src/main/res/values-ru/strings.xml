@@ -735,4 +735,6 @@
     <string name="notification_action_disconnect">Disconnect my config</string>
     <string name="notification_action_reconnect">Refresh my config</string>
     <string name="public_game">Game mode</string>
+    <string name="public_disconnected">Интернет отключился; проверка остановлена.</string>
+    <string name="public_disconnected_saved">Интернет отключился — %1$d из %2$d проверенных конфигураций сохранены в списке.</string>
 </resources>

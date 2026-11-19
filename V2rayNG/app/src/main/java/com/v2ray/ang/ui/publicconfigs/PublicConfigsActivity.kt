@@ -1,7 +1,11 @@
 package com.v2ray.ang.ui.publicconfigs
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,6 +18,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
@@ -87,15 +92,74 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
     )
     val state = _state.asStateFlow()
     private var cancelled = AtomicBoolean(false)
+    private var disconnected = AtomicBoolean(false)
+    private val connectivityManager =
+        runCatching { application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager }.getOrNull()
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            viewModelScope.launch(Dispatchers.IO) {
+                if (!PublicConfigs.isNetworkAvailable(getApplication())) return@launch
+                _state.update {
+                    it.copy(
+                        noLine = if (it.running) it.noLine else false,
+                        operator = NetworkOperator.current(getApplication()),
+                    )
+                }
+                if (_state.value.address.isNullOrEmpty()) {
+                    val (address, provider) = PublicConfigs.whoAmI()
+                    if (address.isNotEmpty()) {
+                        _state.update { it.copy(address = address, provider = provider) }
+                    }
+                }
+            }
+        }
+
+        override fun onLost(network: Network) {
+            handlePossibleDisconnect()
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            if (!networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                handlePossibleDisconnect()
+            }
+        }
+    }
 
     init {
+        runCatching { connectivityManager?.registerDefaultNetworkCallback(networkCallback) }
         viewModelScope.launch(Dispatchers.IO) {
             // Anything a previous measurement left behind — a scratch group from a
             // run that was killed, or from the version that drew it as a tab — is
             // cleared when the screen opens.
             PublicConfigs.tidyUp()
-            val (address, provider) = PublicConfigs.whoAmI()
-            _state.update { it.copy(address = address, provider = provider) }
+            if (!PublicConfigs.isNetworkAvailable(getApplication())) {
+                _state.update { it.copy(address = "", noLine = true) }
+            } else {
+                val (address, provider) = PublicConfigs.whoAmI()
+                _state.update { it.copy(address = address, provider = provider) }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        runCatching { connectivityManager?.unregisterNetworkCallback(networkCallback) }
+    }
+
+    private fun handlePossibleDisconnect() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!PublicConfigs.hasLine(getApplication())) {
+                if (_state.value.running) {
+                    disconnected.set(true)
+                    cancelled.set(true)
+                }
+                _state.update {
+                    it.copy(
+                        noLine = true,
+                        operator = NetworkOperator.current(getApplication()),
+                    )
+                }
+            }
         }
     }
 
@@ -104,32 +168,36 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
     fun start() {
         if (_state.value.running) return
         val flag = AtomicBoolean(false)
+        val lineLost = AtomicBoolean(false)
         cancelled = flag
+        disconnected = lineLost
         // Asked before the screen says it is working. With no line there is
         // nothing to measure, so the screen says that instead of counting attempts
         // that never left the phone.
         _state.update { it.copy(running = true, progress = null, outcome = null, noLine = false) }
         viewModelScope.launch(Dispatchers.IO) {
-            if (!PublicConfigs.hasLine()) {
+            if (!PublicConfigs.hasLine(getApplication())) {
                 _state.update { it.copy(running = false, noLine = true) }
                 return@launch
             }
             val outcome = runCatching {
-                PublicConfigs.collect(getApplication(), _state.value.options, flag) { progress ->
+                PublicConfigs.collect(getApplication(), _state.value.options, flag, lineLost) { progress ->
                     _state.update { it.copy(progress = progress) }
                 }
             }.getOrElse { PublicConfigs.Outcome(0, PublicConfigs.Origin.Bundled) }
-            _state.update { it.copy(running = false, stopping = false, outcome = outcome) }
+            _state.update {
+                it.copy(
+                    running = false,
+                    stopping = false,
+                    outcome = outcome,
+                    noLine = outcome.disconnected,
+                )
+            }
         }
     }
 
     /**
      * "Enough": stops trying more servers; those already found are used.
-     *
-     * The button used to set a flag and say nothing, so it looked dead while the
-     * measurement already in flight finished — a few seconds of a screen that
-     * ignored the press. The work now stops at the next checkpoint and the screen
-     * says so at once.
      */
     fun stop() {
         cancelled.set(true)
@@ -148,9 +216,10 @@ class PublicConfigsActivity : BaseComponentActivity() {
     @Composable
     override fun ScreenContent() {
         val state by viewModel.state.collectAsStateWithLifecycle()
-        val added = state.outcome?.added ?: 0
-        LaunchedEffect(added) {
-            if (added > 0) {
+        val outcome = state.outcome
+        val added = outcome?.added ?: 0
+        LaunchedEffect(outcome) {
+            if (outcome != null && !outcome.disconnected && added > 0) {
                 setResult(RESULT_OK, Intent().putExtra(EXTRA_KEEP, state.options.count))
                 finish()
             }
@@ -184,9 +253,13 @@ private fun PublicConfigsScreen(
     onBack: () -> Unit,
 ) {
     // The figure being typed. Held as text so a half-typed number is not rounded
-    // or thrown away, and shared with the slider so both show the same value.
-    var typedCount by rememberSaveable(state.options.count) {
-        mutableStateOf(state.options.count.toString())
+    // or thrown away, and synced with the slider without resetting cursor focus.
+    var typedCount by rememberSaveable { mutableStateOf(state.options.count.toString()) }
+    LaunchedEffect(state.options.count) {
+        val current = typedCount.toIntOrNull()?.coerceIn(1, PublicConfigs.MAX_COUNT)
+        if (current != state.options.count) {
+            typedCount = state.options.count.toString()
+        }
     }
 
     val colors = MaterialTheme.colorScheme
@@ -226,7 +299,12 @@ private fun PublicConfigsScreen(
             )
 
             Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(stringResource(R.string.public_intro), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
@@ -249,13 +327,15 @@ private fun PublicConfigsScreen(
                     val wanted = progress?.wanted?.takeIf { it > 0 } ?: options.count.coerceAtLeast(1)
                     val text = when {
                         state.stopping -> stringResource(R.string.public_stopping)
-                        // What happened, told truthfully: the number reached, and
-                        // when it fell short, why — the pool was tried and did not
-                        // answer on this line. "No server could be reached" was
-                        // wrong whenever some were found and added.
                         state.outcome != null -> {
                             val got = state.outcome.added
-                            if (got <= 0) {
+                            if (state.outcome.disconnected) {
+                                if (got > 0) {
+                                    stringResource(R.string.public_disconnected_saved, got, wanted)
+                                } else {
+                                    stringResource(R.string.public_disconnected)
+                                }
+                            } else if (got <= 0) {
                                 stringResource(R.string.public_none)
                             } else if (got >= wanted) {
                                 stringResource(R.string.public_reached, got, wanted)
@@ -350,7 +430,7 @@ private fun PublicConfigsScreen(
                         onValueChange = { raw ->
                             val value = raw.toInt()
                             val step = if (value <= 500) 10 else 100
-                            val next = (value / step) * step
+                            val next = ((value / step) * step).coerceIn(1, PublicConfigs.MAX_COUNT)
                             if (next != options.count) typedCount = next.toString()
                             onChange(options.copy(count = next))
                         },
