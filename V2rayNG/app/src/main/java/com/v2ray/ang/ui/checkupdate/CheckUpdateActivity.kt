@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -44,6 +46,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,10 +76,12 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.dto.CheckUpdateResult
+import com.v2ray.ang.handler.ApkInstaller
 import com.v2ray.ang.handler.UpdateNotifier
 import com.v2ray.ang.handler.UpdateRelease
 import com.v2ray.ang.ui.base.BaseComponentActivity
@@ -129,9 +134,46 @@ fun CheckUpdateScreen(
     val noUpdateTick by viewModel.noUpdateTick.collectAsStateWithLifecycle()
     var askSize by remember { mutableStateOf(false) }
 
+    // A file the owner already has on the phone, chosen by them: the way to install a build
+    // that the update check cannot see, because GitHub hides a draft from anyone not signed in.
+    val pickApk = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (!ApkInstaller.looksLikeApk(context, uri)) {
+            val size = ApkInstaller.sizeOf(context, uri)
+            val shown = if (size > 0) android.text.format.Formatter.formatFileSize(context, size)
+            else "?"
+            Toast.makeText(
+                context,
+                context.getString(R.string.update_not_an_apk, shown),
+                Toast.LENGTH_LONG
+            ).show()
+            return@rememberLauncherForActivityResult
+        }
+        if (!ApkInstaller.install(context, uri)) {
+            Toast.makeText(context, R.string.update_install_permission, Toast.LENGTH_LONG).show()
+        }
+    }
+
     LaunchedEffect(installFile) {
         val apk = installFile ?: return@LaunchedEffect
-        // Copying the file takes a moment: off the main thread, so the screen stays smooth.
+        // The installer is opened by the app itself now; the Download folder was a detour that
+        // ended nowhere on phones where no app held the permission to install from it.
+        val installed = try {
+            ApkInstaller.install(context, ApkInstaller.uriFor(context, apk))
+        } catch (e: Exception) {
+            LogUtil.w(AppConfig.TAG, "Installer could not be reached", e)
+            false
+        }
+        if (installed) {
+            viewModel.onInstallHandled()
+            return@LaunchedEffect
+        }
+        if (!ApkInstaller.mayInstall(context)) {
+            Toast.makeText(context, R.string.update_install_permission, Toast.LENGTH_LONG).show()
+            viewModel.onInstallHandled()
+            return@LaunchedEffect
+        }
+        // Nothing else worked: copy the file where the owner can reach it.
         val handed = withContext(Dispatchers.IO) { UpdateNotifier.handOver(context, apk) }
         if (handed) {
             Toast.makeText(context, R.string.update_in_downloads, Toast.LENGTH_LONG).show()
@@ -191,10 +233,49 @@ fun CheckUpdateScreen(
                     checked = checkPreRelease,
                     onCheckedChange = { viewModel.toggleCheckPreRelease(it) }
                 )
+                // The version this phone is running, always visible. It was only ever
+                // shown inside the "a newer build exists" card, which is a card that
+                // never appears when the phone cannot see the build at all — so the
+                // one number that settles "is this the version I think it is" was the
+                // one number not on the screen.
+                Text(
+                    text = stringResource(
+                        R.string.update_running_build,
+                        BuildConfig.VERSION_NAME,
+                        BuildConfig.VERSION_CODE,
+                        BuildConfig.BUILD_COMMIT.take(7).ifEmpty { "?" },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                )
                 SettingsMenuItem(
                     icon = painterResource(R.drawable.ic_check_update_24dp),
                     title = stringResource(R.string.update_check_for_update),
                     onClick = { viewModel.checkForUpdates() }
+                )
+                SettingsMenuItem(
+                    icon = painterResource(R.drawable.ic_source_code_24dp),
+                    title = stringResource(R.string.update_install_from_file),
+                    onClick = { pickApk.launch("application/vnd.android.package-archive") }
+                )
+                // A release kept as a draft is invisible to an app: GitHub shows it only to
+                // somebody who is signed in. This is how the phone signs in, once.
+                var githubKey by remember {
+                    mutableStateOf(MmkvManager.decodeSettingsString(AppConfig.PREF_GITHUB_TOKEN).orEmpty())
+                }
+                OutlinedTextField(
+                    value = githubKey,
+                    onValueChange = { typed ->
+                        githubKey = typed
+                        MmkvManager.encodeSettings(AppConfig.PREF_GITHUB_TOKEN, typed.trim())
+                    },
+                    label = { Text(stringResource(R.string.update_github_key)) },
+                    supportingText = { Text(stringResource(R.string.update_github_key_help)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
                 )
                 if (result != null) {
                     UpdateCard(

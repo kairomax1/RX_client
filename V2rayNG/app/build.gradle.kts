@@ -5,6 +5,23 @@ plugins {
     id("com.jaredsburrows.license")
 }
 
+/**
+ * The commit this build was made from, so that a build can tell which build it is.
+ * Two builds can carry the same version and still be different — a tester's build
+ * and the published one both say 1.0.1 — and without this there is no way for the
+ * phone to know whether the release it is looking at is the one it is running.
+ */
+fun commitOf(dir: File): String = runCatching {
+    val process = ProcessBuilder("git", "rev-parse", "HEAD")
+        .directory(dir)
+        .redirectErrorStream(false)
+        .start()
+    val out = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() == 0) out else ""
+}.getOrDefault("")
+
+val buildCommit = commitOf(rootDir).ifEmpty { commitOf(rootDir.parentFile) }
+
 android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
@@ -13,8 +30,20 @@ android {
         applicationId = "com.mobix.vpn"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.1"
+        // 4 was a mistake to freeze: a phone only updates an installed app when
+        // the new file has a higher number, and every build this project shipped
+        // carried the same one, so an installed copy could never be replaced. The
+        // number now comes from the build itself (-Prx.versionCode=<run number>,
+        // passed by the workflow) so that each build is newer than the last. CI
+        // then refuses to ship a file whose number is not above 4000004, which is
+        // the highest number any earlier build ever had — no phone can be stuck on
+        // a version that is newer than everything after it.
+        versionCode = (project.findProperty("rx.versionCode") as String?)?.toIntOrNull() ?: 4
+        // A tester who checks the phone's Settings screen can tell two builds apart
+        // from here on, which is how the version question is settled without a log.
+        versionName = (project.findProperty("rx.versionName") as String?) ?: "1.0.1"
+
+        buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
@@ -77,9 +106,15 @@ android {
 
     packaging {
         jniLibs {
-            // Compressed, extract-at-install native libraries. The alternative (uncompressed, mapped
-            // straight out of the APK) is refused by some device installers as an invalid package.
-            useLegacyPackaging = true
+            // Uncompressed, mapped straight out of the APK.
+            //
+            // The old comment here said the opposite and was wrong. Compressed libraries are the
+            // shape that produces "the package appears to be invalid" on install: a device must
+            // then extract them at install time into the app's own storage, and when that step
+            // does not fit the install transaction the installer refuses the whole package.
+            // Uncompressed is what Android has shipped native libraries in since 2010 and the
+            // only packaging every installer accepts. Nothing in this app needs them on disk.
+            useLegacyPackaging = false
         }
     }
 
@@ -176,12 +211,6 @@ android {
             "bn",
             "bqi-rIR"
         )
-    }
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
     }
 
     testOptions {

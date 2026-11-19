@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.TuningRunner
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
 import com.v2ray.ang.ui.compose.rxScreenBrush
@@ -19,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -50,6 +53,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MainScreen(
     mainViewModel: MainViewModel,
+    gamingModeViewModel: GamingModeViewModel,
     onAction: (MainAction) -> Unit,
     onNavigate: (MainDestination) -> Unit,
 ) {
@@ -60,7 +64,11 @@ fun MainScreen(
     val updatePending by mainViewModel.updatePending.collectAsStateWithLifecycle()
     val displayText = mainViewModel.formatStatus(uiState.status)
     // The status line names the connection state; bulk test progress takes it over while it runs.
+    val aetherSearch = uiState.aetherSearch
     val statusText = when {
+        aetherSearch != null && aetherSearch.total > 0 && aetherSearch.attempt > 0 ->
+            stringResource(R.string.aether_searching, aetherSearch.attempt.toString(), aetherSearch.total.toString(), aetherSearch.label)
+        aetherSearch != null -> stringResource(R.string.aether_starting)
         uiState.connectPhase == ConnectPhase.Connecting -> stringResource(R.string.rx_connecting)
         uiState.status is MainStatus.TestProgress -> displayText
         uiState.status is MainStatus.Testing && uiState.connectPhase != ConnectPhase.Connected -> displayText
@@ -80,6 +88,11 @@ fun MainScreen(
     var showDelDuplicateConfirm by remember { mutableStateOf(false) }
     var showDelInvalidConfirm by remember { mutableStateOf(false) }
     var showQuickSheet by remember { mutableStateOf(false) }
+    var showGamingMode by remember { mutableStateOf(false) }
+    val connectBestTick by mainViewModel.connectBestTick.collectAsStateWithLifecycle()
+    LaunchedEffect(connectBestTick) {
+        if (connectBestTick > 0) onAction(MainAction.RestartService)
+    }
     var showCopySelected by remember { mutableStateOf(false) }
     var showRemoveConfirm by rememberSaveable(stateSaver = ServerDeleteTarget.Saver) {
         mutableStateOf<ServerDeleteTarget?>(null)
@@ -219,6 +232,7 @@ fun MainScreen(
                         },
                         onSearchToggle = { show: Boolean -> showSearch = show },
                         onMenuClick = { scope.launch { drawerState.open() } },
+                        onPublicConfigs = { onNavigate(MainDestination.PublicConfigs) },
                         onAction = onAction,
                         onMoreMenuAction = { action ->
                             when (action) {
@@ -229,7 +243,8 @@ fun MainScreen(
                                 MainMoreMenuAction.ExportAll -> onAction(MainAction.ExportAll)
                                 MainMoreMenuAction.CopySelected -> showCopySelected = true
                             }
-                        }
+                        },
+                        onNavigate = { destination -> onNavigate(destination) },
                     )
                 },
                 bottomBar = {
@@ -336,6 +351,22 @@ fun MainScreen(
         }
         }
 
+        // While the best mux and fragment settings are being looked for, the
+        // connection cannot come up yet, so the screen says why.
+        val tuningPhase = uiState.tuning
+        TuningNotice(
+            text = stringResource(
+                if (tuningPhase == TuningRunner.Phase.Done) R.string.rx_tuning_done
+                else R.string.rx_tuning_searching
+            ),
+            visible = tuningPhase == TuningRunner.Phase.Searching ||
+                    tuningPhase == TuningRunner.Phase.Done,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 150.dp),
+        )
+
         // Rises out of the connect button; the only message shown around connecting.
         ConnectFailureMessage(
             visible = uiState.connectPhase == ConnectPhase.Failed,
@@ -350,8 +381,42 @@ fun MainScreen(
                 onDismiss = { showQuickSheet = false },
                 onNavigate = { destination ->
                     showQuickSheet = false
-                    onNavigate(destination)
+                    if (destination == MainDestination.GamingMode) {
+                        gamingModeViewModel.refresh()
+                        showGamingMode = true
+                    } else {
+                        onNavigate(destination)
+                    }
                 },
+            )
+        }
+
+        if (showGamingMode) {
+            val dnsState by gamingModeViewModel.state.collectAsStateWithLifecycle()
+            // Sharing is read every second while the card is open: another
+            // device can arrive or leave while the owner is looking at it.
+            LaunchedEffect(Unit) {
+                gamingModeViewModel.watchSharing()
+            }
+            DisposableEffect(Unit) {
+                onDispose { gamingModeViewModel.stopWatchingSharing() }
+            }
+            MainGamingModeCard(
+                state = dnsState,
+                // Switching the mode only switches it: no config is tested and
+                // none is connected. Whatever is connected stays connected, and
+                // if nothing is, nothing is started.
+                onSetEnabled = gamingModeViewModel::setEnabled,
+                onSetGameExit = gamingModeViewModel::setGameExit,
+                onUseAether = mainViewModel::connectAether,
+                onSetSharing = gamingModeViewModel::setSharing,
+                onSetMinutes = gamingModeViewModel::setMinutes,
+                onAllow = gamingModeViewModel::allowDevice,
+                onBlock = gamingModeViewModel::blockDevice,
+                onForget = gamingModeViewModel::forgetDevice,
+                // A running tunnel is rebuilt with the new rules; a stopped one is left alone.
+                onChanged = { if (isRunning) onAction(MainAction.RestartService) },
+                onDismiss = { showGamingMode = false },
             )
         }
     }

@@ -102,6 +102,53 @@ fun ConnectFailureMessage(visible: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
+private val TuningTint = Color(0xFF6FD3FF)
+
+/**
+ * Shown while the app tries each mux and fragment setting against the live line.
+ * The user asked to be told this is happening, because the connection takes
+ * longer to appear than usual while it is looked for.
+ */
+@Composable
+fun TuningNotice(text: String, visible: Boolean, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = slideInVertically(
+            spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+        ) { it * 2 } + fadeIn(tween(220)) + scaleIn(tween(260), initialScale = 0.85f),
+        exit = slideOutVertically(tween(260)) { it } + fadeOut(tween(220)) +
+                scaleOut(tween(260), targetScale = 0.92f),
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 26.dp)
+                .widthIn(max = 420.dp)
+                .shadow(18.dp, MESSAGE_SHAPE, ambientColor = TuningTint, spotColor = TuningTint)
+                .clip(MESSAGE_SHAPE)
+                .background(rxFloatingColor())
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(TuningTint.copy(alpha = 0.16f), TuningTint.copy(alpha = 0.04f))
+                    )
+                )
+                .border(1.dp, TuningTint.copy(alpha = 0.45f), MESSAGE_SHAPE)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(TuningTint))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
 /** Tick several configs of the current group, then copy them all at once. */
 @Composable
 fun CopySelectedDialog(

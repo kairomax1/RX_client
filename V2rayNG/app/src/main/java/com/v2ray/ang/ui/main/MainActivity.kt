@@ -26,6 +26,7 @@ import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.UpdateNotifier
+import com.v2ray.ang.handler.TuningRunner
 import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
@@ -34,6 +35,7 @@ import com.v2ray.ang.extension.toast
 import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.handler.AngConfigManager
+import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
@@ -77,6 +79,8 @@ class MainActivity : HelperBaseComponentActivity() {
         MainViewModel.Factory(application, MainRepository(application as AngApplication))
     }
 
+    private val gamingModeViewModel: GamingModeViewModel by viewModels()
+
     private val requestVpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) startV2Ray()
@@ -107,6 +111,12 @@ class MainActivity : HelperBaseComponentActivity() {
             mainViewModel.refreshUiSettings()
             if (refreshGroups) mainViewModel.onAction(MainAction.RefreshGroups)
             if (restartService) LauncherManager.restartService(this)
+        }
+
+    private val publicConfigsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val keep = result.data?.getIntExtra(com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity.EXTRA_KEEP, 0) ?: 0
+            if (result.resultCode == RESULT_OK && keep > 0) mainViewModel.testPublicConfigs(keep, connect = true)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -185,6 +195,7 @@ class MainActivity : HelperBaseComponentActivity() {
         BackHandler { moveTaskToBack(false) }
         MainScreen(
             mainViewModel = mainViewModel,
+            gamingModeViewModel = gamingModeViewModel,
             onAction = { action ->
                 when (action) {
                     MainAction.ToggleService -> handleFabAction()
@@ -228,14 +239,23 @@ class MainActivity : HelperBaseComponentActivity() {
 
     private fun navigateTo(destination: MainDestination) {
         val intent = when (destination) {
+            MainDestination.PublicConfigs -> {
+                publicConfigsLauncher.launch(Intent(this, com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity::class.java))
+                return
+            }
             MainDestination.Subscriptions -> Intent(this, SubSettingActivity::class.java)
             MainDestination.PerAppProxy -> Intent(this, PerAppProxyActivity::class.java)
             MainDestination.Routing -> Intent(this, RoutingSettingActivity::class.java)
+            // Shown as a card by the main screen; there is no activity to open.
+            MainDestination.GamingMode -> return
             MainDestination.Cloudflare -> Intent(this, CloudflareActivity::class.java)
             MainDestination.SpeedTest -> Intent(this, SpeedTestActivity::class.java)
             MainDestination.Settings -> Intent(this, SettingsActivity::class.java)
             MainDestination.CheckUpdate -> Intent(this, CheckUpdateActivity::class.java)
             MainDestination.BackupRestore -> Intent(this, BackupActivity::class.java)
+            MainDestination.XboxDns -> Intent(this, com.v2ray.ang.ui.xboxdns.XboxDnsActivity::class.java)
+            MainDestination.FirefoxVpn -> Intent(this, com.v2ray.ang.ui.firefoxvpn.FirefoxVpnActivity::class.java)
+            MainDestination.Log -> Intent(this, com.v2ray.ang.ui.applog.AppLogActivity::class.java)
             MainDestination.About -> Intent(this, AboutActivity::class.java)
         }
         settingsActivityLauncher.launch(intent)
@@ -244,9 +264,18 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun handleFabAction() {
         val state = mainViewModel.uiState.value
         when {
-            state.isRunning -> LauncherManager.stopService(this)
+            state.isRunning -> {
+                // Said out loud, so nothing is taken in its place: this stop was asked for.
+                mainViewModel.onStopRequested()
+                LauncherManager.stopService(this)
+            }
             // A tap while still connecting cancels the attempt.
             state.connectPhase == ConnectPhase.Connecting -> {
+                mainViewModel.onStopRequested()
+                // Cancelling also stops the search for the best settings, if one is running.
+                tuningJob?.cancel()
+                tuningJob = null
+                mainViewModel.setTuning(TuningRunner.Phase.Idle)
                 mainViewModel.onConnectCancelled()
                 LauncherManager.stopService(this)
             }
@@ -286,11 +315,48 @@ class MainActivity : HelperBaseComponentActivity() {
         ) {
             checkAndRequestPermission(PermissionType.ACCESS_LOCAL_NETWORK) {}
         }
+        // Every config is measured on this line before it is used: which mux and
+        // fragment settings are fastest depends on the network, and the answer
+        // found for one config says nothing about the next. This used to be
+        // skipped while gaming, which is why a config could be played through
+        // carrying settings that lost packets; it now runs there too, and the
+        // one combination that was found for this config last time is tried
+        // first so the search is two attempts rather than five.
+        if (mainViewModel.needsTuning(state.selectedGuid)) {
+            tuneThenConnect(state.selectedGuid.orEmpty())
+            return
+        }
+        connectNow()
+    }
+
+    private fun connectNow() {
         mainViewModel.onConnectRequested()
         if (!LauncherManager.startService(this, quiet = true)) {
             mainViewModel.onConnectFailed()
         }
     }
+
+    /**
+     * Looks for the fastest mux and fragment settings, then connects. The screen
+     * says what is happening the whole time, because this takes longer than a
+     * plain connect and the user asked to be told.
+     */
+    private fun tuneThenConnect(guid: String) {
+        tuningJob?.cancel()
+        tuningJob = lifecycleScope.launch {
+            val chosen = TuningRunner.tune(this@MainActivity, guid) { phase ->
+                mainViewModel.setTuning(phase)
+            }
+            // The search left the tunnel down and the best setting applied.
+            mainViewModel.onConnectRequested()
+            if (!LauncherManager.startService(this@MainActivity, quiet = true)) {
+                mainViewModel.onConnectFailed()
+            }
+            AppLog.info(AppLog.Section.Connection, "Tuning: connecting with ${chosen.key}")
+        }
+    }
+
+    private var tuningJob: kotlinx.coroutines.Job? = null
 
     private fun importManually(createConfigType: Int) {
         val intent = when (createConfigType) {

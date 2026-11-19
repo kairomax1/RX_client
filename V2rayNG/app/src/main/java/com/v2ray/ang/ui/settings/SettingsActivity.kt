@@ -39,6 +39,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.VPN
 import com.v2ray.ang.R
+import com.v2ray.ang.ui.sharing.SharingActivity
 import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
@@ -46,6 +47,8 @@ import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvBool
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvString
 import com.v2ray.ang.handler.SettingsChangeManager
+import com.v2ray.ang.handler.Sharing
+import com.v2ray.ang.handler.SharingGateway
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -112,8 +115,6 @@ fun SettingsScreen(
     // Kept in storage so the switch stays where the user left it, also after a restart.
     var vpnSettingsExpanded by rememberMmkvBool(AppConfig.PREF_SHOW_DNS_SETTINGS, false)
     var coreSettingsExpanded by rememberSaveable { mutableStateOf(true) }
-    var muxSettingsExpanded by rememberSaveable { mutableStateOf(false) }
-    var fragmentSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var observatorySettingsExpanded by rememberSaveable { mutableStateOf(false) }
     var advancedSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var modeSettingsExpanded by rememberSaveable { mutableStateOf(true) }
@@ -121,6 +122,7 @@ fun SettingsScreen(
 
     val context = LocalContext.current
     var dailyMaintenance by rememberMmkvBool(AppConfig.PREF_DAILY_MAINTENANCE, true)
+    var autoFailover by rememberMmkvBool(AppConfig.PREF_AUTO_FAILOVER, true)
     var localDns by rememberMmkvBool(AppConfig.PREF_LOCAL_DNS_ENABLED, false)
     var fakeDns by rememberMmkvBool(AppConfig.PREF_FAKE_DNS_ENABLED, false)
     var appendHttpProxy by rememberMmkvBool(AppConfig.PREF_APPEND_HTTP_PROXY, false)
@@ -129,16 +131,7 @@ fun SettingsScreen(
     var vpnInterfaceAddress by rememberMmkvString(AppConfig.PREF_VPN_INTERFACE_ADDRESS_CONFIG_INDEX, "0")
     var vpnMtu by rememberMmkvString(AppConfig.PREF_VPN_MTU, "")
 
-    var mux by rememberMmkvBool(AppConfig.PREF_MUX_ENABLED, false)
-    var muxConcurrency by rememberMmkvString(AppConfig.PREF_MUX_CONCURRENCY, "8")
-    var muxXudpConcurrency by rememberMmkvString(AppConfig.PREF_MUX_XUDP_CONCURRENCY, AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY)
-    var muxXudpQuic by rememberMmkvString(AppConfig.PREF_MUX_XUDP_QUIC, "reject")
 
-    var fragment by rememberMmkvBool(AppConfig.PREF_FRAGMENT_ENABLED, false)
-    var fragmentPackets by rememberMmkvString(AppConfig.PREF_FRAGMENT_PACKETS, "tlshello")
-    var fragmentLength by rememberMmkvString(AppConfig.PREF_FRAGMENT_LENGTH, "50-100")
-    var fragmentInterval by rememberMmkvString(AppConfig.PREF_FRAGMENT_INTERVAL, "10-20")
-    var fragmentMaxSplit by rememberMmkvString(AppConfig.PREF_FRAGMENT_MAXSPLIT, "10")
     var observatoryLeastPingInterval by rememberMmkvString(AppConfig.PREF_OBSERVATORY_LEAST_PING_INTERVAL, AppConfig.OBSERVATORY_LEAST_PING_INTERVAL)
     var observatoryLeastLoadInterval by rememberMmkvString(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_INTERVAL, AppConfig.OBSERVATORY_LEAST_LOAD_INTERVAL)
     var observatoryLeastLoadMethod by rememberMmkvString(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_METHOD, AppConfig.OBSERVATORY_LEAST_LOAD_METHOD)
@@ -190,7 +183,6 @@ fun SettingsScreen(
     val hevTunEnabled = isVpn && useHevTun
     val localProxyForced = hevTunEnabled
     val effectiveLocalProxy = enableLocalProxy || localProxyForced
-    val muxXudpConcurrencyInt = muxXudpConcurrency.toIntOrNull() ?: AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY.toInt()
 
     val dynamicColorSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     LaunchedEffect(dynamicColorSupported) {
@@ -220,10 +212,6 @@ fun SettingsScreen(
     val coreLogLevelValues = stringArrayResource(R.array.core_loglevel).toList()
     val outboundResolveEntries = stringArrayResource(R.array.outbound_domain_resolve_method).toList()
     val outboundResolveValues = stringArrayResource(R.array.outbound_domain_resolve_method_value).toList()
-    val xudpQuicEntries = stringArrayResource(R.array.mux_xudp_quic_entries).toList()
-    val xudpQuicValues = stringArrayResource(R.array.mux_xudp_quic_value).toList()
-    val fragmentPacketsEntries = stringArrayResource(R.array.fragment_packets).toList()
-    val fragmentPacketsValues = stringArrayResource(R.array.fragment_packets).toList()
     val observatoryLeastLoadMethodEntries = stringArrayResource(R.array.observatory_least_load_method).toList()
     val observatoryLeastLoadMethodValues = stringArrayResource(R.array.observatory_least_load_method).toList()
     val modeEntries = stringArrayResource(R.array.mode_entries).toList()
@@ -308,16 +296,16 @@ fun SettingsScreen(
                 order = 1
             ) {
                 SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_auto_failover),
+                    summary = stringResource(R.string.summary_pref_auto_failover),
+                    checked = autoFailover,
+                    onCheckedChange = { autoFailover = it }
+                )
+                SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_ipv6_enabled),
                     summary = stringResource(R.string.summary_pref_ipv6_enabled),
                     checked = ipv6Enabled,
                     onCheckedChange = { ipv6Enabled = it }
-                )
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_mux_enabled),
-                    summary = stringResource(R.string.summary_pref_mux_enabled),
-                    checked = mux,
-                    onCheckedChange = { mux = it }
                 )
                 SettingsListItem(
                     title = stringResource(R.string.settings_bypass_lan_title),
@@ -361,56 +349,10 @@ fun SettingsScreen(
             }
 
             SettingsSection(
-                title = stringResource(R.string.settings_group_fragment),
-                description = stringResource(R.string.settings_group_fragment_desc),
-                icon = painterResource(R.drawable.ic_flash_on_24dp),
-                order = 2
-            ) {
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_fragment_enabled),
-                    summary = stringResource(R.string.settings_fragment_switch_hint),
-                    checked = fragment,
-                    onCheckedChange = { fragment = it }
-                )
-                // The details only mean something while fragmenting is on.
-                AnimatedVisibility(visible = fragment) {
-                    Column {
-                        SettingsListItem(
-                            title = stringResource(R.string.settings_fragment_packets_title),
-                            hint = stringResource(R.string.settings_fragment_packets_hint),
-                            entries = fragmentPacketsEntries,
-                            values = fragmentPacketsValues,
-                            selectedValue = fragmentPackets,
-                            onSelected = { fragmentPackets = it }
-                        )
-                        SettingsEditItem(
-                            title = stringResource(R.string.settings_fragment_length_title),
-                            hint = stringResource(R.string.settings_fragment_length_hint),
-                            value = fragmentLength,
-                            onValueChanged = { fragmentLength = it }
-                        )
-                        SettingsEditItem(
-                            title = stringResource(R.string.settings_fragment_interval_title),
-                            hint = stringResource(R.string.settings_fragment_interval_hint),
-                            value = fragmentInterval,
-                            onValueChanged = { fragmentInterval = it }
-                        )
-                        SettingsEditItem(
-                            title = stringResource(R.string.settings_fragment_maxsplit_title),
-                            hint = stringResource(R.string.settings_fragment_maxsplit_hint),
-                            value = fragmentMaxSplit,
-                            keyboardNumber = true,
-                            onValueChanged = { fragmentMaxSplit = it }
-                        )
-                    }
-                }
-            }
-
-            SettingsSection(
                 title = stringResource(R.string.settings_group_list),
                 description = stringResource(R.string.settings_group_list_desc),
                 icon = painterResource(R.drawable.ic_grid_24dp),
-                order = 3
+                order = 2
             ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_speed_enabled),
@@ -430,7 +372,7 @@ fun SettingsScreen(
                 title = stringResource(R.string.title_pref_daily_maintenance),
                 description = stringResource(R.string.settings_group_maintenance_desc),
                 icon = painterResource(R.drawable.ic_refresh_24dp),
-                order = 4
+                order = 3
             ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.settings_maintenance_switch_title),
@@ -447,8 +389,36 @@ fun SettingsScreen(
                 )
             }
 
+            SettingsSection(
+                title = stringResource(R.string.sharing_title),
+                description = stringResource(R.string.sharing_settings_desc),
+                icon = painterResource(R.drawable.ic_share_24dp),
+                order = 4
+            ) {
+                SettingsMenuItem(
+                    title = stringResource(R.string.sharing_open),
+                    subtitle = sharingSummary(),
+                    onClick = { context.startActivity(Intent(context, SharingActivity::class.java)) },
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
             NavigationBarsSpacer()
         }
     }
+}
+
+/**
+ * One line saying what sharing is doing at this moment, so the settings can be
+ * read without opening the screen: whether the door is open, and on which
+ * address the other device has to be pointed.
+ */
+@Composable
+private fun sharingSummary(): String {
+    val on = Sharing.isEnabled() && Sharing.stoppedReason().isEmpty()
+    if (!on) return stringResource(R.string.sharing_state_off)
+    val address = remember { SharingGateway.network().first.firstOrNull() }
+    val port = remember { Sharing.port() }
+    return if (address == null) stringResource(R.string.sharing_no_network)
+    else stringResource(R.string.sharing_at, address, port.toString())
 }

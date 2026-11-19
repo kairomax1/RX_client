@@ -233,8 +233,11 @@ object MmkvManager {
             allServers.addAll(decodeServerList(DEFAULT_SUBSCRIPTION_ID))
         }
 
-        // Add servers from all subscriptions
-        subsList.forEach { guid ->
+        // Add servers from all subscriptions, but not from the scratch groups the
+        // app measures public configs in: one of those holds a single config that
+        // is being tried at this moment, and pulling it into "test all", an export
+        // or a backup would carry a half-tested address into the owner's list.
+        subsList.filterNot { PublicConfigs.isInternalGroup(it) }.forEach { guid ->
             allServers.addAll(decodeServerList(guid))
         }
 
@@ -420,7 +423,11 @@ object MmkvManager {
         val subId = getSubscriptionId(subscriptionId)
         val serverList = decodeServerList(subId)
 
-        // Remove all servers in the list
+        // Remove all servers in the list. The empties have to be written
+        // explicitly: clearing the decoded list and encoding it again writes back
+        // exactly what was read, so the profiles stayed on disk and every refresh
+        // added its batch to the ones already there — which is what "it keeps
+        // adding more and more of them" was.
         serverList.forEach { guid ->
             if (getSelectServer() == guid) {
                 mainStorage.remove(KEY_SELECTED_SERVER)
@@ -429,8 +436,21 @@ object MmkvManager {
             serverAffStorage.remove(guid)
         }
 
-        serverList.clear()
-        encodeServerList(serverList, subId)
+        encodeServerList(ArrayList(), subId)
+    }
+
+    /**
+     * Empties a group and keeps its place in the list. Unlike [removeServerViaSubid]
+     * the group itself stays, so the tab does not disappear while it is being refilled.
+     */
+    fun clearServerList(subscriptionId: String) {
+        val subId = getSubscriptionId(subscriptionId)
+        decodeServerList(subId).forEach { guid ->
+            if (getSelectServer() == guid) mainStorage.remove(KEY_SELECTED_SERVER)
+            profileFullStorage.remove(guid)
+            serverAffStorage.remove(guid)
+        }
+        encodeServerList(ArrayList(), subId)
     }
 
     /**
@@ -654,6 +674,10 @@ object MmkvManager {
             val json = subStorage.decodeString(key)
             if (!json.isNullOrBlank()) {
                 val item = JsonUtil.fromJsonSafe(json, SubscriptionItem::class.java) ?: SubscriptionItem()
+                // The scratch groups the app measures in are real store entries but
+                // not anybody's subscription: they are left out of every list that
+                // is drawn, which is the one place that decides it.
+                if (PublicConfigs.isInternalGroup(key)) return@forEach
                 subscriptions.add(SubscriptionCache(key, item))
             }
         }

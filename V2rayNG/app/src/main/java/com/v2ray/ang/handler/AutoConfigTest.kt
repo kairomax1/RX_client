@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import libv2ray.CoreCallbackHandler
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,8 +38,15 @@ object AutoConfigTest {
     const val STORAGE_ID = "RX_AUTO_TEST"
     private val storage by lazy { MMKV.mmkvWithID(STORAGE_ID, MMKV.MULTI_PROCESS_MODE) }
 
-    private const val PAYLOAD_BYTES = 600_000
-    private const val MAX_DOWNLOAD_MS = 6_000L
+    // What decides a config is whether bytes come through, not how many. A small
+    // download is enough to tell a working tunnel from a dead one, and asking for
+    // a large one only added waiting to every candidate on a slow but working
+    // line: at 4 kbit/s — which is what one of hers really carried — a sixth of a
+    // megabyte is two minutes, so the measurement gave up on a config that was
+    // in fact carrying. The floor and the window are both smaller now, and the
+    // window is shorter than the deadline the caller gives the whole probe.
+    private const val PAYLOAD_BYTES = 300_000
+    private const val MAX_DOWNLOAD_MS = 3_500L
     private val PAYLOAD_URLS = listOf(
         "https://speed.cloudflare.com/__down?bytes=$PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
@@ -84,6 +92,22 @@ object AutoConfigTest {
         storage.encode(guid, "${value.pingMs},${value.speedKbps ?: ""}")
     }
 
+    /**
+     * Carries real bytes through this config right now, and says how quickly.
+     *
+     * A ping is only a handshake: a UDP sort — WireGuard above all — answers a
+     * handshake and then moves no data at all when its MTU is wrong or its
+     * carrier's NAT entry is gone, which is exactly the state that was reported
+     * as "it pings and does not work". Only a download can tell the difference,
+     * so this is what decides whether a config is offered to anybody.
+     *
+     * @return kbit/s measured, or null when nothing came through in [timeoutMillis].
+     */
+    suspend fun probe(context: Context, guid: String, timeoutMillis: Long = 14_000L): Int? =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMillis) { measureSpeed(context, guid) }?.takeIf { it > 0 }
+        }
+
     /** Download speed of one config in kbit/s, or null when nothing could be measured. */
     private suspend fun measureSpeed(context: Context, guid: String): Int? = withContext(Dispatchers.IO) {
         val port = runCatching { ServerSocket(0).use { it.localPort } }.getOrNull() ?: return@withContext null
@@ -128,9 +152,13 @@ object AutoConfigTest {
     private fun download(port: Int): Int? {
         val client = OkHttpClient.Builder()
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port)))
-            .connectTimeout(4, TimeUnit.SECONDS)
+            // Two seconds to the local door, and a read that only has to be
+            // alive rather than fast: a slow line sends a few bytes at a time and
+            // is still a working config. The whole call is bounded so that a
+            // candidate can never hold the round for longer than its share.
+            .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(4, TimeUnit.SECONDS)
-            .callTimeout(MAX_DOWNLOAD_MS + 5_000L, TimeUnit.MILLISECONDS)
+            .callTimeout(MAX_DOWNLOAD_MS + 1_500L, TimeUnit.MILLISECONDS)
             .build()
         try {
             for (url in PAYLOAD_URLS) {
@@ -160,7 +188,9 @@ object AutoConfigTest {
                 if ((System.nanoTime() - started) / 1_000_000 > MAX_DOWNLOAD_MS) break
             }
             val millis = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
-            if (total < 20_000) return null
+            // 4 kB is a fifth of a second at 4 kbit/s: enough to prove the tunnel
+            // moves bytes, small enough that a slow line is not called dead.
+            if (total < 4_000) return null
             return (total * 8 / millis).toInt().coerceAtLeast(1) // bits per millisecond = kbit/s
         }
     }

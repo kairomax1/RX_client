@@ -14,8 +14,11 @@ import com.v2ray.ang.enums.BalancerStrategyType
 import com.v2ray.ang.enums.CoreResolvedType
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -32,6 +35,11 @@ object CoreConfigManager {
      * Build the runtime configuration for normal startup.
      */
     fun getV2rayConfig(context: Context, guid: String): ConfigResult {
+        // Mux and fragment are one set of settings that the core reads while it
+        // builds an outbound, so they have to be the ones this config was
+        // measured with. Setting them here means a config change can never be
+        // connected with the previous config's answer.
+        Tuning.applyFor(guid)
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
                 ?: return ConfigResult(
@@ -59,6 +67,7 @@ object CoreConfigManager {
      * The core flow is reused, then non-essential sections are removed.
      */
     fun getV2rayConfig4Speedtest(context: Context, guid: String): ConfigResult {
+        Tuning.applyFor(guid)
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
                 ?: return ConfigResult(
@@ -528,9 +537,11 @@ object CoreConfigManager {
             inbound1.settings = V2rayConfig.InboundBean.InSettingsBean()
         }
 
-        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PROXY_SHARING) != true) {
-            inbound1.listen = AppConfig.LOOPBACK
-        }
+        // The core listens on this phone alone, always. Other devices reach it
+        // through the app's own door (SharingGateway), which is what lets a
+        // device be asked about, named and cut off; a door straight into the
+        // core would be one nobody can see or close.
+        inbound1.listen = AppConfig.LOOPBACK
         inbound1.port = socksPort
         inbound1.settings?.udp = MmkvManager.decodeSettingsBool(AppConfig.PREF_SOCKS_ENABLE_UDP, AppConfig.DEFAULT_SOCKS_ENABLE_UDP)
         if (socksUsername != null && socksPassword != null) {
@@ -546,13 +557,28 @@ object CoreConfigManager {
             inbound1.settings?.accounts = null
         }
         val fakedns = MmkvManager.decodeSettingsBool(AppConfig.PREF_FAKE_DNS_ENABLED) == true
-        val sniffAllTlsAndHttp =
+        // DNS mode decides by site name, so the name has to be read from the connection.
+        val sniffAllTlsAndHttp = GamingMode.isEnabled() ||
             MmkvManager.decodeSettingsBool(AppConfig.PREF_SNIFFING_ENABLED, true) != false
         inbound1.sniffing?.enabled = fakedns || sniffAllTlsAndHttp
+        // In DNS mode the site name must also replace the address the app was given: for a
+        // filtered site that address is a fake one, and only the name leads to the real site.
         inbound1.sniffing?.routeOnly =
-            MmkvManager.decodeSettingsBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
+            !GamingMode.isEnabled() && MmkvManager.decodeSettingsBool(AppConfig.PREF_ROUTE_ONLY_ENABLED, false)
         if (!sniffAllTlsAndHttp) {
             inbound1.sniffing?.destOverride?.clear()
+        }
+        if (sniffAllTlsAndHttp) {
+            // What the core is told to read out of every connection. `http` and
+            // `tls` are what the rules match on and cost nothing worth measuring;
+            // `quic` makes the core reassemble and parse QUIC headers for every
+            // UDP 443 flow, which is a per-packet cost on the same CPU that is
+            // carrying a game. The template lists all three, and in this mode the
+            // third buys nothing: a UDP 443 flow is dropped outright by the rules,
+            // so there is no name to read from it. Leaving it out is the cheapest
+            // real speed there is in this mode — no extra bytes on the wire, just
+            // less work per packet.
+            inbound1.sniffing?.destOverride?.removeAll { it == "quic" }
         }
         if (fakedns) {
             inbound1.sniffing?.destOverride?.add("fakedns")
@@ -597,7 +623,7 @@ object CoreConfigManager {
     private fun collectUserRuleDomainsByTag(tag: String): ArrayList<String> {
         val domain = ArrayList<String>()
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             if (key.enabled && key.outboundTag == tag && !key.domain.isNullOrEmpty()) {
                 key.domain?.forEach {
@@ -615,7 +641,7 @@ object CoreConfigManager {
     private fun collectCustomOutboundDomains(): ArrayList<String> {
         val domain = ArrayList<String>()
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             if (key.enabled && !AppConfig.BUILTIN_OUTBOUND_TAGS.contains(key.outboundTag)
                 && !key.domain.isNullOrEmpty()
@@ -886,7 +912,7 @@ object CoreConfigManager {
     ) {
         val servers = ArrayList<Any>()
         val remoteDns = SettingsManager.getRemoteDnsServers()
-        val domesticDns = SettingsManager.getDomesticDnsServers()
+        val domesticDns = SettingsManager.getDomesticDnsServers(configContext.context)
 
         remoteDns.forEach { servers.add(it) }
 
@@ -1041,7 +1067,13 @@ object CoreConfigManager {
                             V2rayConfig.DnsBean.ServersBean(
                                 address = address,
                                 domains = rule.domain,
-                                skipFallback = true,
+                                // Names at home are answered by a resolver at home, and
+                                // only that one was allowed to answer: when it did not,
+                                // nothing did, and a site that never gets a name is a
+                                // site that never opens. The other resolvers are still
+                                // the last resort rather than the first, so a name at
+                                // home is still answered from home when it can be.
+                                skipFallback = false,
                                 tag = tag
                             )
                         )
@@ -1174,11 +1206,30 @@ object CoreConfigManager {
             MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY)
                 ?: "AsIs"
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         rulesetItems?.forEach { key ->
             appendRoutingUserRule(configContext, key, v2rayConfig, policyGroupBalancerTags)
         }
+        // What was really written, said out loud: a rule that is silently left
+        // out looks exactly like a rule that was never wanted, and guessing
+        // which of the two it is costs a build and a day of the owner's patience.
+        AppLog.info(
+            AppLog.Section.Core,
+            buildString {
+                append("Routing: ${rulesetItems?.size ?: 0} rules")
+                rulesetItems?.forEach { key ->
+                    val names = key.domain?.size ?: 0
+                    val addresses = key.ip?.size ?: 0
+                    append("; ${key.remarks}: $names names, $addresses addresses -> ${key.outboundTag}")
+                }
+                append("; sniffing ${if (CoreConfigManager.sniffingEnabled(v2rayConfig)) "on" else "off"}")
+            }
+        )
     }
+
+    /** Whether the core was told to read the site name out of the connection. */
+    private fun sniffingEnabled(v2rayConfig: V2rayConfig): Boolean =
+        v2rayConfig.inbounds.any { it.sniffing?.enabled == true }
 
     /**
      * Convert one rule item and append it to routing rules.

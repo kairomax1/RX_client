@@ -10,6 +10,7 @@ import com.v2ray.ang.enums.NetworkType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.extension.nullIfBlank
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -58,6 +59,11 @@ object CoreOutboundBuilder {
             } else if (outbound.streamSettings?.network == NetworkType.XHTTP.type) {
                 muxEnabled = false
             }
+            // A game wants the packet it is sending now to leave now. Mux carries
+            // many streams over one connection and every one of them waits behind
+            // the others — which is how a file is fetched quickly and how a game
+            // is made to stutter.
+            if (GamingMode.isEnabled()) muxEnabled = false
 
             if (muxEnabled) {
                 outbound.mux?.enabled = true
@@ -235,6 +241,35 @@ object CoreOutboundBuilder {
         return outboundBean
     }
 
+    /**
+     * Mobile carriers drop the NAT entry of a silent UDP flow within a minute;
+     * this keeps it. Twenty-five seconds is the usual answer, but a carrier that
+     * is quicker than that — and several are — leaves the tunnel dead for the
+     * twenty seconds before the next packet, which is exactly the "it pings but
+     * then stops working" that was reported. Fifteen is cheap (a handshake-sized
+     * packet every fifteen seconds) and is under every carrier's timer.
+     */
+    private const val WIREGUARD_KEEP_ALIVE_SECONDS = 15
+
+    /**
+     * The packet size for a WireGuard tunnel. Configs ask for 1420, which fits plain Ethernet
+     * only: on mobile data and PPPoE the handshake passes and then large packets vanish, so
+     * the tunnel "connects" and loads nothing. 1280 fits every path (it is the IPv6 minimum);
+     * anything above 1380 is brought down to it, a smaller wish is kept.
+     */
+    internal fun wireguardMtu(wanted: Int?): Int = when {
+        // A config that asks for more than fits a mobile path is brought down to
+        // the largest size that still does; 1280 is the IPv6 minimum and is safe
+        // everywhere, but it is also the slowest, so it is the floor rather than
+        // the default.
+        wanted == null || wanted > WIREGUARD_SAFE_MTU -> WIREGUARD_SAFE_MTU
+        wanted < 1280 -> 1280
+        else -> wanted
+    }
+
+    /** Fits a PPPoE and a mobile path (1500 minus tunnel and carrier overhead). */
+    private const val WIREGUARD_SAFE_MTU = 1360
+
     private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
         val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
 
@@ -252,20 +287,6 @@ object CoreOutboundBuilder {
             ipv4Addresses.ifEmpty { listOf(AppConfig.WIREGUARD_LOCAL_ADDRESS_V4) }
         }
 
-        val rawDNS = profileItem.remoteDNS
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?.ifEmpty { null }
-            ?: listOf(AppConfig.WIREGUARD_LOCAL_REMOTE_DNS)
-
-        val remotes = if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true) {
-            rawDNS
-        } else {
-            val ipv4Dns = rawDNS.filter { !it.contains(":") }
-            ipv4Dns.ifEmpty { listOf(AppConfig.WIREGUARD_LOCAL_REMOTE_DNS) }
-        }
-
         outboundBean?.settings?.let { wireguard ->
             wireguard.secretKey = profileItem.secretKey
             wireguard.address = addresses
@@ -275,8 +296,17 @@ object CoreOutboundBuilder {
                 peer.preSharedKey = profileItem.preSharedKey?.nullIfBlank()
                 peer.endpoint = Utils.getIpv6Address(profileItem.server) + ":${profileItem.serverPort}"
             }
-            wireguard.mtu = profileItem.mtu
-            wireguard.remoteDNS = remotes
+            wireguard.peers?.firstOrNull()?.keepAlive = WIREGUARD_KEEP_ALIVE_SECONDS
+            wireguard.mtu = wireguardMtu(profileItem.mtu)
+            // With IPv6 off, an endpoint name is not tried over an address family that leads nowhere.
+            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) != true) wireguard.domainStrategy = "ForceIPv4"
+            // The DNS a WireGuard outbound carries is asked inside the tunnel by the
+            // core, before routing is consulted — so a resolver written here answers
+            // every name, including the ones that must be answered at home, and
+            // the anti-sanction relays stop being used at all. Blank means the
+            // core asks through its own DNS section, which is the one that knows
+            // which names belong on which line.
+            wireguard.remoteDNS = emptyList()
             wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
         }
 
@@ -555,7 +585,12 @@ object CoreOutboundBuilder {
      */
     fun populateTlsSettings(streamSettings: OutboundBean.StreamSettingsBean, profileItem: ProfileItem, sniExt: String?) {
         val streamSecurity = profileItem.security.orEmpty()
-        val allowInsecure = profileItem.insecure == true && profileItem.pinnedCA256.isNullOrEmpty()
+        // Xray-core no longer accepts "allowInsecure": when it is true the core throws the
+        // whole config away and refuses to start, so a profile asking for it used to end
+        // with no connection at all and no rules at all. What the core offers instead is to
+        // name the peer rather than trust any certificate: the name is still checked, so an
+        // untrusted or expired certificate is accepted while a wrong one is not.
+        val skipCertificateCheck = profileItem.insecure == true && profileItem.pinnedCA256.isNullOrEmpty()
         val sni = if (profileItem.sni.isNullOrEmpty()) {
             when {
                 sniExt.isNotNullEmpty() && Utils.isDomainName(sniExt) -> sniExt
@@ -569,12 +604,15 @@ object CoreOutboundBuilder {
         streamSettings.security = streamSecurity.nullIfBlank()
         if (streamSettings.security == null) return
         val tlsSetting = OutboundBean.StreamSettingsBean.TlsSettingsBean(
-            allowInsecure = allowInsecure,
+            // Never true: it is not a setting the core reads any more, it is a reason for
+            // the core to refuse the config.
+            allowInsecure = false,
             serverName = sni.nullIfBlank(),
             fingerprint = profileItem.fingerPrint.nullIfBlank(),
             alpn = profileItem.alpn?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.takeIf { !it.isNullOrEmpty() },
             echConfigList = profileItem.echConfigList.nullIfBlank(),
-            verifyPeerCertByName = profileItem.verifyPeerCertByName.nullIfBlank(),
+            verifyPeerCertByName = profileItem.verifyPeerCertByName.nullIfBlank()
+                ?: if (skipCertificateCheck) sni.nullIfBlank() else null,
             pinnedPeerCertSha256 = profileItem.pinnedCA256.nullIfBlank(),
             publicKey = profileItem.publicKey.nullIfBlank(),
             shortId = profileItem.shortId.nullIfBlank(),

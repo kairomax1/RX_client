@@ -183,7 +183,7 @@ fun PerAppProxyScreen(
                 Column(
                     Modifier.padding(horizontal = 16.dp, vertical = 12.dp).selectableGroup()
                 ) {
-                    PerAppRoutingMode.entries.forEach { mode ->
+                    PerAppRoutingMode.choices().forEach { mode ->
                         RoutingModeRow(
                             mode = mode,
                             selected = routingMode == mode,

@@ -1,5 +1,8 @@
 package com.v2ray.ang.core
 
+import com.v2ray.ang.handler.Failover
+import com.v2ray.ang.handler.GamingMode
+import com.v2ray.ang.handler.AppLog
 import android.app.Activity
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -37,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
@@ -47,6 +51,42 @@ import java.net.InetSocketAddress
 
 object CoreServiceManager {
 
+    /** How often the tunnel is asked, quietly, whether it still carries anything. */
+    private const val WATCH_EVERY_MILLIS = 45_000L
+
+    /**
+     * How many empty answers in a row are answered by taking another config.
+     *
+     * Three, not two: a phone that loses its signal for a moment, or a network
+     * that is merely slow, must not be answered by tearing the tunnel down.
+     *
+     * A question the phone could not ask at all — because the phone itself has
+     * no connection, or because the tunnel was being rebuilt — is not counted:
+     * it says nothing about the config, and a config was being thrown away for
+     * the state of the phone.
+     */
+    private const val WATCH_MISSES_BEFORE_MOVING = 3
+
+    /**
+     * The addresses the watch asks through the tunnel. Any one of them
+     * answering means the config carries traffic, so a single site being
+     * blocked on this line — which is the ordinary state of affairs on the
+     * lines this app is for — is not mistaken for a dead config. A 204 answer
+     * is small enough to cost nothing every few minutes.
+     */
+    private val WATCH_PROBES = listOf(
+        "https://cp.cloudflare.com/generate_204",
+        "https://www.gstatic.com/generate_204",
+        "https://connectivitycheck.gstatic.com/generate_204",
+        "https://detectportal.firefox.com/success.txt",
+    )
+
+    /** A short rest before a moved-to config is raised, so the old tunnel is really gone. */
+    private const val RESTART_AFTER_MILLIS = 1_200L
+
+    /** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
+    private const val FIREFOX_VPN_GUID = "firefox-vpn"
+
     private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
     private val mMsgReceive = ReceiveMessageHandler()
     private var currentConfig: ProfileItem? = null
@@ -54,6 +94,11 @@ object CoreServiceManager {
     private var browserDialer: IDialerService? = null
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val failoverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** The config the watcher moved to on its own, so the next start is not taken for a new round. */
+    @Volatile
+    private var autoMovedTo: String? = null
 
     @Volatile
     private var isReloading = false
@@ -133,9 +178,19 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+        AppLog.info(
+            AppLog.Section.Connection,
+            "Starting with config '${config.remarks}' (${config.configType.name})" +
+                (if (isReload) ", reload after a network change" else "") +
+                (if (GamingMode.isEnabled()) ", DNS mode on" else ""),
+        )
+        // The Aether profile is only a pointer to the engine's local port; the engine itself
+        // has to be running behind it.
+        if (AetherEngine.isAetherProfile(config)) AetherEngine.start(service) else AetherEngine.stop()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
+            AppLog.error(AppLog.Section.Core, "The config could not be turned into core settings: ${result.errorMessage}")
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }
 
@@ -158,6 +213,16 @@ object CoreServiceManager {
         coreController.startLoop(result.content, tunFd)
 
         if (!isRunning()) {
+            // The core keeps the reason to itself — it only says no — so the parts of the
+            // profile that it most often refuses are written down here. A core version that
+            // drops a setting (it stopped accepting "allowInsecure", for one) shows up as a
+            // connection that never opens, and the reason has to be findable.
+            AppLog.error(
+                AppLog.Section.Core,
+                "The core would not take the config: security ${config.security ?: "none"}, " +
+                    "network ${config.network ?: "none"}, " +
+                    (if (config.insecure == true) "certificate check off" else "certificate checked")
+            )
             error("Core failed to start")
         }
 
@@ -182,9 +247,139 @@ object CoreServiceManager {
         if (!isReload) {
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
         }
+        // The rules were written; whether they are obeyed is another matter, and it is
+        // the one that decides whether an advert is fetched and where a site at home is
+        // answered from. The tunnel is asked a moment after it settles.
+        CoroutineScope(Dispatchers.IO).launch {
+            kotlinx.coroutines.delay(3000)
+            if (isRunning()) {
+                runCatching { RoutingSelfTest.run() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Routing test could not be run", it) }
+            }
+        }
         ServiceRuntimeState.markRunning(true)
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
+        watchConfig(service, guid)
+    }
+
+    /**
+     * Configs die, whichever group they belong to: a free public server often,
+     * a private one often enough. While one of them is the running config, a
+     * request is sent through the tunnel now and then; when nothing comes back a
+     * few times in a row another config of the same group is taken and the
+     * service starts again with it, without asking and without a word.
+     *
+     * Nothing is said on the way because a move is not a failure: it is the
+     * connection being kept. Only when there is nothing left to take is the
+     * tunnel left alone, which is what the owner then sees.
+     */
+    private fun watchConfig(service: Service, guid: String) {
+        failoverScope.coroutineContext.cancelChildren()
+        // The app's own ways of reaching the internet are not watched: moving
+        // away from one of them would change what the phone is doing, not only
+        // where it does it.
+        if (guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))) return
+        // Asked for, this is; imposed, it is not. The switch in the settings is
+        // there for a phone or a network where a config is better left alone.
+        if (!SettingsManager.isAutoFailoverEnabled()) {
+            Failover.reset()
+            return
+        }
+        // A start the owner asked for opens a new round; a start that came out of
+        // a move continues the one that is running.
+        if (guid != autoMovedTo) Failover.reset()
+        autoMovedTo = null
+        failoverScope.launch {
+            var misses = 0
+            while (isActive) {
+                kotlinx.coroutines.delay(WATCH_EVERY_MILLIS)
+                if (!isRunning() || isReloading) continue
+                // Without a connection of its own the phone cannot ask anything,
+                // and a silence now would be the phone's, not the config's.
+                if (!phoneIsOnline(service)) continue
+                val verdict = askThroughTunnel(service)
+                if (verdict == Verdict.Carries) {
+                    misses = 0
+                    Failover.settle()
+                    continue
+                }
+                if (verdict == Verdict.Unreachable) continue
+                misses++
+                if (misses < WATCH_MISSES_BEFORE_MOVING) continue
+                // The config answered nothing three times while the phone itself was
+                // online: it is gone. Another one of its group is taken.
+                val next = nextConfigAfter(guid)
+                if (next == null) {
+                    AppLog.error(AppLog.Section.Connection, "The config stopped answering and there is no other one left in its group")
+                    return@launch
+                }
+                AppLog.info(AppLog.Section.Connection, "The config stopped answering; another one of its group is taken")
+                misses = 0
+                Failover.moved(next)
+                autoMovedTo = next
+                MmkvManager.setSelectServer(next)
+                val control = serviceControl?.get() ?: return@launch
+                // Stopping cancels this watcher, so the restart runs on its own.
+                CoroutineScope(Dispatchers.Default).launch {
+                    control.stopService()
+                    kotlinx.coroutines.delay(RESTART_AFTER_MILLIS)
+                    LauncherManager.startService(service)
+                }
+                return@launch
+            }
+        }
+    }
+
+    /** What one question through the tunnel came back with. */
+    private enum class Verdict { Carries, Silent, Unreachable }
+
+    /**
+     * Asks every address in [WATCH_PROBES] through the tunnel and stops at the
+     * first that answers. A phone with no connection of its own is reported as
+     * [Verdict.Unreachable] rather than as a silent config, because the two are
+     * different failures with different answers and only one of them is the
+     * config's.
+     */
+    private suspend fun askThroughTunnel(context: Context?): Verdict {
+        var asked = false
+        for (address in WATCH_PROBES) {
+            if (!phoneIsOnline(context)) return Verdict.Unreachable
+            val millis = runCatching { coreController.measureDelay(address) }.getOrDefault(-1L)
+            if (millis >= 0L) return Verdict.Carries
+            // -1 was the old "nothing came back", and the core also throws when it
+            // was never asked; both are a silence of some kind, and the caller
+            // decides whether it counts.
+            asked = true
+        }
+        return if (asked) Verdict.Silent else Verdict.Unreachable
+    }
+
+    /**
+     * True when the phone has a network of its own. Asked of the system rather
+     * than guessed from a failure, so a dropped signal never spends a move.
+     */
+    private fun phoneIsOnline(context: Context?): Boolean = try {
+        val manager = context?.getSystemService(android.net.ConnectivityManager::class.java)
+        val network = manager?.activeNetwork ?: return true
+        val caps = manager.getNetworkCapabilities(network) ?: return true
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Exception) {
+        // Nothing to ask: do not let a system call decide the config's fate.
+        true
+    }
+
+    /**
+     * Another config of the group the running one belongs to: the quickest of
+     * those whose latency is known, and none that was already taken in this
+     * round. The app's own ways of reaching the internet are left out, since
+     * taking one of them would change what the phone is doing, not only where.
+     */
+    private fun nextConfigAfter(guid: String): String? {
+        val group = currentConfig?.subscriptionId.orEmpty()
+        val guids = (if (group.isEmpty()) MmkvManager.decodeAllServerList() else MmkvManager.decodeServerList(group))
+            .filter { it != FIREFOX_VPN_GUID && !AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(it)) }
+        return Failover.next(guid, guids) { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }
     }
 
     /**
@@ -194,6 +389,7 @@ object CoreServiceManager {
      */
     fun stopCoreLoop(): Boolean {
         connectionTestScope.coroutineContext.cancelChildren()
+        failoverScope.coroutineContext.cancelChildren()
         val service = getService() ?: return false
 
         networkMonitor?.unregister()
@@ -216,6 +412,8 @@ object CoreServiceManager {
             browserDialer!!.stop()
             browserDialer = null
         }
+        AetherEngine.stop()
+        AppLog.info(AppLog.Section.Connection, "Service stopped")
 
         ServiceRuntimeState.markRunning(false)
         MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")
@@ -350,6 +548,11 @@ object CoreServiceManager {
 
             ensureActive()
             val endpoint = if (time >= 0) SpeedtestManager.getRemoteIPInfo() else null
+            if (time >= 0) {
+                AppLog.info(AppLog.Section.Test, "Connection test passed: $time ms")
+            } else {
+                AppLog.error(AppLog.Section.Test, "Connection test failed: ${errorStr.ifBlank { "no answer through the tunnel" }}")
+            }
             val result = ConnectionTestResult(
                 delayMillis = time,
                 errorMessage = errorStr,

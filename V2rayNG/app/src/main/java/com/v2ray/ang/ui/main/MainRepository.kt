@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.AutoConfigTest
 import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.handler.ConfigBadges
@@ -22,6 +23,8 @@ import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.extension.serializable
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.core.AetherEngine
+import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
@@ -152,12 +155,25 @@ class MainRepository(
                 }
             )
         }
+        // decodeSubscriptions already leaves out the groups the app keeps for
+        // itself, so the tab list cannot inherit "rx public pending" again.
         result += MmkvManager.decodeSubscriptions()
         return result
     }
 
     override fun getSubscriptionItem(id: String): SubscriptionItem? =
         MmkvManager.decodeSubscription(id)
+
+    override fun isAetherSelected(): Boolean =
+        AetherEngine.isAetherProfile(MmkvManager.getSelectServer()?.let { MmkvManager.decodeServerConfig(it) })
+
+    override fun aetherStatus(notBefore: Long): AetherEngine.Status? = AetherEngine.readStatus(app, notBefore)
+
+    override fun ensureAetherProfile(): String? =
+        if (AetherEngine.isAvailable(app)) AetherEngine.ensureProfile() else null
+
+    override fun getTestDelayMillis(guid: String): Long =
+        MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis?.let(::cleanTestDelay) ?: 0L
 
     override fun getServerGuidList(groupId: String): List<String> =
         if (groupId.isEmpty()) {
@@ -233,6 +249,14 @@ class MainRepository(
     override fun share2Clipboard(guid: String): Boolean =
         AngConfigManager.share2Clipboard(app, guid) == 0
 
+    override fun isAutoFailoverEnabled(): Boolean = SettingsManager.isAutoFailoverEnabled()
+
+    override fun startService() {
+        LauncherManager.restartServiceOrStart(app) {
+            LauncherManager.startService(app, quiet = true)
+        }
+    }
+
     override fun sendMsg2Service(msgId: Int, content: String) =
         MessageHelper.sendMsg2Service(app, msgId, content)
 
@@ -253,6 +277,19 @@ class MainRepository(
 
     override fun syncSubscriptions() {
         SubscriptionUpdater.sync(app)
+    }
+
+    override fun renewPublicConfigs(connected: Boolean): Int {
+        PublicConfigs.schedule(app)
+        // refreshIfDue renews the group itself when it can, so the answer is whether it
+        // did; asking it and then collecting again would test every candidate twice.
+        if (PublicConfigs.refreshIfDue(app)) return PublicConfigs.savedOptions().count
+        // New lists are waiting: the group is rebuilt, unless a tunnel is up (the servers
+        // have to be tried on the bare connection) or the user never asked for public configs.
+        if (connected || !PublicConfigs.fresh.value || !PublicConfigs.hasGroup()) return 0
+        val options = PublicConfigs.savedOptions()
+        val outcome = PublicConfigs.collect(app, options, java.util.concurrent.atomic.AtomicBoolean(false)) {}
+        return if (outcome.added > 0) options.count else 0
     }
 
     override fun initAssets() {

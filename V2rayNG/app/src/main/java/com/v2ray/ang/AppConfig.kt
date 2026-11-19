@@ -94,6 +94,7 @@ object AppConfig {
     const val PREF_BENCHMARK_PREFIX = "pref_benchmark_"
     const val PREF_GEO_FILES_SOURCES = "pref_geo_files_sources"
     const val PREF_USE_HEV_TUNNEL = "pref_use_hev_tunnel_v2"
+    const val PREF_AUTO_FAILOVER = "pref_auto_failover"
     const val PREF_HEV_TUNNEL_LOGLEVEL = "pref_hev_tunnel_loglevel"
     const val PREF_HEV_TUNNEL_RW_TIMEOUT = "pref_hev_tunnel_rw_timeout_v2"
     const val PREF_UPDATE_SUBSCRIPTION = "pref_update_subscription"
@@ -141,6 +142,17 @@ object AppConfig {
     const val ANDROID_PACKAGE_NAME_LIST_URL = "$GITHUB_RAW_URL/2dust/androidpackagenamelist/master/proxy.txt"
     const val APP_URL = "$GITHUB_URL/kairomax1/RX_client"
     const val APP_API_URL = "https://api.github.com/repos/kairomax1/RX_client/releases"
+
+    /**
+     * A key the owner makes once, in GitHub, that lets this phone read the releases
+     * no one else can see. A release kept as a draft is invisible to anybody who is
+     * not signed in, and an app cannot sign in, so without this the phone simply
+     * never hears of the build that was made for it.
+     */
+    const val PREF_GITHUB_TOKEN = "pref_rx_github_token"
+
+    /** The assets of a release are fetched from the API, which is the only door a key opens. */
+    const val GITHUB_ASSET_URL = "https://api.github.com/repos/kairomax1/RX_client/releases/assets/%d"
     const val MAKER_GITHUB_URL = "$GITHUB_URL/kairomax1"
     const val MAKER_TELEGRAM_URL = "https://t.me/aimobix"
     const val MAKER_YOUTUBE_URL = "https://youtube.com/@aimobixnet"

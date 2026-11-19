@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.dto.SubscriptionUpdateResult
 import com.v2ray.ang.dto.TestServiceMessage
@@ -33,6 +34,18 @@ interface MainDataSource : Closeable {
     fun getSubscriptionItem(id: String): SubscriptionItem?
 
     fun getServerGuidList(groupId: String): List<String>
+
+    /** True when the selected config is the built-in Aether profile. */
+    fun isAetherSelected(): Boolean = false
+
+    /** How far the Aether engine is with finding a route; null when it was never started. */
+    fun aetherStatus(notBefore: Long = 0): AetherEngine.Status? = null
+
+    /** Id of the built-in Aether profile (created on demand); null when this build has no engine. */
+    fun ensureAetherProfile(): String? = null
+
+    /** Last measured ping of a config; 0 when untested, negative when it failed. */
+    fun getTestDelayMillis(guid: String): Long = 0L
     fun decodeServerConfig(guid: String): ProfileItem?
     fun decodeAffiliationInfo(guid: String): ServerAffiliationInfo?
 
@@ -73,6 +86,15 @@ interface MainDataSource : Closeable {
     fun share2QRCode(guid: String): android.graphics.Bitmap?
     fun share2Clipboard(guid: String): Boolean
 
+    /** Whether the app may leave a config that stopped carrying traffic and take another one. */
+    fun isAutoFailoverEnabled(): Boolean = true
+
+    /**
+     * Raises the tunnel again on the config that is now selected: restarted when
+     * a daemon answers, started when there is none standing.
+     */
+    fun startService() {}
+
     fun sendMsg2Service(msgId: Int, content: String)
     fun sendMsg2TestService(msg: TestServiceMessage, requestId: String? = null)
     fun cancelAllPing()
@@ -80,4 +102,11 @@ interface MainDataSource : Closeable {
 
     fun syncSubscriptions()
     fun initAssets()
+
+    /**
+     * Looks for newer public config lists and, when there are some and no tunnel is up,
+     * collects the group again. Returns how many configs are to stay after the real test, or 0
+     * when nothing was collected.
+     */
+    fun renewPublicConfigs(connected: Boolean): Int = 0
 }
