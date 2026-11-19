@@ -1,13 +1,24 @@
 package com.v2ray.ang.handler
 
 import android.content.Context
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.Worker
+import androidx.work.WorkerParameters
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -217,36 +228,97 @@ object XboxDns {
     private fun knownResolvers(): List<String> = KNOWN_RESOLVERS
     private const val EXTRA_FILE = "rx-dns-extra.txt"
     private const val KEY_LIST_CHECKED = "rx_dns_list_checked"
+    private const val KEY_LIST_DAILY = "rx_dns_list_daily"
     private const val LIST_EVERY_MILLIS = 15 * 60 * 1000L
+    private const val DAILY_LIST_MILLIS = 24 * 60 * 60 * 1000L
+    private const val LIST_FETCH_THREADS = 12
+    private const val LIST_FETCH_CONNECT_MS = 2500
+    private const val LIST_FETCH_READ_MS = 4500
+    private val updateListLock = Any()
 
     /**
-     * Adds the servers of the public lists to the ones the app carries. Looks at most every
-     * fifteen minutes; a list that did not change costs one short request. Returns how many
-     * servers the phone now knows beyond the bundled ones.
+     * Adds the servers of the public lists to the ones the app carries. Fetches lists
+     * in parallel so updating completes in seconds, looking at most every fifteen minutes
+     * unless [force] is true. Returns how many servers the phone now knows beyond the
+     * bundled ones.
      */
-    fun updateList(context: Context): Int {
-        val file = java.io.File(context.filesDir, EXTRA_FILE)
-        val known = LinkedHashSet<Int>()
-        if (file.exists()) runCatching { known.addAll(parseAddresses(file.readText())) }
-        val now = System.currentTimeMillis()
-        if (now - MmkvManager.decodeSettingsLong(KEY_LIST_CHECKED, 0L) < LIST_EVERY_MILLIS) return known.size
-        MmkvManager.encodeSettings(KEY_LIST_CHECKED, now)
-        val before = known.size
-        var answered = 0
-        for (source in LIST_SOURCES) {
-            val tagKey = "rx_dns_tag_" + source.hashCode().toUInt().toString(16)
-            val answer = PublicConfigs.fetch(source, MmkvManager.decodeSettingsString(tagKey).takeIf { file.exists() })
-            if (answer.code == 200 || answer.code == 304) answered++
-            val body = answer.body ?: continue
-            known.addAll(parseAddresses(body).filterNot { isUnroutable(it) })
-            MmkvManager.encodeSettings(tagKey, answer.tag)
+    fun updateList(context: Context, force: Boolean = false, ignoreTags: Boolean = false): Int =
+        synchronized(updateListLock) {
+            val file = java.io.File(context.filesDir, EXTRA_FILE)
+            val known = LinkedHashSet<Int>()
+            if (file.exists()) runCatching { known.addAll(parseAddresses(file.readText())) }
+            val now = System.currentTimeMillis()
+            if (!force && now - MmkvManager.decodeSettingsLong(KEY_LIST_CHECKED, 0L) < LIST_EVERY_MILLIS) {
+                return known.size
+            }
+            val before = known.size
+            val answered = AtomicInteger(0)
+            val parsedBySource = java.util.Collections.synchronizedList(ArrayList<List<Int>>(LIST_SOURCES.size))
+            val pool = Executors.newFixedThreadPool(LIST_FETCH_THREADS)
+            try {
+                val tasks = LIST_SOURCES.map { source ->
+                    Callable {
+                        val tagKey = "rx_dns_tag_" + source.hashCode().toUInt().toString(16)
+                        val tag = if (ignoreTags) null else MmkvManager.decodeSettingsString(tagKey).takeIf { file.exists() }
+                        val answer = PublicConfigs.fetch(
+                            source,
+                            tag,
+                            connectTimeoutMs = LIST_FETCH_CONNECT_MS,
+                            readTimeoutMs = LIST_FETCH_READ_MS,
+                        )
+                        if (answer.code == 200 || answer.code == 304) answered.incrementAndGet()
+                        val body = answer.body ?: return@Callable
+                        val addrs = parseAddresses(body).filterNot { isUnroutable(it) }
+                        if (addrs.isNotEmpty()) parsedBySource.add(addrs)
+                        MmkvManager.encodeSettings(tagKey, answer.tag)
+                    }
+                }
+                pool.invokeAll(tasks, 45, TimeUnit.SECONDS)
+            } catch (_: Throwable) {
+            } finally {
+                pool.shutdownNow()
+            }
+            parsedBySource.forEach { known.addAll(it) }
+            // The named ones are always there, so a phone that cannot reach a single
+            // list still has a spread of servers to sweep.
+            knownResolvers().forEach { toInt(it)?.let(known::add) }
+            if (known.size != before || !file.exists()) {
+                runCatching { file.writeText(known.joinToString("\n") { toText(it) }) }
+            }
+            val answeredCount = answered.get()
+            if (answeredCount > 0) {
+                MmkvManager.encodeSettings(KEY_LIST_CHECKED, now)
+                if (ignoreTags) MmkvManager.encodeSettings(KEY_LIST_DAILY, now)
+            }
+            AppLog.info(
+                AppLog.Section.Other,
+                "DNS scanner: $answeredCount of ${LIST_SOURCES.size} server lists answered, ${known.size - before} new servers, ${known.size} beyond the bundled ones",
+            )
+            known.size
         }
-        // The named ones are always there, so a phone that cannot reach a single
-        // list still has a spread of servers to sweep.
-        knownResolvers().forEach { toInt(it)?.let(known::add) }
-        if (known.size != before) runCatching { file.writeText(known.joinToString("\n") { toText(it) }) }
-        AppLog.info(AppLog.Section.Other, "DNS scanner: $answered of ${LIST_SOURCES.size} server lists answered, ${known.size - before} new servers, ${known.size} beyond the bundled ones")
-        return known.size
+
+    /**
+     * Refreshes the DNS scanner source lists once per day in the background so the
+     * resolver pool stays current even between manual scans.
+     */
+    fun refreshDailyIfDue(context: Context, force: Boolean = false): Int {
+        val now = System.currentTimeMillis()
+        if (!force && now - MmkvManager.decodeSettingsLong(KEY_LIST_DAILY, 0L) < DAILY_LIST_MILLIS) {
+            return 0
+        }
+        return updateList(context, force = true, ignoreTags = true)
+    }
+
+    /** Schedules the daily DNS scanner source update. */
+    fun scheduleDaily(context: Context) {
+        val request = PeriodicWorkRequestBuilder<XboxDnsDailyWorker>(1, TimeUnit.DAYS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "rx_xbox_dns_daily",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     /** A Microsoft service that answers with the country it sees the caller in. */
@@ -753,4 +825,12 @@ object XboxDns {
             .thenByDescending { it.name.isNotEmpty() }
             .thenBy { it.millis }
     )
+}
+
+/** Daily background update of DNS scanner server lists; see [XboxDns.scheduleDaily]. */
+class XboxDnsDailyWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    override fun doWork(): Result {
+        runCatching { XboxDns.refreshDailyIfDue(applicationContext) }
+        return Result.success()
+    }
 }

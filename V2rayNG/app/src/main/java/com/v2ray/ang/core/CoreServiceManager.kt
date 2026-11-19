@@ -311,7 +311,11 @@ object CoreServiceManager {
                 // online: it is gone. Another one of its group is taken.
                 val next = nextConfigAfter(guid)
                 if (next == null) {
-                    AppLog.error(AppLog.Section.Connection, "The config stopped answering and there is no other one left in its group")
+                    AppLog.error(AppLog.Section.Connection, "The config stopped answering and there is no other one left in its group; stopping")
+                    val control = serviceControl?.get()
+                    CoroutineScope(Dispatchers.Default).launch {
+                        control?.stopService()
+                    }
                     return@launch
                 }
                 AppLog.info(AppLog.Section.Connection, "The config stopped answering; another one of its group is taken")

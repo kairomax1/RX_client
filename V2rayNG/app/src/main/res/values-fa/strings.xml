@@ -985,4 +985,5 @@
     <string name="summary_pref_auto_failover">وقتی کانفیگی که وصل است از کار می‌افتد، برنامه بی‌صدا کانفیگِ دیگری از همان گروه را وصل می‌کند.</string>
     <string name="public_disconnected">اینترنت قطع شد؛ تست کانفیگ‌ها متوقف شد.</string>
     <string name="public_disconnected_saved">اینترنت قطع شد — %1$d از %2$d کانفیگِ تست‌شده در فهرست نگه داشته شد.</string>
+    <string name="rx_tuning_failed">با فرگمنت و موکس هم دور نخورد؛ متوقف شد.</string>
 </resources>

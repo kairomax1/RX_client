@@ -28,13 +28,14 @@ import com.v2ray.ang.util.Utils
 object CoreConfigManager {
     private var initConfigCache: String? = null
     private var initConfigCacheWithTun: String? = null
+    private val tuningBuildLock = Any()
 
     //region get config function
 
     /**
      * Build the runtime configuration for normal startup.
      */
-    fun getV2rayConfig(context: Context, guid: String): ConfigResult {
+    fun getV2rayConfig(context: Context, guid: String): ConfigResult = synchronized(tuningBuildLock) {
         // Mux and fragment are one set of settings that the core reads while it
         // builds an outbound, so they have to be the ones this config was
         // measured with. Setting them here means a config change can never be
@@ -66,8 +67,16 @@ object CoreConfigManager {
      *
      * The core flow is reused, then non-essential sections are removed.
      */
-    fun getV2rayConfig4Speedtest(context: Context, guid: String): ConfigResult {
-        Tuning.applyFor(guid)
+    fun getV2rayConfig4Speedtest(
+        context: Context,
+        guid: String,
+        tuningOverride: Tuning.Choice? = null,
+    ): ConfigResult = synchronized(tuningBuildLock) {
+        if (tuningOverride != null) {
+            Tuning.apply(tuningOverride)
+        } else {
+            Tuning.applyFor(guid)
+        }
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
                 ?: return ConfigResult(

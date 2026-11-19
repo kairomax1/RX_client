@@ -126,4 +126,38 @@ class PublicConfigsGroupsTest {
         assertEquals(PublicConfigs.MAX_COUNT, PublicConfigs.acceptedCount(999_999))
         assertEquals(1, PublicConfigs.acceptedCount(0))
     }
+
+    @Test
+    fun publicConfigsRefreshesEvery15MinutesWhenDeadAndDailyForSources() {
+        val publicSrc = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        val appSrc = java.io.File("src/main/java/com/v2ray/ang/AngApplication.kt").readText()
+        val dailySrc = java.io.File("src/main/java/com/v2ray/ang/service/DailyMaintenanceWorker.kt").readText()
+        val dnsSrc = java.io.File("src/main/java/com/v2ray/ang/handler/XboxDns.kt").readText()
+
+        assertTrue(publicSrc.contains("REFRESH_MILLIS = 15 * 60 * 1000L"))
+        assertTrue(publicSrc.contains("DAILY_MILLIS = 24 * 60 * 60 * 1000L"))
+        assertTrue(publicSrc.contains("areGroupConfigsDead()"))
+        assertTrue(publicSrc.contains("fun refreshSourcesDaily"))
+        assertTrue(publicSrc.contains("PublicConfigs.refreshSourcesDaily(applicationContext)"))
+        assertTrue(publicSrc.contains("SettingsChangeManager.makeSetupGroupTab()"))
+
+        assertTrue(appSrc.contains("PublicConfigs.schedule(this)"))
+        assertTrue(appSrc.contains("XboxDns.scheduleDaily(this)"))
+
+        assertTrue(dailySrc.contains("PublicConfigs.refreshSourcesDaily(applicationContext)"))
+        assertTrue(dailySrc.contains("XboxDns.refreshDailyIfDue(applicationContext)"))
+
+        assertTrue(dnsSrc.contains("fun refreshDailyIfDue"))
+        assertTrue(dnsSrc.contains("fun scheduleDaily"))
+        assertTrue(dnsSrc.contains("DAILY_LIST_MILLIS = 24 * 60 * 60 * 1000L"))
+    }
+
+    @Test
+    fun publicConfigsActivityPreservesPartialAddedConfigsAndNotifiesMain() {
+        val activitySrc = java.io.File("src/main/java/com/v2ray/ang/ui/publicconfigs/PublicConfigsActivity.kt").readText()
+        val mainActivitySrc = java.io.File("src/main/java/com/v2ray/ang/ui/main/MainActivity.kt").readText()
+        assertTrue(activitySrc.contains("EXTRA_AUTO_CONNECT"))
+        assertTrue(activitySrc.contains("carried > 0 || added > 0"))
+        assertTrue(mainActivitySrc.contains("RefreshGroups"))
+    }
 }

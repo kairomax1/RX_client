@@ -731,4 +731,5 @@
     <string name="public_game">Game mode</string>
     <string name="public_disconnected">Đã mất kết nối internet; việc kiểm tra đã dừng lại.</string>
     <string name="public_disconnected_saved">Đã mất kết nối internet — đã giữ lại %1$d trên %2$d cấu hình đã kiểm tra trong danh sách.</string>
+    <string name="rx_tuning_failed">Không thể vượt qua bằng fragment và mux; đã dừng lại.</string>
 </resources>

@@ -741,4 +741,5 @@
     <string name="public_game">Game mode</string>
     <string name="public_disconnected">انقطع الإنترنت؛ تم إيقاف الاختبار.</string>
     <string name="public_disconnected_saved">انقطع الإنترنت — تم حفظ %1$d من أصل %2$d إعدادات تم التحقق منها في القائمة.</string>
+    <string name="rx_tuning_failed">تعذّر التجاوز باستخدام Fragment وMux؛ تم الإيقاف.</string>
 </resources>

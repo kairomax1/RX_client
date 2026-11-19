@@ -737,4 +737,5 @@
     <string name="public_game">Game mode</string>
     <string name="public_disconnected">Интернет отключился; проверка остановлена.</string>
     <string name="public_disconnected_saved">Интернет отключился — %1$d из %2$d проверенных конфигураций сохранены в списке.</string>
+    <string name="rx_tuning_failed">Не удалось обойти с помощью fragment и mux; остановлено.</string>
 </resources>

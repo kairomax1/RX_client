@@ -75,9 +75,12 @@ object PublicConfigs {
     private const val KEY_FRESH = "rx_public_fresh"
     private const val KEY_CHECKED = "rx_public_checked"
     private const val KEY_REBUILT = "rx_public_rebuilt"
+    private const val KEY_DAILY_SOURCES = "rx_public_daily_sources"
     private const val KEY_TAG = "rx_public_tag_"
     /** How often the lists are looked at. Fifteen minutes, as the owner asked. */
     private const val REFRESH_MILLIS = 15 * 60 * 1000L
+    /** How often all public-config source lists are refreshed from scratch. */
+    private const val DAILY_MILLIS = 24 * 60 * 60 * 1000L
 
     /**
      * How old the configs in the group may get before they are rebuilt even
@@ -619,6 +622,7 @@ object PublicConfigs {
         small: Boolean,
         cancelled: AtomicBoolean? = null,
         minLinksDesired: Int = Int.MAX_VALUE,
+        ignoreTags: Boolean = false,
     ): Listing {
         if (cancelled?.get() == true) return Listing(emptyList(), 0, false)
         val sources = SOURCES.filter { it.small == small }
@@ -647,7 +651,7 @@ object PublicConfigs {
                     } else {
                         fetch(
                             source.address,
-                            MmkvManager.decodeSettingsString(tagKey).takeIf { kept != null },
+                            if (ignoreTags) null else MmkvManager.decodeSettingsString(tagKey).takeIf { kept != null },
                             connectTimeoutMs = FETCH_CONNECT_MILLIS,
                             readTimeoutMs = FETCH_READ_MILLIS,
                         ).also {
@@ -708,19 +712,82 @@ object PublicConfigs {
                 }
             }
         }
-        val answered = list.count { it.second }
+        // Put newly changed and freshly answered sources first so stale cache entries
+        // never burn through the test queue before fresh configs are tried.
+        val ordered = list.sortedWith(
+            compareByDescending<Triple<List<String>, Boolean, Boolean>> { it.third }
+                .thenByDescending { it.second }
+        )
+        val answered = ordered.count { it.second }
         AppLog.info(
             AppLog.Section.Other,
             "Public configs: ${if (small) "short" else "large"} lists, $answered of ${sources.size} sources answered " +
-                "(${list.count { it.third }} changed), ${list.sumOf { it.first.size }} links",
+                "(${ordered.count { it.third }} changed), ${ordered.sumOf { it.first.size }} links",
         )
-        return Listing(list.flatMap { it.first }, answered, list.any { it.third })
+        return Listing(ordered.flatMap { it.first }, answered, ordered.any { it.third })
     }
 
     /**
-     * Looks at the short lists when the last look is older than three hours. True when one of
-     * them changed, which the main screen shows as a dot on the download button and uses to
-     * renew the group the next time the app is open and not connected.
+     * Checks whether the configs currently sitting in [GROUP_ID] are dead (unreachable),
+     * so a 15-minute refresh can update the sources and replace dead configs without
+     * waiting for [REBUILD_MILLIS].
+     */
+    private fun areGroupConfigsDead(): Boolean {
+        val guids = MmkvManager.decodeServerList(GROUP_ID)
+        if (guids.isEmpty()) return false
+        val sample = guids.take(10)
+        var anyAlive = false
+        for (guid in sample) {
+            val profile = MmkvManager.decodeServerConfig(guid) ?: continue
+            val host = profile.server.orEmpty()
+            val port = profile.serverPort?.toIntOrNull() ?: continue
+            if (host.isBlank() || port <= 0) continue
+            val isUdp = profile.configType == com.v2ray.ang.enums.EConfigType.WIREGUARD ||
+                profile.configType == com.v2ray.ang.enums.EConfigType.HYSTERIA2
+            val reachable = if (isUdp) {
+                runCatching { !isCloudflare(InetAddress.getByName(host).address) }.getOrDefault(false)
+            } else {
+                runCatching {
+                    val addr = InetAddress.getByName(host)
+                    if (isCloudflare(addr.address)) false
+                    else Socket().use { it.connect(InetSocketAddress(addr, port), CONNECT_MILLIS); true }
+                }.getOrDefault(false)
+            }
+            if (reachable) {
+                anyAlive = true
+                break
+            }
+        }
+        return !anyAlive
+    }
+
+    /**
+     * Refreshes all Public Configs source lists (both short and large) once per day so the
+     * source caches on disk stay up to date even when the user hasn't opened the screen.
+     */
+    fun refreshSourcesDaily(context: Context, force: Boolean = false): Boolean {
+        if (!isNetworkAvailable(context)) return false
+        val now = System.currentTimeMillis()
+        if (!force && now - MmkvManager.decodeSettingsLong(KEY_DAILY_SOURCES, 0L) < DAILY_MILLIS) return false
+        val smallListing = download(context, small = true, ignoreTags = true)
+        val largeListing = download(context, small = false, ignoreTags = true)
+        if (smallListing.answered + largeListing.answered > 0) {
+            MmkvManager.encodeSettings(KEY_DAILY_SOURCES, now)
+            MmkvManager.encodeSettings(KEY_CHECKED, now)
+        }
+        if (smallListing.changed || largeListing.changed) {
+            setFresh(true)
+        }
+        AppLog.info(
+            AppLog.Section.Other,
+            "Public configs: daily source update finished (${smallListing.answered + largeListing.answered} sources answered)",
+        )
+        return smallListing.changed || largeListing.changed
+    }
+
+    /**
+     * Looks at the short lists when the last look is older than fifteen minutes, or when
+     * the current public configs are dead. True when the group was renewed.
      */
     fun refreshIfDue(context: Context): Boolean {
         val now = System.currentTimeMillis()
@@ -731,27 +798,22 @@ object PublicConfigs {
         // both download. It is put back when the work cannot finish, below, so a
         // check that was blocked is not counted as one that was done.
         MmkvManager.encodeSettings(KEY_CHECKED, now)
-        val listing = download(context, small = true)
+        val dead = areGroupConfigsDead()
+        val listing = download(context, small = true, ignoreTags = dead)
+        if (dead) {
+            // Also refresh large lists when existing configs are dead so fresh sources are available.
+            download(context, small = false, ignoreTags = true)
+        }
         val old = now - MmkvManager.decodeSettingsLong(KEY_REBUILT, 0L) >= REBUILD_MILLIS
-        if (listing.changed) setFresh(true)
-        if (!listing.changed && !old) return false
-        // The lists changed, and the group is what is out of date: a dot on a button
-        // that only clears when somebody walks to the screen is not a refresh, and
-        // was why the public configs were the same ones weeks later.
-        //
-        // Only when nothing is connected. Filling the group means raising a tunnel
-        // for every candidate, and doing that under a running VPN would take the
-        // connection the owner is using away from them — the one thing a background
-        // job must never do. With a tunnel up, the list is marked as waiting and the
-        // group is renewed the next time the app is opened without one.
+        if (listing.changed || dead) setFresh(true)
+        if (!listing.changed && !old && !dead) return false
         if (ServiceRuntimeState.isRunning(context)) {
-            // Not now, but not lost either: going back to "due" is what makes the
-            // next check try again. Before, the marker had already been written,
-            // so a phone whose tunnel was always up waited another full round and
-            // the group kept whatever it was filled with the first time — the
-            // count on the screen never moved.
             MmkvManager.encodeSettings(KEY_CHECKED, now - REFRESH_MILLIS)
             AppLog.info(AppLog.Section.Other, "Public configs: a tunnel is up; the group is renewed at the next idle check")
+            return false
+        }
+        if (!hasLine(context)) {
+            MmkvManager.encodeSettings(KEY_CHECKED, now - REFRESH_MILLIS)
             return false
         }
         val options = savedOptions()
@@ -1124,6 +1186,10 @@ object PublicConfigs {
         MmkvManager.encodeSubscription(GROUP_ID, group)
         runCatching { AutoConfigTest.sortGroup(GROUP_ID) }
         setFresh(false)
+        MmkvManager.encodeSettings(KEY_REBUILT, System.currentTimeMillis())
+        if (imported > 0) {
+            runCatching { SettingsChangeManager.makeSetupGroupTab() }
+        }
         AppLog.info(
             AppLog.Section.Other,
             "Public configs: $imported of the $wanted asked for after $rounds chunk(s). " +
@@ -1289,7 +1355,12 @@ object PublicConfigs {
                             ) {
                                 0
                             } else {
-                                AutoConfigTest.probeFast(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
+                                // probeFast measures speed and falls back to HTTP 204 reachability.
+                                // If all speed/204 payload URLs are blocked on this network yet
+                                // Xray measureOutboundDelay already succeeded for a TCP/TLS sort,
+                                // keep the config instead of discarding a working proxy.
+                                AutoConfigTest.probeFast(context, guid, VERIFY_TIMEOUT_MILLIS)
+                                    ?: if (!link.kind.udp) 1 else 0
                             }
                         }
                         done.incrementAndGet()
@@ -1426,9 +1497,10 @@ object PublicConfigs {
     }
 }
 
-/** The three-hourly look at the lists; see [PublicConfigs.schedule]. */
+/** Fifteen-minute and daily source check; see [PublicConfigs.schedule]. */
 class PublicConfigsWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
+        runCatching { PublicConfigs.refreshSourcesDaily(applicationContext) }
         runCatching { PublicConfigs.refreshIfDue(applicationContext) }
         return Result.success()
     }

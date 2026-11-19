@@ -20,7 +20,9 @@ import kotlinx.coroutines.withContext
 object TuningRunner {
 
     /** What the screen says while it happens. */
-    enum class Phase { Idle, Searching, Done, Unsupported }
+    enum class Phase { Idle, Searching, Done, Unsupported, Failed }
+
+    data class Outcome(val choice: Tuning.Choice, val bypassed: Boolean)
 
     /** How long the tunnel is given to come up, and to go down again. */
     private const val UP_TIMEOUT_MS = 20_000L
@@ -32,17 +34,36 @@ object TuningRunner {
 
     /**
      * Measures every combination worth trying and leaves the fastest one applied.
+     * If the config failed (`-1ms`) and neither plain nor fragment/mux carries
+     * traffic, the tunnel is stopped and [Outcome.bypassed] is `false`.
      * [onPhase] is called as it moves along, so the screen can say what is happening.
      */
-    suspend fun tune(context: Context, guid: String, onPhase: (Phase) -> Unit): Tuning.Choice =
+    suspend fun tune(context: Context, guid: String, onPhase: (Phase) -> Unit): Outcome =
         withContext(Dispatchers.IO) {
             val profile = MmkvManager.decodeServerConfig(guid)
+            val storedDelay = MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L
             if (guid.isBlank() || !Tuning.worthTrying(profile)) {
+                if (storedDelay < 0L && guid.isNotBlank()) {
+                    onPhase(Phase.Searching)
+                    Tuning.apply(Tuning.PLAIN)
+                    val millis = withChoice(context) { Tuning.measure() }
+                    if (millis != null) {
+                        Tuning.remember(guid, Tuning.PLAIN)
+                        MmkvManager.encodeServerTestDelayMillis(guid, millis)
+                        onPhase(Phase.Done)
+                        return@withContext Outcome(Tuning.PLAIN, bypassed = true)
+                    }
+                    Tuning.forget(guid)
+                    Tuning.markUnbypassable(guid)
+                    LauncherManager.stopService(context)
+                    onPhase(Phase.Failed)
+                    return@withContext Outcome(Tuning.PLAIN, bypassed = false)
+                }
                 // Nothing to look for: the config is connected exactly as it is.
                 Tuning.apply(Tuning.PLAIN)
                 Tuning.remember(guid, Tuning.PLAIN)
                 onPhase(Phase.Unsupported)
-                return@withContext Tuning.PLAIN
+                return@withContext Outcome(Tuning.PLAIN, bypassed = true)
             }
 
             onPhase(Phase.Searching)
@@ -71,11 +92,28 @@ object TuningRunner {
                 }
             }
 
+            if (bestMillis == Long.MAX_VALUE) {
+                Tuning.forget(guid)
+                Tuning.markUnbypassable(guid)
+                MmkvManager.encodeServerTestDelayMillis(guid, -1L)
+                Tuning.apply(Tuning.PLAIN)
+                LauncherManager.stopService(context)
+                AppLog.error(
+                    AppLog.Section.Connection,
+                    "Tuning: could not bypass config with fragment or mux; stopping",
+                )
+                onPhase(Phase.Failed)
+                return@withContext Outcome(Tuning.PLAIN, bypassed = false)
+            }
+
             Tuning.apply(best)
             Tuning.remember(guid, best)
+            if (storedDelay < 0L) {
+                MmkvManager.encodeServerTestDelayMillis(guid, bestMillis)
+            }
             AppLog.info(AppLog.Section.Connection, "Tuning: ${best.key} was the fastest on this line")
             onPhase(Phase.Done)
-            best
+            Outcome(best, bypassed = true)
         }
 
     /** Raises the tunnel with the settings already applied, measures, and takes it down. */

@@ -7,9 +7,11 @@ import com.v2ray.ang.dto.RealPingEvent
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SpeedtestManager
+import com.v2ray.ang.handler.Tuning
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineName
@@ -123,27 +125,64 @@ class RealPingWorkerService(
             val port = config.serverPort.orEmpty().toInt()
             val tcpTime = SpeedtestManager.socketConnectTime(url, port, 1000)
             if (tcpTime <= -1L) {
+                Tuning.markUnbypassable(guid)
                 return retFailure
             }
         }
 
+        val delayTestUrl = SettingsManager.getDelayTestUrl()
         val configResult = CoreConfigManager.getV2rayConfig4Speedtest(context, guid)
         if (!configResult.status) {
+            Tuning.markUnbypassable(guid)
             return retFailure
         }
         val first = RealPingExecutionLimiter.run(config.configType) {
-            CoreNativeManager.measureOutboundDelay(configResult.content, SettingsManager.getDelayTestUrl())
+            CoreNativeManager.measureOutboundDelay(configResult.content, delayTestUrl)
         }
-        if (first > 0L || !shakesHands(config.configType)) return first
-        // WireGuard and Hysteria2 raise their tunnel out of UDP and only then
-        // shake hands, all inside the time the measurement allows. The first try
-        // pays for the handshake and gives up just before it would have finished,
-        // which is how a config that carries traffic perfectly came to be shown
-        // as a minus one. They are measured once more before being called dead.
-        delay(SECOND_CHANCE_GAP_MS)
-        return RealPingExecutionLimiter.run(config.configType) {
-            CoreNativeManager.measureOutboundDelay(configResult.content, SettingsManager.getDelayTestUrl())
+        if (first > 0L) {
+            Tuning.clearUnbypassable(guid)
+            return first
         }
+        if (shakesHands(config.configType)) {
+            // WireGuard and Hysteria2 raise their tunnel out of UDP and only then
+            // shake hands, all inside the time the measurement allows. The first try
+            // pays for the handshake and gives up just before it would have finished,
+            // which is how a config that carries traffic perfectly came to be shown
+            // as a minus one. They are measured once more before being called dead.
+            delay(SECOND_CHANCE_GAP_MS)
+            val second = RealPingExecutionLimiter.run(config.configType) {
+                CoreNativeManager.measureOutboundDelay(configResult.content, delayTestUrl)
+            }
+            if (second > 0L) {
+                Tuning.clearUnbypassable(guid)
+                return second
+            }
+        }
+        if (Tuning.worthTrying(config)) {
+            val currentChoice = Tuning.choiceFor(guid)
+            val candidates = buildList {
+                if (currentChoice != null && currentChoice != Tuning.PLAIN) add(Tuning.PLAIN)
+                addAll(Tuning.bypassPlan(config).filter { it.key != currentChoice?.key })
+            }
+            for (choice in candidates) {
+                val built = CoreConfigManager.getV2rayConfig4Speedtest(context, guid, tuningOverride = choice)
+                if (!built.status) continue
+                val bypassed = RealPingExecutionLimiter.run(config.configType) {
+                    CoreNativeManager.measureOutboundDelay(built.content, delayTestUrl)
+                }
+                if (bypassed > 0L) {
+                    Tuning.remember(guid, choice)
+                    AppLog.info(
+                        AppLog.Section.Connection,
+                        "Bypassed -1ms config (${config.remarks}) using ${choice.key} (${bypassed}ms)",
+                    )
+                    return bypassed
+                }
+            }
+            Tuning.forget(guid)
+        }
+        Tuning.markUnbypassable(guid)
+        return retFailure
     }
 
     /** Sorts that need a handshake of their own before any byte can be measured. */

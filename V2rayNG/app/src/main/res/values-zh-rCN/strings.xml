@@ -731,4 +731,5 @@
     <string name="public_game">Game mode</string>
     <string name="public_disconnected">网络已断开，已停止测试。</string>
     <string name="public_disconnected_saved">网络已断开 — 已保留 %2$d 个中已验证的 %1$d 个配置到列表。</string>
+    <string name="rx_tuning_failed">无法通过 fragment 和 mux 绕过；已停止。</string>
 </resources>

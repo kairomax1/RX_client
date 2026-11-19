@@ -356,11 +356,15 @@ fun MainScreen(
         val tuningPhase = uiState.tuning
         TuningNotice(
             text = stringResource(
-                if (tuningPhase == TuningRunner.Phase.Done) R.string.rx_tuning_done
-                else R.string.rx_tuning_searching
+                when (tuningPhase) {
+                    TuningRunner.Phase.Done -> R.string.rx_tuning_done
+                    TuningRunner.Phase.Failed -> R.string.rx_tuning_failed
+                    else -> R.string.rx_tuning_searching
+                }
             ),
             visible = tuningPhase == TuningRunner.Phase.Searching ||
-                    tuningPhase == TuningRunner.Phase.Done,
+                    tuningPhase == TuningRunner.Phase.Done ||
+                    tuningPhase == TuningRunner.Phase.Failed,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()

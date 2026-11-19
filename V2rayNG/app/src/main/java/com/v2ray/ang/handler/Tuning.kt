@@ -159,8 +159,31 @@ object Tuning {
      */
     private const val TRUSTED_FOR_MILLIS = 12 * 60 * 60 * 1000L
 
+    /** Combinations that actually apply mux and/or fragment, used to bypass a -1ms block. */
+    fun bypassPlan(profile: ProfileItem?): List<Choice> =
+        plan(profile).filter { it != PLAIN }
+
+    /** Marks [guid] as unbypassable after both plain and fragment/mux attempts failed. */
+    fun markUnbypassable(guid: String) {
+        if (guid.isBlank()) return
+        MmkvManager.encodeSettings(PREF_PREFIX + "unbypassable_" + guid, true)
+    }
+
+    /** Clears the unbypassable marker (e.g. when a combination starts working). */
+    fun clearUnbypassable(guid: String) {
+        if (guid.isBlank()) return
+        MmkvManager.encodeSettings(PREF_PREFIX + "unbypassable_" + guid, false)
+    }
+
+    /** True when fragment and mux were already tested on [guid] and could not bypass the block. */
+    fun isUnbypassable(guid: String): Boolean {
+        if (guid.isBlank()) return false
+        return MmkvManager.decodeSettingsBool(PREF_PREFIX + "unbypassable_" + guid, false)
+    }
+
     /** Remembers what won, so the same config is not measured again on the same line. */
     fun remember(guid: String, choice: Choice) {
+        clearUnbypassable(guid)
         MmkvManager.encodeSettings(PREF_PREFIX + guid, choice.key)
         MmkvManager.encodeSettings(PREF_PREFIX + "at_" + guid, System.currentTimeMillis())
     }
@@ -194,14 +217,18 @@ object Tuning {
     fun measure(repeats: Int = 2, timeoutMs: Int = 4000): Long? {
         val port = SettingsManager.getSocksPort()
         if (port == 0) return null
+        val fallbackUrl = SettingsManager.getDelayTestUrl()
+        val urls = listOf(PROBE_URL, fallbackUrl).distinct()
         var total = 0L
         repeat(repeats) {
             val start = System.currentTimeMillis()
             // SOCKS, not HTTP: the core of this build opens no other door, and a
             // request aimed at the wrong kind is answered by nobody.
-            val answered = HttpUtil.getUrlContent(
-                UrlContentRequest(url = PROBE_URL, timeout = timeoutMs, socksPort = port)
-            ) != null
+            val answered = urls.any { url ->
+                HttpUtil.getUrlContent(
+                    UrlContentRequest(url = url, timeout = timeoutMs, socksPort = port)
+                ) != null
+            }
             if (!answered) return null
             total += System.currentTimeMillis() - start
         }

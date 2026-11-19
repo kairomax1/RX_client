@@ -46,16 +46,23 @@ object AutoConfigTest {
     // in fact carrying. The floor and the window are both smaller now, and the
     // window is shorter than the deadline the caller gives the whole probe.
     private const val PAYLOAD_BYTES = 300_000
-    private const val FAST_PAYLOAD_BYTES = 65_536
+    private const val FAST_PAYLOAD_BYTES = 32_768
     private const val MAX_DOWNLOAD_MS = 3_500L
-    private const val FAST_MAX_DOWNLOAD_MS = 2_000L
+    private const val FAST_MAX_DOWNLOAD_MS = 1_600L
     private val PAYLOAD_URLS = listOf(
         "https://speed.cloudflare.com/__down?bytes=$PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
+        "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
     )
     private val FAST_PAYLOAD_URLS = listOf(
         "https://speed.cloudflare.com/__down?bytes=$FAST_PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
+        "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
+        "https://github.githubassets.com/favicons/favicon.png",
+    )
+    private val REACHABILITY_URLS = listOf(
+        "https://www.gstatic.com/generate_204",
+        "https://cp.cloudflare.com/generate_204",
     )
 
     private data class Stored(val pingMs: Long = 0L, val speedKbps: Int? = null)
@@ -178,21 +185,28 @@ object AutoConfigTest {
             // alive rather than fast: a slow line sends a few bytes at a time and
             // is still a working config. The whole call is bounded so that a
             // candidate can never hold the round for longer than its share.
-            .connectTimeout(2, TimeUnit.SECONDS)
-            .readTimeout(if (fast) 2500L else 4000L, TimeUnit.MILLISECONDS)
-            .callTimeout(maxDownloadMs + (if (fast) 1_200L else 1_500L), TimeUnit.MILLISECONDS)
+            .connectTimeout(if (fast) 1500L else 2000L, TimeUnit.MILLISECONDS)
+            .readTimeout(if (fast) 1600L else 4000L, TimeUnit.MILLISECONDS)
+            .callTimeout(maxDownloadMs + (if (fast) 600L else 1_500L), TimeUnit.MILLISECONDS)
             .build()
         try {
             for (url in urls) {
                 val attempt = try {
-                    downloadOnce(client, url, payloadBytes, maxDownloadMs)
+                    downloadOnce(client, url, payloadBytes, maxDownloadMs, minBytes = if (fast) 1_024L else 4_000L)
                 } catch (_: Throwable) {
-                    // When fast-probing, a socket/timeout failure means the tunnel
-                    // itself stalled; move on immediately instead of waiting a second timeout.
-                    if (fast) return null
                     null
                 }
                 if (attempt != null) return attempt
+            }
+            if (fast) {
+                for (url in REACHABILITY_URLS) {
+                    val ok = try {
+                        confirmHttp204(client, url)
+                    } catch (_: Throwable) {
+                        false
+                    }
+                    if (ok) return 1
+                }
             }
             return null
         } finally {
@@ -201,7 +215,20 @@ object AutoConfigTest {
         }
     }
 
-    private fun downloadOnce(client: OkHttpClient, url: String, payloadBytes: Int, maxDownloadMs: Long): Int? {
+    private fun confirmHttp204(client: OkHttpClient, url: String): Boolean {
+        val request = Request.Builder().url(url).header("Cache-Control", "no-cache").build()
+        client.newCall(request).execute().use { response ->
+            return response.code in 200..299
+        }
+    }
+
+    private fun downloadOnce(
+        client: OkHttpClient,
+        url: String,
+        payloadBytes: Int,
+        maxDownloadMs: Long,
+        minBytes: Long = 4_000L,
+    ): Int? {
         val request = Request.Builder().url(url).header("Cache-Control", "no-cache").build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
@@ -217,9 +244,9 @@ object AutoConfigTest {
                 if ((System.nanoTime() - started) / 1_000_000 > maxDownloadMs) break
             }
             val millis = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
-            // 4 kB is a fifth of a second at 4 kbit/s: enough to prove the tunnel
-            // moves bytes, small enough that a slow line is not called dead.
-            if (total < 4_000) return null
+            // Enough bytes to prove the tunnel moves data, small enough that a slow line or
+            // lightweight fallback asset is not rejected as dead.
+            if (total < minBytes) return null
             return (total * 8 / millis).toInt().coerceAtLeast(1) // bits per millisecond = kbit/s
         }
     }

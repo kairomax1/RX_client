@@ -184,10 +184,10 @@ class MainViewModel(
      * was thrown away for a slow ping and a group of twenty was left holding a
      * dozen.
      */
-    fun testPublicConfigs(keep: Int, connect: Boolean) {
+    fun testPublicConfigs(keep: Int, connect: Boolean, openTab: Boolean = connect) {
         viewModelScope.launch {
             setupGroupTab(forceRefresh = true).join()
-            if (connect) subscriptionIdChanged(PublicConfigs.GROUP_ID)
+            if (connect || openTab) subscriptionIdChanged(PublicConfigs.GROUP_ID)
             publicConnect = false
             applyAutoTestOrder(listOf(PublicConfigs.GROUP_ID))
             if (connect) {
@@ -212,11 +212,17 @@ class MainViewModel(
         _uiState.update {
             it.copy(
                 tuning = phase,
-                connectPhase = if (phase == TuningRunner.Phase.Searching) ConnectPhase.Connecting
-                else it.connectPhase,
+                connectPhase = when (phase) {
+                    TuningRunner.Phase.Searching -> ConnectPhase.Connecting
+                    TuningRunner.Phase.Failed -> ConnectPhase.Failed
+                    else -> it.connectPhase
+                },
             )
         }
-        if (phase == TuningRunner.Phase.Done || phase == TuningRunner.Phase.Unsupported) {
+        if (phase == TuningRunner.Phase.Done ||
+            phase == TuningRunner.Phase.Unsupported ||
+            phase == TuningRunner.Phase.Failed
+        ) {
             tuningNoticeJob?.cancel()
             tuningNoticeJob = viewModelScope.launch {
                 delay(3_000)
@@ -229,12 +235,16 @@ class MainViewModel(
 
     /**
      * True when this config's mux and fragment settings have never been measured
-     * here, or were measured so long ago that the answer is no longer about this
-     * line. Every new config therefore gets its own search, which is what "the
-     * settings are not checked when the config changes" was about.
+     * here, were measured so long ago that the answer is no longer about this
+     * line, or the config previously failed (`-1ms`) and must verify whether
+     * fragment and mux can bypass the block before connecting.
      */
     fun needsTuning(guid: String?): Boolean =
-        guid != null && (Tuning.best(guid) == null || Tuning.stale(guid))
+        guid != null && (
+            Tuning.best(guid) == null ||
+                Tuning.stale(guid) ||
+                (dataSource.decodeAffiliationInfo(guid)?.testDelayMillis ?: 0L) < 0L
+            )
 
     /** Selects the built-in Aether profile and connects through it. */
     fun connectAether() {
@@ -1095,6 +1105,16 @@ class MainViewModel(
                 }
                 dataSource.finishAutoTest(tested)
                 applyAutoTestOrder(groups.keys)
+                val runningGuid = uiState.value.selectedGuid
+                if (uiState.value.isRunning &&
+                    runningGuid != null &&
+                    runningGuid in groups.values.flatten() &&
+                    (dataSource.decodeAffiliationInfo(runningGuid)?.testDelayMillis ?: 0L) < 0L
+                ) {
+                    // Running config tested -1ms and could not be bypassed with fragment/mux: stop it.
+                    onConnectFailed(canMove = false)
+                    dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+                }
                 if (keep > 0 && tested.isNotEmpty()) {
                     // Public configs: the winner is the head of the list after the download
                     // measurements, not the lowest ping alone.
@@ -1520,6 +1540,15 @@ class MainViewModel(
         viewModelScope.launch(ioDispatcher) {
             cacheMutex.withLock { groupDataCache.clear() }
             reloadAllGroups(_uiState.value.groups.map { it.id })
+            val runningGuid = uiState.value.selectedGuid
+            if (uiState.value.isRunning &&
+                runningGuid != null &&
+                (dataSource.decodeAffiliationInfo(runningGuid)?.testDelayMillis ?: 0L) < 0L &&
+                Tuning.isUnbypassable(runningGuid)
+            ) {
+                onConnectFailed(canMove = false)
+                dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            }
         }
     }
 

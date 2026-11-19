@@ -115,8 +115,17 @@ class MainActivity : HelperBaseComponentActivity() {
 
     private val publicConfigsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val refreshGroups = SettingsChangeManager.consumeSetupGroupTab()
             val keep = result.data?.getIntExtra(com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity.EXTRA_KEEP, 0) ?: 0
-            if (result.resultCode == RESULT_OK && keep > 0) mainViewModel.testPublicConfigs(keep, connect = true)
+            val autoConnect = result.data?.getBooleanExtra(
+                com.v2ray.ang.ui.publicconfigs.PublicConfigsActivity.EXTRA_AUTO_CONNECT,
+                true,
+            ) ?: true
+            if (result.resultCode == RESULT_OK && keep > 0) {
+                mainViewModel.testPublicConfigs(keep, connect = autoConnect, openTab = true)
+            } else if (refreshGroups) {
+                mainViewModel.onAction(MainAction.RefreshGroups)
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -344,15 +353,22 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun tuneThenConnect(guid: String) {
         tuningJob?.cancel()
         tuningJob = lifecycleScope.launch {
-            val chosen = TuningRunner.tune(this@MainActivity, guid) { phase ->
+            val result = TuningRunner.tune(this@MainActivity, guid) { phase ->
                 mainViewModel.setTuning(phase)
+            }
+            if (!result.bypassed) {
+                // Neither plain nor fragment/mux bypassed the block: keep it stopped.
+                LauncherManager.stopService(this@MainActivity)
+                mainViewModel.onConnectFailed(canMove = false)
+                AppLog.error(AppLog.Section.Connection, "Tuning: could not bypass -1ms config; stopped")
+                return@launch
             }
             // The search left the tunnel down and the best setting applied.
             mainViewModel.onConnectRequested()
             if (!LauncherManager.startService(this@MainActivity, quiet = true)) {
                 mainViewModel.onConnectFailed()
             }
-            AppLog.info(AppLog.Section.Connection, "Tuning: connecting with ${chosen.key}")
+            AppLog.info(AppLog.Section.Connection, "Tuning: connecting with ${result.choice.key}")
         }
     }
 

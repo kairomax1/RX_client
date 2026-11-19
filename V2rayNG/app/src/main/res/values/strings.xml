@@ -1013,4 +1013,5 @@
     <string name="summary_pref_auto_failover">When the config in use stops carrying traffic, another one of the same group is taken quietly.</string>
     <string name="public_disconnected">Internet disconnected; testing stopped.</string>
     <string name="public_disconnected_saved">Internet disconnected — %1$d of %2$d verified configs were saved to the list.</string>
+    <string name="rx_tuning_failed">Could not bypass with fragment or mux; stopped.</string>
 </resources>

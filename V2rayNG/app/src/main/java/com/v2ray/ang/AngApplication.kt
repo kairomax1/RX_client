@@ -10,7 +10,9 @@ import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.handler.XboxDns
 import com.v2ray.ang.ui.compose.ThemeManager
 
 class AngApplication : Application() {
@@ -50,8 +52,11 @@ class AngApplication : Application() {
         // Initialize theme state from MMKV
         ThemeManager.refresh()
 
-        // Keep the daily maintenance job in sync with the preference
+        // Keep the daily maintenance job in sync with the preference, and ensure
+        // Public Configs (every 15m + daily) and DNS Scanner (daily) refresh automatically.
         DailyMaintenance.sync(this)
+        PublicConfigs.schedule(this)
+        XboxDns.scheduleDaily(this)
         UpdateNotifier.scheduleWatch(this)
     }
 }

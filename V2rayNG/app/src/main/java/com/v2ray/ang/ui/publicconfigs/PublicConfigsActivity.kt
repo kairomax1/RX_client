@@ -143,6 +143,7 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
 
     override fun onCleared() {
         super.onCleared()
+        cancelled.set(true)
         runCatching { connectivityManager?.unregisterNetworkCallback(networkCallback) }
     }
 
@@ -218,17 +219,38 @@ class PublicConfigsActivity : BaseComponentActivity() {
         val state by viewModel.state.collectAsStateWithLifecycle()
         val outcome = state.outcome
         val added = outcome?.added ?: 0
+        val carried = state.progress?.carried ?: 0
+        LaunchedEffect(carried, outcome) {
+            if (carried > 0 || added > 0) {
+                val autoConnect = outcome != null && !outcome.disconnected && added > 0
+                setResult(
+                    RESULT_OK,
+                    Intent()
+                        .putExtra(EXTRA_KEEP, state.options.count)
+                        .putExtra(EXTRA_AUTO_CONNECT, autoConnect),
+                )
+            }
+        }
         LaunchedEffect(outcome) {
             if (outcome != null && !outcome.disconnected && added > 0) {
-                setResult(RESULT_OK, Intent().putExtra(EXTRA_KEEP, state.options.count))
+                setResult(
+                    RESULT_OK,
+                    Intent()
+                        .putExtra(EXTRA_KEEP, state.options.count)
+                        .putExtra(EXTRA_AUTO_CONNECT, true),
+                )
                 finish()
             }
         }
-        PublicConfigsScreen(state, viewModel::change, viewModel::start, viewModel::stop) { finish() }
+        PublicConfigsScreen(state, viewModel::change, viewModel::start, viewModel::stop) {
+            viewModel.stop()
+            finish()
+        }
     }
 
     companion object {
         const val EXTRA_KEEP = "keep"
+        const val EXTRA_AUTO_CONNECT = "auto_connect"
     }
 }
 

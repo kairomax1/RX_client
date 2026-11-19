@@ -64,12 +64,17 @@ class DailyMaintenanceWorker(
         runCatching { refreshSubscriptions() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: subscription refresh failed", it) }
 
-        runCatching { com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext) }
-            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
+        runCatching {
+            if (isOnline()) com.v2ray.ang.handler.PublicConfigs.refreshSourcesDaily(applicationContext)
+            com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext)
+        }.onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
 
         // Only when there is a line to fetch it over: offline, the request would sit
         // on its timeout and hold up everything after it.
         if (isOnline()) {
+            runCatching { com.v2ray.ang.handler.XboxDns.refreshDailyIfDue(applicationContext) }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: DNS scanner list failed", it) }
+
             runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
                 .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
         }

@@ -734,4 +734,5 @@
     <string name="public_game">Game mode</string>
     <string name="public_disconnected">İnternet kəsildi; test dayandırıldı.</string>
     <string name="public_disconnected_saved">İnternet kəsildi — yoxlanılmış %2$d konfiqurasiyadan %1$d ədədi siyahıda saxlanıldı.</string>
+    <string name="rx_tuning_failed">Fragment və mux ilə keçmək mümkün olmadı; dayandırıldı.</string>
 </resources>
