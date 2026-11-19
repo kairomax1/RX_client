@@ -51,11 +51,13 @@ class PublicConfigsGroupsTest {
     @Test
     fun aCheckThatCarriesNothingDoesNotEmptyTheTab() {
         val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
-        assertEquals(
-            0,
-            Regex("clearServerList\\(GROUP_ID\\)").findAll(source).count(),
-            "the group is replaced only by what carried, never emptied before a round",
-        )
+        // Exactly one place clears the group, and it is reached only once a config
+        // has carried something: "if (!replaced)" guards it. Clearing before the
+        // rounds is what emptied the tab every time a check found nothing.
+        val clears = Regex("clearServerList\\(GROUP_ID\\)").findAll(source).count()
+        assertEquals(1, clears, "the group is replaced in one place only")
+        val guardAt = source.indexOf("if (!replaced)")
+        assertTrue(guardAt > 0 && guardAt < source.indexOf("clearServerList(GROUP_ID)"))
         assertTrue(source.contains("val previous = MmkvManager.decodeServerList(GROUP_ID)"))
     }
 
