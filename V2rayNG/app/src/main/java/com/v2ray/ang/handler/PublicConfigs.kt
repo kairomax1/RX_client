@@ -11,7 +11,9 @@ import androidx.work.WorkerParameters
 import com.google.gson.JsonParser
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.SubscriptionItem
+import com.v2ray.ang.util.Utils
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -148,11 +150,30 @@ object PublicConfigs {
         runCatching { MmkvManager.removeServerViaSubid(GROUP_ID_SWEEP) }
     }
 
-    /** How many candidates carry a real download at the same time. */
-    private const val VERIFY_AT_ONCE = 4
+    /**
+     * How many candidates are worked on at the same time.
+     *
+     * The tunnel itself is still raised for one config at a time — the core is a
+     * single engine with one routing table — but the cheap connect check in front
+     * of it and the imports behind it are not the core's work, and doing them for
+     * one address at a time was most of the waiting.
+     */
+    private const val VERIFY_AT_ONCE = 6
 
-    /** How long one candidate has to carry a small download before it is refused. */
-    private const val VERIFY_TIMEOUT_MILLIS = 18_000L
+    /** How long a bare connection to a candidate's address is waited for. */
+    private const val QUICK_CONNECT_MILLIS = 1500
+
+    /**
+     * How long one candidate has to carry a small download before it is refused.
+     *
+     * A config that works answers in a few hundred milliseconds, and the download
+     * that decides it is capped at three and a half seconds of reading. Eighteen
+     * seconds was the ceiling on the whole thing and was mostly spent waiting for
+     * a tunnel that was never going to open, which is why counting ten of them
+     * took as long as it did. An address that cannot accept a connection never
+     * reaches this point at all: [answers] refuses it first.
+     */
+    private const val VERIFY_TIMEOUT_MILLIS = 9_000L
     private const val MAX_TRIED = 4000
     private const val MAX_BYTES = 3_000_000
 
@@ -192,7 +213,7 @@ object PublicConfigs {
         val reachable: Int,
         /** How many were asked for; the work stops at this, not past it. */
         val wanted: Int = 0,
-        /** Configs measured by carrying real bytes so far, and how many carried. */
+        /** How many candidates a tunnel was opened over so far, and how many are in the tab. */
         val verified: Int = 0,
         val carried: Int = 0,
         /** Which round of looking at the lists this is; 0 before the first. */
@@ -838,6 +859,9 @@ object PublicConfigs {
         var found = 0
         var tried = 0
         var measured = 0
+        // How many configs are really in the tab. This is the figure the screen
+        // shows, and it is the tab's own count — not the number that carried, which
+        // can be a duplicate the store refused.
         var carried = 0
         var rounds = 0
         var emptyRound = false
@@ -849,7 +873,11 @@ object PublicConfigs {
         }
 
         val deadline = System.currentTimeMillis() + MAX_DURATION_MILLIS
-        while (!cancelled.get() && kept.size < wanted && rounds < MAX_ROUNDS && !emptyRound &&
+        // Progress is measured by what this collection added, not by how big the
+        // tab is: the old group is only cleared once something proves itself, so
+        // for the first part of the search the tab is still the previous list and
+        // its size says nothing about how far this run has got.
+        while (!cancelled.get() && carried < wanted && rounds < MAX_ROUNDS && !emptyRound &&
             System.currentTimeMillis() < deadline
         ) {
             rounds++
@@ -887,18 +915,16 @@ object PublicConfigs {
 
             // Measured properly, the only test that decides. A config that carried
             // goes into the group straight away — while the round is still running,
-            // which is what "add them by itself" means to the person watching — and
-            // the counter on the screen moves with the tab, because both are the
-            // same list: only something that really carried is ever counted.
+            // which is what "add them by itself" means to the person watching.
             val carriedNow = runBlocking {
                 verify(
                     context = context,
                     candidates = candidates,
-                    wanted = wanted - kept.size,
+                    wanted = (wanted - carried).coerceAtLeast(1),
                     verify = options.verify,
                     cancelled = cancelled,
                     deadline = deadline,
-                    onCarried = { link ->
+                    onCarried = { link, profile ->
                         val isNew = synchronized(kept) { keptRaws.add(link.raw).also { if (it) kept += link } }
                         if (isNew) {
                             // The first proven config is the moment the old group
@@ -907,17 +933,28 @@ object PublicConfigs {
                                 MmkvManager.clearServerList(GROUP_ID)
                                 replaced = true
                             }
-                            imported += importIntoGroup(context, listOf(link.raw))
+                            val added = importIntoGroup(context, profile, link.raw)
+                            imported += added
+                            // The figure on the screen is the number of configs that
+                            // really went into the tab. It was reporting the size of
+                            // the proof list instead, so a config that carried was
+                            // added to the tab while the screen still said zero —
+                            // press the button, watch it count nothing, go back to
+                            // the list and find two new ones. What is said and what
+                            // is done are now the same number.
+                            if (added > 0) carried += added
                             report()
                         }
                     },
-                ) { verified, carriedSoFar ->
+                ) { verified, _ ->
                     // `verified` is the number a tunnel was actually opened over —
                     // the real work, which moves whether or not anything came
-                    // through. `carried` is the part of it that worked. Showing the
-                    // first for the second was the counter that sat still.
+                    // through. The number of configs that went into the tab is
+                    // counted in `onCarried`, from what the store really took, and
+                    // is deliberately not taken from the measurement: the two are
+                    // different numbers, and mixing them is what made the screen
+                    // say zero while the tab grew.
                     measured = verified
-                    carried = carriedSoFar
                     report()
                 }
             }
@@ -1023,6 +1060,43 @@ object PublicConfigs {
         }.getOrDefault(0)
     }
 
+    /**
+     * Puts one measured config into the tab, using the form that was measured.
+     *
+     * The raw link is only the fallback. The measured copy carries the settings
+     * the tunnel was actually raised with — the ones Tuning settled on from this
+     * line — so a config that carried in the test carries when it is picked. It is
+     * a link the same app has just accepted, but it is stored as a payload of its
+     * own rather than re-parsed, because re-parsing is the step that has been
+     * known to refuse a link the measurement had already used.
+     */
+    private fun importIntoGroup(context: Context, profile: ProfileItem?, raw: String): Int {
+        val group = MmkvManager.decodeSubscription(GROUP_ID) ?: SubscriptionItem()
+        group.remarks = context.getString(R.string.public_group_name)
+        MmkvManager.encodeSubscription(GROUP_ID, group)
+        val before = MmkvManager.decodeServerList(GROUP_ID).size
+        val measured = profile?.let { proved ->
+            runCatching {
+                val guid = Utils.getUuid()
+                proved.subscriptionId = GROUP_ID
+                MmkvManager.saveServerProfiles(
+                    profiles = mapOf(guid to proved),
+                    rawConfigs = mapOf(guid to raw),
+                    subscriptionId = GROUP_ID,
+                    append = true,
+                )
+                guid
+            }.getOrNull()
+        }
+        if (measured != null) {
+            // Counted from the group itself: whatever the store did, the figure on
+            // the screen is the number of entries the tab now holds beyond what it
+            // held a moment ago.
+            return (MmkvManager.decodeServerList(GROUP_ID).size - before).coerceAtLeast(0)
+        }
+        return importIntoGroup(context, listOf(raw))
+    }
+
     /** A TCP connect to each candidate, a few at a time; the cheap half of the test. */
     private fun quickCheck(
         links: List<Link>,
@@ -1067,7 +1141,7 @@ object PublicConfigs {
         verify: Boolean,
         cancelled: AtomicBoolean,
         deadline: Long = Long.MAX_VALUE,
-        onCarried: (Link) -> Unit = {},
+        onCarried: (Link, ProfileItem?) -> Unit = { _, _ -> },
         onProgress: (verified: Int, carried: Int) -> Unit,
     ): List<Pair<Link, Int>> = coroutineScope {
         if (!verify) {
@@ -1079,9 +1153,11 @@ object PublicConfigs {
         val gate = Semaphore(VERIFY_AT_ONCE)
         val carried = java.util.Collections.synchronizedList(mutableListOf<Pair<Link, Int>>())
         val done = java.util.concurrent.atomic.AtomicInteger(0)
-        // Every measurement runs through one tunnel at a time: a core is a single
+        // The tunnel is raised for one candidate at a time: a core is a single
         // engine with one routing table, so two configs raised at once would be
-        // measuring each other's traffic as well as their own.
+        // measuring each other's traffic as well as their own. Everything around
+        // it — the connect check, the import, the teardown — runs in parallel, so
+        // the waiting is the tunnel's own time and nothing else.
         val oneAtATime = Mutex()
         candidates.map { link ->
             async(Dispatchers.IO) {
@@ -1096,7 +1172,8 @@ object PublicConfigs {
                     if (cancelled.get() || carried.size >= wanted || System.currentTimeMillis() >= deadline) {
                         return@withPermit
                     }
-                    val speed = oneAtATime.withLock { speedOf(context, link) }
+                    val measuredNow = oneAtATime.withLock { measure(context, link) }
+                    val speed = measuredNow.speed
                     // Every candidate handed to a tunnel counts as measured, whether
                     // or not it carried. Only counting the successes made the figure
                     // on the screen the same as the number found, so a round that
@@ -1112,7 +1189,7 @@ object PublicConfigs {
                         )
                         // Into the tab the moment it is proven, not at the end of the
                         // round: the one watching is meant to see the list grow.
-                        onCarried(link)
+                        onCarried(link, measuredNow.profile)
                     }
                     // Attempts, and of those how many carried. The two have to be
                     // able to differ: that difference is the only thing on the
@@ -1126,12 +1203,39 @@ object PublicConfigs {
     }
 
     /**
+     * True when [link]'s address accepts a connection on this line.
+     *
+     * Only the sorts whose first byte is a TCP connection are asked: Hysteria and
+     * WireGuard speak UDP, so their honesty can only be established by raising
+     * them, and they are measured as before.
+     */
+    private fun answers(link: Link): Boolean {
+        if (link.kind == Kind.Hysteria || link.kind == Kind.WireGuard) return true
+        return try {
+            Socket().use { socket -> socket.connect(InetSocketAddress(link.host, link.port), QUICK_CONNECT_MILLIS) }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * The speed [link] carries on this line, in kbit/s, or 0 when it carried
      * nothing. The tunnel is raised privately for the measurement, so a running
      * connection is not disturbed and nothing half-tested is ever left in the
      * group the owner sees.
      */
-    private suspend fun speedOf(context: Context, link: Link): Int {
+    private suspend fun measure(context: Context, link: Link): Carried {
+        // A tunnel is the expensive half of a measurement: raising one and
+        // timing out on it takes many seconds, and on a filtered line most
+        // addresses never accept a connection at all. One bare TCP connect
+        // answers the same question in a second and a half, on the same line, so
+        // the tunnel is saved for what is actually listening. This is what makes
+        // the count move at a pace worth watching.
+        if (!answers(link)) {
+            AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host}:${link.port} did not accept a connection")
+            return Carried(null, 0)
+        }
         val guid = privateImport(context, link)
         if (guid == null) {
             // A link the app's own importer will not take cannot be tunnelled at
@@ -1139,21 +1243,30 @@ object PublicConfigs {
             // the difference between "nothing on this line carries" and "nothing
             // was ever tried".
             AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} could not be imported")
-            return 0
+            return Carried(null, 0)
         }
         return try {
             val speed = AutoConfigTest.probe(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
             if (speed <= 0) {
                 AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} opened and carried nothing")
+                return Carried(null, 0)
             }
-            speed
+            // The config that was proved is handed back on the way out, together
+            // with what it carried, rather than being thrown away with the
+            // scratch group. The proven form is the one Tuning has just settled
+            // on from this line's own measurements — which is why it is the copy
+            // that belongs in the tab.
+            Carried(MmkvManager.decodeServerConfig(guid), speed)
         } catch (e: Exception) {
             AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} failed: ${e.message.orEmpty().take(120)}")
-            0
+            Carried(null, 0)
         } finally {
             MmkvManager.removeServers(listOf(guid), PENDING_GROUP)
         }
     }
+
+    /** A measured candidate: the config as it was proved, and the speed it carried. */
+    private class Carried(val profile: ProfileItem?, val speed: Int)
 
     /**
      * Puts [link] in a group of its own, so a tunnel can be raised for it without

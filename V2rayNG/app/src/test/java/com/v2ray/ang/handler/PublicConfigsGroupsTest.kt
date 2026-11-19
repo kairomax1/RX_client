@@ -61,6 +61,36 @@ class PublicConfigsGroupsTest {
         assertTrue(source.contains("val previous = MmkvManager.decodeServerList(GROUP_ID)"))
     }
 
+    /**
+     * The number on the screen is the number of configs added, not the number that
+     * was tried and also not the number that carried: a duplicate the store refuses
+     * carried nothing into the list, and the screen used to sit at zero the whole
+     * time while the tab grew.
+     */
+    @Test
+    fun theFigureShownIsWhatWentIntoTheTab() {
+        val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        // The progress record is built from `carried`, which is bumped by what the
+        // store took.
+        assertTrue(source.contains("onProgress(Progress(origin, found, tried, kept.size, wanted, measured, carried, rounds, poolSize))"))
+        assertTrue(
+            source.contains("if (added > 0) carried += added"),
+            "the figure moves by what was really stored, not by what carried",
+        )
+        // And the measurement callback no longer writes that figure.
+        val callback = source.substringAfter(") { verified, _ ->").substringBefore("report()\n                }")
+        assertFalse(callback.contains("carried = "), "the measurement must not decide how many were added")
+    }
+
+    /** A dead address must be refused by a connect, not by an eighteen-second tunnel. */
+    @Test
+    fun aDeadAddressCostsAConnectAndNotATunnel() {
+        val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        assertTrue(source.contains("if (!answers(link))"))
+        assertTrue(source.contains("QUICK_CONNECT_MILLIS = 1500"))
+        assertTrue(source.contains("VERIFY_TIMEOUT_MILLIS = 9_000L"))
+    }
+
     @Test
     fun theCeilingIsHighEnoughForTheNumberSheAsksFor() {
         // The screen offered up to this number and the collection quietly stopped

@@ -264,30 +264,31 @@ private fun PublicConfigsScreen(
                             }
                         }
                         progress?.origin == null -> stringResource(R.string.public_step_fetch)
-                        // Read the way the question is asked: what I have, out of
-                        // what I asked for, with how much work it took after it.
-                        // The third figure is the work that decides: a config only
-                        // counts once a tunnel was raised over it and it carried
-                        // real bytes. The pool was looked at far more often than
-                        // that, and counting that would be raising a number for
-                        // work that proved nothing.
+                        // Read the way the question is asked: how many are in
+                        // the list, out of how many were asked for, and how much
+                        // was tried to get them. The first figure is the tab's own
+                        // count — the number of configs really added — so the
+                        // screen and the list can never disagree, which they did:
+                        // it showed the size of the proof list, sat at zero while
+                        // configs were arriving, and left the count to be found on
+                        // the other screen.
                         else -> stringResource(
                             R.string.public_step_try,
-                            progress.reachable,
+                            progress.carried,
                             wanted,
                             progress.verified,
                         )
                     }
                     Text(text, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
                     if (state.running) {
-                        // The bar fills with the number of configs proven, against
-                        // the number asked for — the only progress that matters to
-                        // the person watching.
+                        // The bar fills with the configs really in the list, against
+                        // the number asked for — the same figure as the line above
+                        // it, so neither can be the odd one out.
                         if (progress?.origin == null) {
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                         } else {
                             LinearProgressIndicator(
-                                progress = { (progress.reachable.toFloat() / wanted).coerceIn(0f, 1f) },
+                                progress = { (progress.carried.toFloat() / wanted).coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }

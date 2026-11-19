@@ -903,7 +903,7 @@
     <string name="public_count_exact">Type a number:</string>
     <string name="public_start">Get configs</string>
     <string name="public_step_fetch">Getting the lists…</string>
-    <string name="public_step_try">%1$d of %2$d ready — %3$d really tested</string>
+    <string name="public_step_try">%1$d of %2$d added to the list — %3$d tested</string>
     <string name="public_reached">%1$d of %2$d ready and added to the list</string>
     <string name="public_short">Only %1$d of %2$d could be found; the rest of the pool did not answer on your connection</string>
     <string name="public_step_round">Round %1$d: %2$d of %3$d ready</string>

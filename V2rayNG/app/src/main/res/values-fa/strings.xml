@@ -875,8 +875,8 @@
     <string name="public_count_exact">دقیق بنویس:</string>
     <string name="public_start">کانفیگ بگیر</string>
     <string name="public_step_fetch">در حال گرفتن فهرست‌ها…</string>
-    <string name="public_step_try">%1$d از %2$d تا آماده شد — %3$d تا واقعاً امتحان شد</string>
-    <string name="public_reached">%1$d از %2$d تا آماده شد و به فهرست اضافه شد</string>
+    <string name="public_step_try">%1$d از %2$d تا به فهرست اضافه شد — %3$d تا امتحان شد</string>
+    <string name="public_reached">%1$d از %2$d تا به فهرست اضافه شد</string>
     <string name="public_short">فقط %1$d از %2$d تا پیدا شد؛ بقیه‌ی کانفیگ‌های مخزن روی اینترنت تو جواب ندادند</string>
     <string name="public_step_round">دور %1$d: %2$d از %3$d آماده است</string>
     <string name="public_stopping">باشه، همین‌ها را نگه می‌دارم…</string>
