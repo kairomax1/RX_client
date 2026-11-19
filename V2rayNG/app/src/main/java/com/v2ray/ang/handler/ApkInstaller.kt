@@ -2,12 +2,14 @@ package com.v2ray.ang.handler
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.util.LogUtil
 import java.io.File
 
@@ -25,11 +27,45 @@ import java.io.File
  */
 object ApkInstaller {
 
+    /**
+     * Says, for the log, which certificate this phone's own copy of the app is
+     * signed with.
+     *
+     * An install that is refused for a signature mismatch is refused with the same
+     * words as one refused for an unfinished download, and the signature is the one
+     * difference that cannot be argued with: if the installed copy was signed with
+     * another key — one from before the key was made permanent, or a build from
+     * another line — no build from this repository will ever replace it without an
+     * uninstall first. Recording it means the answer is in the log the next time
+     * this is asked, instead of in a guess.
+     */
+    fun logInstalledSignature(context: Context) {
+        val printed = runCatching {
+            @Suppress("DEPRECATION")
+            val info = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+            info.signatures?.firstOrNull()?.toByteArray()?.let { signature ->
+                java.security.MessageDigest.getInstance("SHA-256").digest(signature)
+                    .joinToString("") { "%02x".format(it) }
+            }
+        }.getOrNull()
+        AppLog.info(
+            AppLog.Section.Update,
+            "Installed copy: ${context.packageName} versionName ${BuildConfig.VERSION_NAME} versionCode ${BuildConfig.VERSION_CODE}, " +
+                "signed with ${printed ?: "an unreadable certificate"}",
+        )
+    }
+
     /** Every zip file, and therefore every APK, starts with these two letters. */
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B)
 
-    /** Our builds are far larger than this; an HTML page saved by mistake is far smaller. */
-    private const val MIN_APK_BYTES = 5L * 1024 * 1024
+    /**
+     * Our builds are far larger than this; an HTML page saved by mistake is far
+     * smaller. It used to be five megabytes, which is true of the builds with the
+     * engine in them and not of every build that has ever been handed out — and the
+     * check's job is to tell an APK from a web page, not to tell one build from
+     * another.
+     */
+    private const val MIN_APK_BYTES = 2L * 1024 * 1024
 
     /** What the phone reports for the file behind [uri], or -1 when it cannot say. */
     fun sizeOf(context: Context, uri: Uri): Long =
@@ -90,6 +126,10 @@ object ApkInstaller {
      * owner's permission — the setting is opened for them in that case.
      */
     fun install(context: Context, uri: Uri): Boolean {
+        // Written before the hand-off, so the log always holds the two facts an
+        // "app not installed" has to be explained with: what this phone is running
+        // and what signed it.
+        logInstalledSignature(context)
         if (!mayInstall(context)) {
             openPermissionSetting(context)
             return false

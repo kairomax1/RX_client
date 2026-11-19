@@ -745,6 +745,7 @@
     <string name="update_download">دانلود آپدیت</string>
     <string name="update_install">نصب کن</string>
     <string name="update_retry">نشد؛ دوباره امتحان کن</string>
+    <string name="update_running_build">این نسخه: %1$s (شماره %2$d، %3$s)</string>
     <string name="update_installed_version">نسخهٔ نصب‌شده: %s</string>
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>

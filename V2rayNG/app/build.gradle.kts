@@ -30,8 +30,18 @@ android {
         applicationId = "com.mobix.vpn"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.1"
+        // 4 was a mistake to freeze: a phone only updates an installed app when
+        // the new file has a higher number, and every build this project shipped
+        // carried the same one, so an installed copy could never be replaced. The
+        // number now comes from the build itself (-Prx.versionCode=<run number>,
+        // passed by the workflow) so that each build is newer than the last. CI
+        // then refuses to ship a file whose number is not above 4000004, which is
+        // the highest number any earlier build ever had — no phone can be stuck on
+        // a version that is newer than everything after it.
+        versionCode = (project.findProperty("rx.versionCode") as String?)?.toIntOrNull() ?: 4
+        // A tester who checks the phone's Settings screen can tell two builds apart
+        // from here on, which is how the version question is settled without a log.
+        versionName = (project.findProperty("rx.versionName") as String?) ?: "1.0.1"
 
         buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
 

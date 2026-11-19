@@ -773,6 +773,7 @@
     <string name="update_download">Download update</string>
     <string name="update_install">Install</string>
     <string name="update_retry">Failed; try again</string>
+    <string name="update_running_build">This build: %1$s (code %2$d, %3$s)</string>
     <string name="update_installed_version">Installed version: %s</string>
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>

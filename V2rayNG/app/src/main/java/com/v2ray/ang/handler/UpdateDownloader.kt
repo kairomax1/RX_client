@@ -117,10 +117,14 @@ object UpdateDownloader {
 
     private fun routes(url: String, mirrorsAllowed: Boolean): List<Route> {
         val list = ArrayList<Route>()
-        val port = runCatching { SettingsManager.getHttpPort() }.getOrDefault(0)
-        // With the tunnel up, the local proxy is the way most likely to reach GitHub.
-        if (port > 0 && isListening(port)) list += Route("tunnel", url, port)
+        // The phone's own line first, then the tunnel, then a mirror. The order used
+        // to put the tunnel in front of everything, which is wrong for the simplest
+        // case there is: a phone on an unfiltered connection can fetch the file
+        // itself, and going through a tunnel to reach GitHub makes the download
+        // depend on whichever config happens to be up at that moment.
         list += Route("direct", url)
+        val port = runCatching { SettingsManager.getHttpPort() }.getOrDefault(0)
+        if (port > 0 && isListening(port)) list += Route("tunnel", url, port)
         if (mirrorsAllowed) MIRRORS.forEachIndexed { i, mirror -> list += Route("mirror${i + 1}", mirror + url) }
         return list
     }

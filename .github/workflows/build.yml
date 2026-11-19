@@ -222,11 +222,17 @@ jobs:
           chmod +x gradlew
           # The debug variant is signed with the same key as the release one (see build.gradle.kts),
           # so no file from this run can force a tester to uninstall first.
+          # The build number is this run's, and it is what makes the APK newer than the
+          # one on the phone. A frozen number was the reason an installed copy could
+          # never be updated: Android only replaces an app with a file whose versionCode
+          # is higher, and every build here carried the same one.
           ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
             -Prx.storeFile="$KEYSTORE_PATH" \
             -Prx.storePassword="$STORE_PASSWORD" \
             -Prx.keyAlias="$KEY_ALIAS" \
-            -Prx.keyPassword="$KEY_PASSWORD"
+            -Prx.keyPassword="$KEY_PASSWORD" \
+            -Prx.versionCode="$((4000004 + GITHUB_RUN_NUMBER))" \
+            -Prx.versionName="1.0.${GITHUB_RUN_NUMBER}"
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
@@ -255,6 +261,25 @@ jobs:
             }
           done
           echo "All release and debug APKs carry the same certificate."
+
+      - name: Refuse an APK that a phone cannot update
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # 4000004 is the highest versionCode any earlier build carries, so anything
+          # above it is newer than everything that came before. A file at or below it
+          # would install on a clean phone and silently refuse to update one that has
+          # RX VPN on it already - which is the report this step exists to make
+          # impossible to ship again.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in *.apk; do
+            CODE=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+            NAME=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+            echo "$apk: versionCode=$CODE versionName=$NAME"
+            if [ -z "$CODE" ] || [ "$CODE" -le 4000004 ]; then
+              echo "::error::$apk carries versionCode ${CODE:-none}; it must be greater than 4000004 or a phone with RX VPN installed will not take it."
+              exit 1
+            fi
+          done
 
       - name: Report APK facts
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release

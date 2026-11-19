@@ -233,6 +233,22 @@ fun CheckUpdateScreen(
                     checked = checkPreRelease,
                     onCheckedChange = { viewModel.toggleCheckPreRelease(it) }
                 )
+                // The version this phone is running, always visible. It was only ever
+                // shown inside the "a newer build exists" card, which is a card that
+                // never appears when the phone cannot see the build at all — so the
+                // one number that settles "is this the version I think it is" was the
+                // one number not on the screen.
+                Text(
+                    text = stringResource(
+                        R.string.update_running_build,
+                        BuildConfig.VERSION_NAME,
+                        BuildConfig.VERSION_CODE,
+                        BuildConfig.BUILD_COMMIT.take(7).ifEmpty { "?" },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                )
                 SettingsMenuItem(
                     icon = painterResource(R.drawable.ic_check_update_24dp),
                     title = stringResource(R.string.update_check_for_update),
