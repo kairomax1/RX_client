@@ -145,8 +145,19 @@ object ApkInstaller {
             )
             true
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Installer could not be opened", e)
-            false
+            try {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+                true
+            } catch (fallbackError: Exception) {
+                LogUtil.e(AppConfig.TAG, "Installer could not be opened", fallbackError)
+                false
+            }
         }
     }
 }

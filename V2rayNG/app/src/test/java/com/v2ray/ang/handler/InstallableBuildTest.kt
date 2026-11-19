@@ -45,4 +45,17 @@ class InstallableBuildTest {
         assertTrue(installer.contains("fun logInstalledSignature"))
         assertTrue(installer.contains("logInstalledSignature(context)"), "it must be called before the hand-off")
     }
+
+    /**
+     * Native binaries (libaether.so, libhevsockstun.so) must be extracted into nativeLibraryDir
+     * and installers must not reject uncompressed 4 KB / executable ELF entries in lib/.
+     */
+    @Test
+    fun nativeLibrariesUseLegacyExtractablePackaging() {
+        val gradle = read("build.gradle.kts")
+        assertTrue(
+            gradle.contains("useLegacyPackaging = true"),
+            "useLegacyPackaging must stay true so installers accept the APK and binaries extract to nativeLibraryDir",
+        )
+    }
 }

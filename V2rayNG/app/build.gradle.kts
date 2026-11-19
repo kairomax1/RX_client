@@ -106,15 +106,13 @@ android {
 
     packaging {
         jniLibs {
-            // Uncompressed, mapped straight out of the APK.
-            //
-            // The old comment here said the opposite and was wrong. Compressed libraries are the
-            // shape that produces "the package appears to be invalid" on install: a device must
-            // then extract them at install time into the app's own storage, and when that step
-            // does not fit the install transaction the installer refuses the whole package.
-            // Uncompressed is what Android has shipped native libraries in since 2010 and the
-            // only packaging every installer accepts. Nothing in this app needs them on disk.
-            useLegacyPackaging = false
+            // Compressed, extract-at-install native libraries (extractNativeLibs="true").
+            // Both AetherEngine (libaether.so) and RootProxyManager (libhevsockstun.so) execute
+            // binaries directly from context.applicationInfo.nativeLibraryDir, which stays empty
+            // when useLegacyPackaging = false. Uncompressed packaging with 4 KB NDK r26 binaries
+            // and ELF executables in lib/ is also rejected by device installers on both fresh
+            // installs and updates ("the package appears to be invalid").
+            useLegacyPackaging = true
         }
     }
 
