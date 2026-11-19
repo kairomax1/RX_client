@@ -822,10 +822,15 @@ object PublicConfigs {
         MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
         MmkvManager.encodeSettings(KEY_COUNT, wanted)
 
-        // Emptied once, before the first round, so this collection replaces the
-        // last one instead of piling onto it; filled from here on only with
-        // configs already proven on this line.
-        MmkvManager.clearServerList(GROUP_ID)
+        // Emptied when the first config proves itself, not before the first
+        // round, so this collection replaces the last one instead of piling onto
+        // it — and only once there is something to replace it with. Clearing at
+        // the start meant a check that carried nothing, which is the ordinary
+        // result on a filtered line and how every round in the log ends, left the
+        // tab empty: pressing "collect" wiped the configs the owner already had
+        // and handed back nothing.
+        val previous = MmkvManager.decodeServerList(GROUP_ID)
+        var replaced = false
 
         val kept = mutableListOf<Link>()
         val keptRaws = HashSet<String>()
@@ -896,14 +901,21 @@ object PublicConfigs {
                     onCarried = { link ->
                         val isNew = synchronized(kept) { keptRaws.add(link.raw).also { if (it) kept += link } }
                         if (isNew) {
+                            // The first proven config is the moment the old group
+                            // is out of date. Until then nothing is touched.
+                            if (!replaced) {
+                                MmkvManager.clearServerList(GROUP_ID)
+                                replaced = true
+                            }
                             imported += importIntoGroup(context, listOf(link.raw))
                             report()
                         }
                     },
                 ) { verified, carriedSoFar ->
-                    // `verified` is the number that really carried bytes — not the
-                    // number that was tried. That is the figure the screen shows,
-                    // so it can only move when something actually came through.
+                    // `verified` is the number a tunnel was actually opened over —
+                    // the real work, which moves whether or not anything came
+                    // through. `carried` is the part of it that worked. Showing the
+                    // first for the second was the counter that sat still.
                     measured = verified
                     carried = carriedSoFar
                     report()
@@ -924,6 +936,16 @@ object PublicConfigs {
         }
 
         if (kept.isEmpty()) {
+            // Nothing carried, so nothing was replaced: the configs already in the
+            // tab are still there, untouched. Said out loud, because the difference
+            // between an empty tab and an untouched one is the difference between a
+            // list that was lost and a check that found nothing new.
+            if (previous.isNotEmpty()) {
+                AppLog.info(
+                    AppLog.Section.Other,
+                    "Public configs: nothing carried this time; the ${previous.size} already in the tab were left as they were",
+                )
+            }
             if (cancelled.get()) {
                 AppLog.info(AppLog.Section.Other, "Public configs: stopped on request; nothing had carried yet")
                 return Outcome(0, origin)
@@ -1075,8 +1097,14 @@ object PublicConfigs {
                         return@withPermit
                     }
                     val speed = oneAtATime.withLock { speedOf(context, link) }
+                    // Every candidate handed to a tunnel counts as measured, whether
+                    // or not it carried. Only counting the successes made the figure
+                    // on the screen the same as the number found, so a round that
+                    // tried eighty-one and carried none could read "81 measured" for
+                    // work that never opened a tunnel — a counter that cannot move
+                    // independently of the successes is not a progress figure.
+                    done.incrementAndGet()
                     if (speed > 0) {
-                        done.incrementAndGet()
                         carried.add(link to speed)
                         AppLog.info(
                             AppLog.Section.Other,
@@ -1086,9 +1114,10 @@ object PublicConfigs {
                         // round: the one watching is meant to see the list grow.
                         onCarried(link)
                     }
-                    // Both figures are the same number on purpose: a config that
-                    // carried nothing was not measured, it was only attempted, and
-                    // an attempt is not worth showing.
+                    // Attempts, and of those how many carried. The two have to be
+                    // able to differ: that difference is the only thing on the
+                    // screen that tells a search which is working from one which
+                    // is not reaching anything.
                     onProgress(done.get(), carried.size)
                 }
             }
@@ -1103,9 +1132,24 @@ object PublicConfigs {
      * group the owner sees.
      */
     private suspend fun speedOf(context: Context, link: Link): Int {
-        val guid = privateImport(context, link) ?: return 0
+        val guid = privateImport(context, link)
+        if (guid == null) {
+            // A link the app's own importer will not take cannot be tunnelled at
+            // all. Written down at debug level, because a whole round of them is
+            // the difference between "nothing on this line carries" and "nothing
+            // was ever tried".
+            AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} could not be imported")
+            return 0
+        }
         return try {
-            AutoConfigTest.probe(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
+            val speed = AutoConfigTest.probe(context, guid, VERIFY_TIMEOUT_MILLIS) ?: 0
+            if (speed <= 0) {
+                AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} opened and carried nothing")
+            }
+            speed
+        } catch (e: Exception) {
+            AppLog.debug(AppLog.Section.Other, "Public configs: ${link.kind.name} ${link.host} failed: ${e.message.orEmpty().take(120)}")
+            0
         } finally {
             MmkvManager.removeServers(listOf(guid), PENDING_GROUP)
         }

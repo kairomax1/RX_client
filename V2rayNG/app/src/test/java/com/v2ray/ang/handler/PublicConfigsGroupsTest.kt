@@ -27,6 +27,38 @@ class PublicConfigsGroupsTest {
         assertFalse(PublicConfigs.isInternalGroup("some-user-subscription"))
     }
 
+    /**
+     * The progress figure has to be able to move on its own.
+     *
+     * It was raised only when a candidate carried something, so a round that
+     * opened eighty-one tunnels and had none of them carry reported the same
+     * number it reported when it had run none at all — which is why the screen
+     * looked as if nothing was being tested. These assert the shape of the fix at
+     * its source: the counter is incremented for the attempt, and only the
+     * `carried` list grows on success.
+     */
+    @Test
+    fun theCounterCountsAttemptsAndNotOnlySuccesses() {
+        val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        val body = source.substringAfter("val speed = oneAtATime.withLock { speedOf(context, link) }")
+            .substringBefore("onProgress(done.get(), carried.size)")
+        assertTrue(
+            body.indexOf("done.incrementAndGet()") < body.indexOf("if (speed > 0)"),
+            "the attempt must be counted before, and independently of, the success",
+        )
+    }
+
+    @Test
+    fun aCheckThatCarriesNothingDoesNotEmptyTheTab() {
+        val source = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        assertEquals(
+            0,
+            Regex("clearServerList\\(GROUP_ID\\)").findAll(source).count(),
+            "the group is replaced only by what carried, never emptied before a round",
+        )
+        assertTrue(source.contains("val previous = MmkvManager.decodeServerList(GROUP_ID)"))
+    }
+
     @Test
     fun theCeilingIsHighEnoughForTheNumberSheAsksFor() {
         // The screen offered up to this number and the collection quietly stopped
