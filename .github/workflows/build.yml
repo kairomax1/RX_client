@@ -329,6 +329,49 @@ jobs:
             echo "::notice title=v1.0.1-sig::$V101_SIG"
           fi
 
+      - name: Compare APK with v1.0.1
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          SAMPLE=$(ls RXVPN_*_arm64-v8a.apk | head -1)
+          V101="$RUNNER_TEMP/v101.apk"
+          if [ -f "$V101" ]; then
+            V101_CERT=$("$BUILD_TOOLS/apksigner" verify --print-certs "$V101" 2>&1 | grep "SHA-256 digest" | head -1 | xargs)
+            V12_CERT=$("$BUILD_TOOLS/apksigner" verify --print-certs "$SAMPLE" 2>&1 | grep "SHA-256 digest" | head -1 | xargs)
+            echo "::notice title=cert-compare::v101=[$V101_CERT] | v12=[$V12_CERT]"
+
+            "$BUILD_TOOLS/aapt2" dump badging "$V101" 2>/dev/null > "$RUNNER_TEMP/v101.badge"
+            "$BUILD_TOOLS/aapt2" dump badging "$SAMPLE" 2>/dev/null > "$RUNNER_TEMP/v12.badge"
+            BADGE_DIFF=$(diff -u "$RUNNER_TEMP/v101.badge" "$RUNNER_TEMP/v12.badge" | grep -E "^[+-][^+-]" | tr '\n' '|' | head -c 900)
+            echo "::notice title=badge-diff::$BADGE_DIFF"
+
+            "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$V101" 2>/dev/null > "$RUNNER_TEMP/v101.xml"
+            "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$SAMPLE" 2>/dev/null > "$RUNNER_TEMP/v12.xml"
+            XML_DIFF=$(diff -u "$RUNNER_TEMP/v101.xml" "$RUNNER_TEMP/v12.xml" | grep -E "^[+-][^+-]" | grep -v "versionCode" | tr '\n' '|' | head -c 900)
+            echo "::notice title=manifest-diff::$XML_DIFF"
+
+            unzip -Z1 "$V101" | sort > "$RUNNER_TEMP/v101.files"
+            unzip -Z1 "$SAMPLE" | sort > "$RUNNER_TEMP/v12.files"
+            ZIP_DIFF=$(comm -13 "$RUNNER_TEMP/v101.files" "$RUNNER_TEMP/v12.files" | grep -vE "^assets/|^res/|^classes" | tr '\n' '|' | head -c 900)
+            echo "::notice title=new-nonasset-files::$ZIP_DIFF"
+
+            Z_V101=$("$BUILD_TOOLS/zipalign" -c -p 4 "$V101" && echo OK || echo FAIL)
+            Z_V12=$("$BUILD_TOOLS/zipalign" -c -p 4 "$SAMPLE" && echo OK || echo FAIL)
+            echo "::notice title=zipalign-p::v101=$Z_V101 | v12=$Z_V12"
+          fi
+          READELF=$(ls "$ANDROID_HOME"/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf | head -1)
+          mkdir -p "$RUNNER_TEMP/so_inspect"
+          unzip -o -j "$SAMPLE" "lib/arm64-v8a/*" -d "$RUNNER_TEMP/so_inspect" > /dev/null
+          ELF_INFO=""
+          for f in "$RUNNER_TEMP/so_inspect"/*.so; do
+            bn=$(basename "$f")
+            tp=$("$READELF" -h "$f" 2>/dev/null | grep "Type:" | awk '{print $2}')
+            al=$("$READELF" -l "$f" 2>/dev/null | grep "LOAD" | awk '{print $NF}' | sort -u | tr '\n' ',')
+            it=$("$READELF" -l "$f" 2>/dev/null | grep -c "INTERP" || true)
+            ELF_INFO="${ELF_INFO}${bn}(type=${tp},align=${al},interp=${it}); "
+          done
+          echo "::notice title=elf-check::$ELF_INFO"
+
       - name: Verify APK structure and write checksums
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release
         run: |
