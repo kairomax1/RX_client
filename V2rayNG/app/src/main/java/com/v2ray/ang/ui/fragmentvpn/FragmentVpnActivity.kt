@@ -291,8 +291,8 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
             }
             if (measuredPing > 0L) FragmentVpn.saveLastPing(measuredPing)
             val whoAmI = withContext(Dispatchers.IO) { runCatching { PublicConfigs.whoAmI() }.getOrNull() }
-            val ipText = whoAmI?.let { info ->
-                listOfNotNull(info.ip, info.isp ?: info.country).joinToString(" · ")
+            val ipText = whoAmI?.let { (ip, country) ->
+                listOf(ip, country).filter { it.isNotBlank() }.joinToString(" · ")
             }
             AppLog.info(AppLog.Section.Connection, "Fragment VPN active (${FragmentVpn.currentConfig().resolvedPreset.key}, ${measuredPing}ms)")
             _state.update {
@@ -476,22 +476,22 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         RxPromptButton(
-                            label = if (state.isRunning || state.isConnecting) {
+                            text = if (state.isRunning || state.isConnecting) {
                                 stringResource(R.string.fragment_vpn_disconnect)
                             } else {
                                 stringResource(R.string.fragment_vpn_connect)
                             },
-                            tone = if (state.isRunning || state.isConnecting) RxPromptTone.Quiet else RxPromptTone.Accent,
+                            tone = if (state.isRunning || state.isConnecting) RxPromptTone.MistRed else RxPromptTone.DarkGreen,
                             onClick = onToggleClick,
                             modifier = Modifier.weight(1f),
                         )
                         RxPromptButton(
-                            label = if (state.isProbing) {
+                            text = if (state.isProbing) {
                                 stringResource(R.string.fragment_vpn_probing_short)
                             } else {
                                 stringResource(R.string.fragment_vpn_probe_best)
                             },
-                            tone = RxPromptTone.Quiet,
+                            tone = RxPromptTone.Ghost,
                             onClick = { if (!state.isProbing) viewModel.probePresets() },
                             modifier = Modifier.weight(1f),
                         )
@@ -517,8 +517,8 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
 
                     if (state.dirtyWhileRunning) {
                         RxPromptButton(
-                            label = stringResource(R.string.fragment_vpn_apply_reconnect),
-                            tone = RxPromptTone.Accent,
+                            text = stringResource(R.string.fragment_vpn_apply_reconnect),
+                            tone = RxPromptTone.Silver,
                             onClick = { viewModel.reconnectWithCurrentSettings() },
                             modifier = Modifier.fillMaxWidth(),
                         )
