@@ -1,5 +1,8 @@
 name: Diagnose RX VPN installation
 on:
+  push:
+    branches: [arena/8e7dbd45-rx-client]
+    paths: [.github/workflows/check-install.yml]
   workflow_dispatch:
 permissions:
   actions: read
