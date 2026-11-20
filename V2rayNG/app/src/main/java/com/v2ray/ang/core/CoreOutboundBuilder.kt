@@ -80,6 +80,19 @@ object CoreOutboundBuilder {
                 outbound.mux?.concurrency = -1
             }
 
+            if (protocol.equals(EConfigType.VMESS.name, true)
+                || protocol.equals(EConfigType.VLESS.name, true)
+                || protocol.equals(EConfigType.TROJAN.name, true)
+                || protocol.equals(EConfigType.SHADOWSOCKS.name, true)
+                || protocol.equals(EConfigType.SOCKS.name, true)
+                || protocol.equals(EConfigType.HTTP.name, true)
+                || protocol.equals(AppConfig.PROTOCOL_FREEDOM, true)
+            ) {
+                val sockopt = outbound.ensureSockopt()
+                if (sockopt.TcpNoDelay == null) sockopt.TcpNoDelay = true
+                if (sockopt.tcpKeepAliveIdle == null) sockopt.tcpKeepAliveIdle = 30
+            }
+
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to update outbound with global settings", e)
             return false
@@ -271,9 +284,52 @@ object CoreOutboundBuilder {
 
     /** Fits a PPPoE and a mobile path (1500 minus tunnel and carrier overhead). */
     private const val WIREGUARD_SAFE_MTU = 1360
+    private const val PREF_WG_MODE_PREFIX = "pref_rx_wg_mode_"
+
+    enum class WireguardMode(val key: String, val maxMtu: Int, val noise: Boolean) {
+        STANDARD("standard", WIREGUARD_SAFE_MTU, false),
+        MTU_1280("mtu1280", 1280, false),
+        NOISE_1280("noise1280", 1280, true),
+        NOISE_1360("noise1360", WIREGUARD_SAFE_MTU, true);
+
+        companion object {
+            fun fromKey(key: String?): WireguardMode? = entries.firstOrNull { it.key == key }
+        }
+    }
+
+    @Volatile
+    private var activeWgMode: WireguardMode = WireguardMode.STANDARD
+
+    fun wgModeFor(guid: String?): WireguardMode {
+        if (guid.isNullOrBlank()) return WireguardMode.STANDARD
+        val saved = runCatching { MmkvManager.decodeSettingsString(PREF_WG_MODE_PREFIX + guid) }.getOrNull()
+        return WireguardMode.fromKey(saved) ?: WireguardMode.STANDARD
+    }
+
+    fun applyWgMode(mode: WireguardMode) {
+        activeWgMode = mode
+    }
+
+    fun applyWgModeFor(guid: String?) {
+        activeWgMode = wgModeFor(guid)
+    }
+
+    fun rememberWgMode(guid: String?, mode: WireguardMode) {
+        if (guid.isNullOrBlank()) return
+        runCatching { MmkvManager.encodeSettings(PREF_WG_MODE_PREFIX + guid, mode.key) }
+    }
+
+    /** Steps up WireGuard anti-DPI protection when a tunnel stalls under carrier filtering. */
+    fun nextWgFallbackMode(guid: String?): WireguardMode? = when (wgModeFor(guid)) {
+        WireguardMode.STANDARD -> WireguardMode.MTU_1280
+        WireguardMode.MTU_1280 -> WireguardMode.NOISE_1280
+        WireguardMode.NOISE_1360 -> WireguardMode.NOISE_1280
+        WireguardMode.NOISE_1280 -> null
+    }
 
     private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
         val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
+        val wgMode = activeWgMode
 
         val rawAddresses = profileItem.localAddress
             ?.split(",")
@@ -282,7 +338,8 @@ object CoreOutboundBuilder {
             ?.ifEmpty { null }
             ?: listOf(AppConfig.WIREGUARD_LOCAL_ADDRESS_V4)
 
-        val addresses = if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true) {
+        val ipv6Enabled = runCatching { MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true }.getOrDefault(false)
+        val addresses = if (ipv6Enabled) {
             rawAddresses
         } else {
             val ipv4Addresses = rawAddresses.filter { !it.contains(":") }
@@ -299,9 +356,9 @@ object CoreOutboundBuilder {
                 peer.endpoint = Utils.getIpv6Address(profileItem.server) + ":${profileItem.serverPort}"
             }
             wireguard.peers?.firstOrNull()?.keepAlive = WIREGUARD_KEEP_ALIVE_SECONDS
-            wireguard.mtu = wireguardMtu(profileItem.mtu)
+            wireguard.mtu = minOf(wireguardMtu(profileItem.mtu), wgMode.maxMtu)
             // With IPv6 off, an endpoint name is not tried over an address family that leads nowhere.
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) != true) wireguard.domainStrategy = "ForceIPv4"
+            if (!ipv6Enabled) wireguard.domainStrategy = "ForceIPv4"
             // The DNS a WireGuard outbound carries is asked inside the tunnel by the
             // core, before routing is consulted — so a resolver written here answers
             // every name, including the ones that must be answered at home, and
@@ -312,11 +369,37 @@ object CoreOutboundBuilder {
             wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
         }
 
+        outboundBean?.ensureSockopt()?.domainStrategy = if (ipv6Enabled) "UseIP" else "UseIPv4"
+
         if (!profileItem.finalMask.isNullOrBlank()) {
-            outboundBean?.streamSettings = OutboundBean.StreamSettingsBean()
+            outboundBean?.streamSettings = outboundBean?.streamSettings ?: OutboundBean.StreamSettingsBean()
             outboundBean?.streamSettings?.let {
                 updateOutboundFinalMask(it, profileItem)
                 it.network = null
+            }
+        } else if (wgMode.noise) {
+            outboundBean?.streamSettings = outboundBean?.streamSettings ?: OutboundBean.StreamSettingsBean()
+            outboundBean?.streamSettings?.let { ss ->
+                ss.network = null
+                ss.finalmask = OutboundBean.StreamSettingsBean.FinalMaskBean(
+                    udp = listOf(
+                        OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
+                            type = "noise",
+                            settings = OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
+                                noise = listOf(
+                                    OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean.NoiseMaskBean(
+                                        rand = "12-28",
+                                        delay = "10-18",
+                                    ),
+                                    OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean.NoiseMaskBean(
+                                        rand = "18-40",
+                                        delay = "12-22",
+                                    ),
+                                )
+                            )
+                        )
+                    )
+                )
             }
         }
         return outboundBean

@@ -61,7 +61,7 @@ class TuningTest {
         assertTrue(mainActivitySrc.contains("LauncherManager.stopService(this@MainActivity)"))
 
         assertTrue(mainViewModelSrc.contains("testDelayMillis ?: 0L) < 0L"))
-        assertTrue(coreServiceSrc.contains("control?.stopService()"))
+        assertTrue(coreServiceSrc.contains("serviceControl.stopService()") || coreServiceSrc.contains("reloadCore()"))
     }
 
     @Test

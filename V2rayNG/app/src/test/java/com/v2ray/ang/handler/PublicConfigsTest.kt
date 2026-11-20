@@ -158,4 +158,26 @@ class PublicConfigsTest {
         )
         assertEquals("trojan://secret@5.6.7.8:443?sni=b.com#ch2", lines[1])
     }
+
+    @Test
+    fun antiCensorshipProtocolsAreRankedFirstWithinEachKind() {
+        val lines = sequenceOf(
+            "vless://a@1.1.1.1:443?security=tls&type=ws&host=a.com#ws",
+            "vless://b@2.2.2.2:443?security=reality&sni=a.com&pbk=x&flow=xtls-rprx-vision#reality",
+            "vless://c@3.3.3.3:443?security=tls&type=xhttp&host=a.com#xhttp",
+            "hy2://p@4.4.4.4:443?sni=a.com#plain",
+            "hy2://p@5.5.5.5:443?sni=a.com&obfs=salamander&obfs-password=pw#salamander",
+        )
+        val vlessHosts = PublicConfigs.select(lines, setOf(Kind.Vless)).map { it.host }
+        assertEquals(listOf("2.2.2.2", "3.3.3.3", "1.1.1.1"), vlessHosts)
+
+        val hyHosts = PublicConfigs.select(lines, setOf(Kind.Hysteria)).map { it.host }
+        assertEquals(listOf("5.5.5.5", "4.4.4.4"), hyHosts)
+    }
+
+    @Test
+    fun fragmentGroupIsHiddenAsInternalGroup() {
+        assertEquals(true, PublicConfigs.isInternalGroup(FragmentVpn.GROUP_ID))
+        assertEquals(true, FragmentVpn.isFragmentProfile(FragmentVpn.PROFILE_GUID))
+    }
 }

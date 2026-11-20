@@ -101,8 +101,8 @@ object PublicConfigs {
     private const val LINE_PROBE_MILLIS = 2200
 
     /** Fast download budget so fetching lists never stalls before testing begins. */
-    private const val DOWNLOAD_THREADS = 16
-    private const val DOWNLOAD_BUDGET_MILLIS = 10_000L
+    private const val DOWNLOAD_THREADS = 24
+    private const val DOWNLOAD_BUDGET_MILLIS = 12_000L
     private const val FETCH_CONNECT_MILLIS = 2500
     private const val FETCH_READ_MILLIS = 4500
 
@@ -130,7 +130,7 @@ object PublicConfigs {
 
     /** True for a group the app keeps for itself: measured in, never shown. */
     fun isInternalGroup(guid: String?): Boolean =
-        guid == PENDING_GROUP || guid == GROUP_ID_SWEEP
+        guid == PENDING_GROUP || guid == GROUP_ID_SWEEP || guid == FragmentVpn.GROUP_ID
 
     /** A second scratch group, so a measurement of a public config and a sweep cannot collide. */
     private const val GROUP_ID_SWEEP = "rx_public_sweep"
@@ -234,16 +234,28 @@ object PublicConfigs {
     }
 
     internal val SOURCES = listOf(
-        // Tier 1: Verified & Iran-tested GitHub collectors (actively updated).
-        Source("0xRadikal/Free-v2ray-Configs", "main", "verified/configs.txt"),
+        // Tier 1: High-signal Iran-tested & anti-censorship GitHub collectors (actively updated).
+        Source("ZendanTeam/SS44-sub", "main", "SS44-gold.txt"),
+        Source("ZendanTeam/SS44-sub", "main", "SS44-udp.txt"),
+        Source("ZendanTeam/SS44-sub", "main", "SS44.txt"),
+        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/vless.txt"),
+        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/hy2.txt"),
+        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/trojan.txt"),
+        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/wireguard.txt"),
+        Source("MustafaBaqer/VestraNet-Nodes", "main", "subscriptions/mix-normal.txt"),
+        Source("morpheusadam/v2ray-config", "main", "subs/bundles/best.txt"),
+        Source("morpheusadam/v2ray-config", "main", "subs/bundles/iran.txt"),
+        Source("morpheusadam/v2ray-config", "main", "subs/bundles/reality.txt"),
+        Source("morpheusadam/v2ray-config", "main", "subs/bundles/hysteria2.txt"),
+        Source("morpheusadam/v2ray-config", "main", "subs/bundles/wireguard.txt"),
         Source("0xRadikal/Free-v2ray-Configs", "main", "fast/configs.txt"),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "top100.txt"),
         Source("0xRadikal/Free-v2ray-Configs", "main", "light/configs.txt"),
+        Source("0xRadikal/Free-v2ray-Configs", "main", "google/configs.txt"),
+        Source("0xRadikal/Free-v2ray-Configs", "main", "protocols/hysteria2.txt"),
         Source("nimazolfaghari66-sketch/iran-vpn-radar", "main", "subscriptions/iran-priority/all"),
         Source("nimazolfaghari66-sketch/iran-vpn-radar", "main", "subscriptions/candidates/all"),
         Source("sakha1370/OpenRay", "main", "output_iran/iran_top100_checked.txt"),
         Source("sakha1370/OpenRay", "main", "output/all_valid_proxies.txt"),
-        Source("ermaozi/get_subscribe", "main", "subscribe/reachable/v2ray.txt"),
         Source("shabane/kamaji", "master", "hub/tested/merged.txt"),
         Source("shabane/kamaji", "master", "hub/best.txt"),
         Source("4n0nymou3/multi-proxy-config-fetcher", "main", "configs/proxy_configs_tested.txt"),
@@ -265,14 +277,24 @@ object PublicConfigs {
         Source("iampedii/whitedns-sub", "main", "base64.txt"),
         Source("v2FreeHub/v2hub-configs", "main", "Sub-AutoUpdate"),
         Source("Mahdi0024/ProxyCollector", "master", "sub/proxies.txt"),
+        Source("MahanKenway/Freedom-V2Ray", "main", "configs/reality.txt"),
+        Source("MahanKenway/Freedom-V2Ray", "main", "configs/mix.txt"),
+        Source("nikita29a/FreeProxyList", "main", "mirror/1.txt"),
+        Source("nikita29a/FreeProxyList", "main", "mirror/2.txt"),
+        Source("FLAT447/v2ray-lists", "main", "WHITE_LITE.txt"),
+        Source("FLAT447/v2ray-lists", "main", "BLACK_FULL.txt"),
+        Source("10ium/V2rayCollector", "main", "mixed_iran.txt"),
+        Source("10ium/V2rayCollector", "main", "vless_iran.txt"),
+        Source("HoomanParsaei/V2rayCollector", "main", "mixed_iran.txt"),
+        Source("Use4Free/V2rayCollector", "main", "mixed_iran.txt"),
+        Source("kaveh-ahangar/V2rayCollector", "main", "mixed_iran.txt"),
         // Hysteria2 and WireGuard, the sorts that carry UDP natively.
-        Source("0xRadikal/Free-v2ray-Configs", "main", "protocols/hysteria2.txt"),
         Source("sakha1370/OpenRay", "main", "output/kind/hysteria2.txt"),
         Source("Argh94/V2RayAutoConfig", "main", "configs/Hysteria2.txt"),
         Source("Argh94/V2RayAutoConfig", "main", "configs/WireGuard.txt"),
         Source("MohammadBahemmat/V2ray-Collector", "main", "servers/hysteria2_servers.txt"),
         Source("Surfboardv2ray/TGParse", "main", "python/hysteria2"),
-        // Tier 2: Active Iranian & global GitHub aggregators.
+        // Tier 2: Active Iranian & anti-censorship GitHub aggregators.
         Source("itsyebekhe/PSG", "main", "subscriptions/xray/mix"),
         Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/mix"),
         Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/reality"),
@@ -283,16 +305,12 @@ object PublicConfigs {
         Source("Surfboardv2ray/TGParse", "main", "configtg.txt"),
         Source("Surfboardv2ray/Proxy-sorter", "main", "submerge/converted.txt"),
         Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/all.txt"),
-        Source("peasoft/NoMoreWalls", "master", "list_raw.txt"),
         Source("lagzian/SS-Collector", "main", "configs/psg/mix.txt"),
         Source("lagzian/SS-Collector", "main", "configs/psg/reality.txt"),
-        Source("roosterkid/openproxylist", "main", "V2RAY_RAW.txt"),
-        Source("Leon406/SubCrawler", "main", "sub/share/a11"),
         Source("miladtahanian/V2RayCFGDumper", "main", "sub.txt"),
         Source("miladtahanian/Config-Collector", "main", "mixed_iran.txt"),
         Source("liketolivefree/kobabi", "main", "sub.txt"),
         Source("V2RayRoot/V2RayConfig", "main", "Config/vless.txt"),
-        Source("snakem982/proxypool", "main", "source/v2ray-2.txt"),
         Source("igareck/vpn-configs-for-russia", "main", "BLACK_VLESS_RUS.txt"),
         Source("Delta-Kronecker/V2ray-Config", "main", "config/new.txt"),
         Source("Delta-Kronecker/V2ray-Config", "main", "config/tcp-pass/reality.txt"),
@@ -305,25 +323,80 @@ object PublicConfigs {
         Source("R3ZARAHIMI/tg-v2ray-configs-every2h", "main", "Config_no_cf.txt"),
         Source("R3ZARAHIMI/tg-v2ray-configs-every2h", "main", "Original-Configs.txt"),
         Source("DukeMehdi/FreeList-V2ray-Configs", "main", "Configs/Lite-DukeMehdi-Configs.txt"),
-        Source("MahanKenway/Freedom-V2Ray", "main", "configs/mix.txt"),
-        Source("morpheusadam/v2ray-config", "main", "subs/bundles/iran.txt"),
-        Source("morpheusadam/v2ray-config", "main", "subs/bundles/reality.txt"),
         Source("mohamadfg-dev/telegram-v2ray-configs-collector", "main", "category/vless.txt"),
         Source("mohamadfg-dev/telegram-v2ray-configs-collector", "main", "category/tcp.txt"),
         Source("ALIILAPRO/v2rayNG-Config", "main", "server.txt"),
         Source("iboxz/free-v2ray-collector", "main", "main/mix.txt"),
         Source("Mosifree/-FREE2CONFIG", "main", "Reality"),
         Source("therealaleph/Iran-configs", "main", "ir_configs.txt"),
-        Source("mahdibland/ShadowsocksAggregator", "master", "Eternity.txt"),
-        Source("mahdibland/ShadowsocksAggregator", "master", "EternityAir.txt"),
-        Source("mfuu/v2ray", "master", "sub"),
-        Source("aiboboxx/v2rayfree", "main", "sub"),
-        Source("ripaojiedian/freenode", "main", "sub"),
-        Source("Pawdroid/Free-servers", "main", "sub"),
-        Source("Ruk1ng001/freeSub", "main", "v2ray"),
-        Source("ermaozi/get_subscribe", "main", "subscribe/v2ray.txt"),
-        // Tier 3: Active public Telegram channels scraped directly via t.me/s/.
+        Source("SoliSpirit/v2ray-configs", "main", "Protocols/vless.txt"),
+        Source("SoliSpirit/v2ray-configs", "main", "Protocols/trojan.txt"),
+        Source("SoliSpirit/v2ray-configs", "main", "Protocols/ss.txt"),
+        // Tier 3: Active public Telegram channels scraped directly via t.me/s/ (REALITY, XHTTP, HY2, WireGuard).
+        Source("t.me", "s", "V2rayConfigList", directUrl = "https://t.me/s/V2rayConfigList"),
+        Source("t.me", "s", "FilterShekanPRO", directUrl = "https://t.me/s/FilterShekanPRO"),
+        Source("t.me", "s", "outlineOpenKey", directUrl = "https://t.me/s/outlineOpenKey"),
+        Source("t.me", "s", "allproconf", directUrl = "https://t.me/s/allproconf"),
+        Source("t.me", "s", "oneclickvpnkeys", directUrl = "https://t.me/s/oneclickvpnkeys"),
+        Source("t.me", "s", "exclaveVPN", directUrl = "https://t.me/s/exclaveVPN"),
+        Source("t.me", "s", "v2ray_extractor", directUrl = "https://t.me/s/v2ray_extractor"),
+        Source("t.me", "s", "ConfigWireguard", directUrl = "https://t.me/s/ConfigWireguard"),
+        Source("t.me", "s", "tube_vpn", directUrl = "https://t.me/s/tube_vpn"),
+        Source("t.me", "s", "V2raysCollector", directUrl = "https://t.me/s/V2raysCollector"),
+        Source("t.me", "s", "free_vpn95", directUrl = "https://t.me/s/free_vpn95"),
+        Source("t.me", "s", "sharecentrepro", directUrl = "https://t.me/s/sharecentrepro"),
+        Source("t.me", "s", "AstracatUI", directUrl = "https://t.me/s/AstracatUI"),
         Source("t.me", "s", "persianvpnhub", directUrl = "https://t.me/s/persianvpnhub"),
+        Source("t.me", "s", "raydikalx", directUrl = "https://t.me/s/raydikalx"),
+        Source("t.me", "s", "proconf1", directUrl = "https://t.me/s/proconf1"),
+        Source("t.me", "s", "outline_open_keys", directUrl = "https://t.me/s/outline_open_keys"),
+        Source("t.me", "s", "v2rayfreeserver", directUrl = "https://t.me/s/v2rayfreeserver"),
+        Source("t.me", "s", "dalton_ping", directUrl = "https://t.me/s/dalton_ping"),
+        Source("t.me", "s", "narcod_ping", directUrl = "https://t.me/s/narcod_ping"),
+        Source("t.me", "s", "easy_free_vpn", directUrl = "https://t.me/s/easy_free_vpn"),
+        Source("t.me", "s", "free_nettm", directUrl = "https://t.me/s/free_nettm"),
+        Source("t.me", "s", "halonetvpn", directUrl = "https://t.me/s/halonetvpn"),
+        Source("t.me", "s", "kian_vpn", directUrl = "https://t.me/s/kian_vpn"),
+        Source("t.me", "s", "overvpn", directUrl = "https://t.me/s/overvpn"),
+        Source("t.me", "s", "netiva_ir", directUrl = "https://t.me/s/netiva_ir"),
+        Source("t.me", "s", "v_2rey", directUrl = "https://t.me/s/v_2rey"),
+        Source("t.me", "s", "awlix_ir", directUrl = "https://t.me/s/awlix_ir"),
+        Source("t.me", "s", "azaranv2ray", directUrl = "https://t.me/s/azaranv2ray"),
+        Source("t.me", "s", "reality_daily", directUrl = "https://t.me/s/reality_daily"),
+        Source("t.me", "s", "iSeqaro", directUrl = "https://t.me/s/iSeqaro"),
+        Source("t.me", "s", "God_CONFIG", directUrl = "https://t.me/s/God_CONFIG"),
+        Source("t.me", "s", "AliAlma_GSM", directUrl = "https://t.me/s/AliAlma_GSM"),
+        Source("t.me", "s", "vpnmasi", directUrl = "https://t.me/s/vpnmasi"),
+        Source("t.me", "s", "v2ray_ar", directUrl = "https://t.me/s/v2ray_ar"),
+        Source("t.me", "s", "v2_vmess", directUrl = "https://t.me/s/v2_vmess"),
+        Source("t.me", "s", "FreeVlessVpn", directUrl = "https://t.me/s/FreeVlessVpn"),
+        Source("t.me", "s", "freeland8", directUrl = "https://t.me/s/freeland8"),
+        Source("t.me", "s", "vmess_vless_v2rayng", directUrl = "https://t.me/s/vmess_vless_v2rayng"),
+        Source("t.me", "s", "ShadowsocksM", directUrl = "https://t.me/s/ShadowsocksM"),
+        Source("t.me", "s", "safeNet4All", directUrl = "https://t.me/s/safeNet4All"),
+        Source("t.me", "s", "v2raying", directUrl = "https://t.me/s/v2raying"),
+        Source("t.me", "s", "shadowproxy66", directUrl = "https://t.me/s/shadowproxy66"),
+        Source("t.me", "s", "ViProxys", directUrl = "https://t.me/s/ViProxys"),
+        Source("t.me", "s", "v2ray_free_conf", directUrl = "https://t.me/s/v2ray_free_conf"),
+        Source("t.me", "s", "meli_proxyy", directUrl = "https://t.me/s/meli_proxyy"),
+        Source("t.me", "s", "heyatserver", directUrl = "https://t.me/s/heyatserver"),
+        Source("t.me", "s", "DailyV2RY", directUrl = "https://t.me/s/DailyV2RY"),
+        Source("t.me", "s", "orange_vpns", directUrl = "https://t.me/s/orange_vpns"),
+        Source("t.me", "s", "VmessProtocol", directUrl = "https://t.me/s/VmessProtocol"),
+        Source("t.me", "s", "prrofile_purple", directUrl = "https://t.me/s/prrofile_purple"),
+        Source("t.me", "s", "vpnfail_vless", directUrl = "https://t.me/s/vpnfail_vless"),
+        Source("t.me", "s", "IP_CF_Config", directUrl = "https://t.me/s/IP_CF_Config"),
+        Source("t.me", "s", "configfa", directUrl = "https://t.me/s/configfa"),
+        Source("t.me", "s", "golestan_vpn", directUrl = "https://t.me/s/golestan_vpn"),
+        Source("t.me", "s", "redfree8", directUrl = "https://t.me/s/redfree8"),
+        Source("t.me", "s", "v2ray_fark", directUrl = "https://t.me/s/v2ray_fark"),
+        Source("t.me", "s", "azadinett", directUrl = "https://t.me/s/azadinett"),
+        Source("t.me", "s", "dnet_vpn", directUrl = "https://t.me/s/dnet_vpn"),
+        Source("t.me", "s", "mainv2ray", directUrl = "https://t.me/s/mainv2ray"),
+        Source("t.me", "s", "shadownet021", directUrl = "https://t.me/s/shadownet021"),
+        Source("t.me", "s", "spdnet", directUrl = "https://t.me/s/spdnet"),
+        Source("t.me", "s", "freemelinet", directUrl = "https://t.me/s/freemelinet"),
+        Source("t.me", "s", "v2rayng_account_free", directUrl = "https://t.me/s/v2rayng_account_free"),
         Source("t.me", "s", "ConfigsHub", directUrl = "https://t.me/s/ConfigsHub"),
         Source("t.me", "s", "v2ray_configs_pools", directUrl = "https://t.me/s/v2ray_configs_pools"),
         Source("t.me", "s", "SOSkeyNET", directUrl = "https://t.me/s/SOSkeyNET"),
@@ -341,7 +414,6 @@ object PublicConfigs {
         Source("t.me", "s", "customv2ray", directUrl = "https://t.me/s/customv2ray"),
         Source("t.me", "s", "DigiV2ray", directUrl = "https://t.me/s/DigiV2ray"),
         Source("t.me", "s", "DirectVPN", directUrl = "https://t.me/s/DirectVPN"),
-        Source("t.me", "s", "Easy_Free_VPN", directUrl = "https://t.me/s/Easy_Free_VPN"),
         Source("t.me", "s", "EliV2ray", directUrl = "https://t.me/s/EliV2ray"),
         Source("t.me", "s", "FreakConfig", directUrl = "https://t.me/s/FreakConfig"),
         Source("t.me", "s", "free4allVPN", directUrl = "https://t.me/s/free4allVPN"),
@@ -356,7 +428,6 @@ object PublicConfigs {
         Source("t.me", "s", "Network_442", directUrl = "https://t.me/s/Network_442"),
         Source("t.me", "s", "new_proxy_channel", directUrl = "https://t.me/s/new_proxy_channel"),
         Source("t.me", "s", "nim_vpn_ir", directUrl = "https://t.me/s/nim_vpn_ir"),
-        Source("t.me", "s", "oneclickvpnkeys", directUrl = "https://t.me/s/oneclickvpnkeys"),
         Source("t.me", "s", "OutlineVpnOfficial", directUrl = "https://t.me/s/OutlineVpnOfficial"),
         Source("t.me", "s", "PrivateVPNs", directUrl = "https://t.me/s/PrivateVPNs"),
         Source("t.me", "s", "proxy_hiddfy", directUrl = "https://t.me/s/proxy_hiddfy"),
@@ -389,7 +460,22 @@ object PublicConfigs {
         Source("t.me", "s", "v2ray_outlineir", directUrl = "https://t.me/s/v2ray_outlineir"),
         Source("t.me", "s", "vpn_ocean", directUrl = "https://t.me/s/vpn_ocean"),
         Source("t.me", "s", "WetConfig", directUrl = "https://t.me/s/WetConfig"),
-        // Tier 4: Large pools, read when the short/verified sources above are not enough.
+        // Tier 4: Large & global pools, read when the short/verified sources above are not enough.
+        Source("ermaozi/get_subscribe", "main", "subscribe/reachable/v2ray.txt", small = false),
+        Source("ermaozi/get_subscribe", "main", "subscribe/v2ray.txt", small = false),
+        Source("roosterkid/openproxylist", "main", "V2RAY_RAW.txt", small = false),
+        Source("Leon406/SubCrawler", "main", "sub/share/a11", small = false),
+        Source("peasoft/NoMoreWalls", "master", "list_raw.txt", small = false),
+        Source("snakem982/proxypool", "main", "source/v2ray-2.txt", small = false),
+        Source("mahdibland/ShadowsocksAggregator", "master", "Eternity.txt", small = false),
+        Source("mahdibland/ShadowsocksAggregator", "master", "EternityAir.txt", small = false),
+        Source("mfuu/v2ray", "master", "sub", small = false),
+        Source("aiboboxx/v2rayfree", "main", "sub", small = false),
+        Source("ripaojiedian/freenode", "main", "sub", small = false),
+        Source("Pawdroid/Free-servers", "main", "sub", small = false),
+        Source("Ruk1ng001/freeSub", "main", "v2ray", small = false),
+        Source("0xRadikal/Free-v2ray-Configs", "main", "all/configs.txt", small = false),
+        Source("0xRadikal/Free-v2ray-Configs", "main", "heavy/configs.txt", small = false),
         Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/cdn", small = false),
         Source("mahdibland/ShadowsocksAggregator", "master", "sub/sub_merge_base64.txt", small = false),
         Source("mahdibland/ShadowsocksAggregator", "master", "sub/airport_sub_merge.txt", small = false),
@@ -400,9 +486,6 @@ object PublicConfigs {
         Source("mahdibland/V2RayAggregator", "master", "sub/sub_merge.txt", small = false),
         Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/v2ray/all_sub.txt", small = false),
         Source("Barabama/FreeNodes", "main", "nodes/merged.txt", small = false),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "protocols/vless.txt", small = false),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "protocols/trojan.txt", small = false),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "protocols/shadowsocks.txt", small = false),
         Source("SoliSpirit/v2ray-configs", "main", "all_configs.txt", small = false),
         Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub10.txt", small = false),
         Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub11.txt", small = false),
@@ -425,7 +508,6 @@ object PublicConfigs {
         Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub14.txt", small = false),
         Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub15.txt", small = false),
         Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub16.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Protocols/vless.txt", small = false),
         Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/vless.txt", small = false),
         Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/trojan.txt", small = false),
         Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/ss.txt", small = false),
@@ -488,13 +570,25 @@ object PublicConfigs {
             } else null
         } else emptyList()
 
-        return (extraGh + extraUrls + SOURCES)
+        val base = (extraGh + extraUrls + SOURCES)
             .filter { it.small == small }
             .filterNot { src ->
                 val addr = src.address.lowercase()
                 disabled.any { addr.contains(it) }
             }
             .distinctBy { it.address }
+        if (!small) return base
+        // Interleave Tier 1/2 GitHub sources with shuffled Telegram channels so t.me/s/
+        // channels always run in the first concurrent batch instead of waiting behind 100+ repos.
+        val gh = base.filterNot { it.isTelegram }
+        val tg = base.filter { it.isTelegram }.shuffled()
+        val interleaved = ArrayList<Source>(base.size)
+        val maxSize = maxOf(gh.size, tg.size)
+        for (i in 0 until maxSize) {
+            if (i < gh.size) interleaved.add(gh[i])
+            if (i < tg.size) interleaved.add(tg[i])
+        }
+        return interleaved
     }
 
     /** Cloudflare's published IPv4 ranges, as address and prefix length. */
@@ -634,8 +728,34 @@ object PublicConfigs {
     }
 
     /**
+     * Scores a parsed link by anti-censorship resilience and transport quality so
+     * REALITY, XHTTP, Hysteria2 (+Salamander), WireGuard, gRPC, and SS-2022 are
+     * tested and chosen ahead of overloaded plain WS/legacy configs.
+     */
+    internal fun qualityScore(link: Link): Int {
+        val raw = link.raw.lowercase()
+        return when (link.kind) {
+            Kind.Vless -> when {
+                "security=reality" in raw -> {
+                    100 + (if ("type=xhttp" in raw || "type=grpc" in raw || "flow=xtls-rprx-vision" in raw) 5 else 0)
+                }
+                "type=xhttp" in raw -> 95
+                "type=grpc" in raw -> 80
+                link.direct -> 68
+                else -> 64
+            }
+            Kind.Hysteria -> if ("obfs=salamander" in raw) 96 else 90
+            Kind.WireGuard -> if ("reserved=" in raw || "fm=" in raw || "finalmask=" in raw) 90 else 86
+            Kind.Trojan -> if (link.direct || "type=grpc" in raw) 76 else 60
+            Kind.Shadowsocks -> if ("2022-blake3-" in raw) 74 else 45
+            Kind.Vmess -> if (link.direct) 52 else 35
+        }
+    }
+
+    /**
      * The safe links of the wanted [kinds] in [lines], each server once (and none that is in
-     * [seen] already), the sorts taken in turn so that no sort crowds the others out.
+     * [seen] already), ranked by anti-censorship strength within each sort and taken in turn
+     * so that no sort crowds the others out.
      */
     internal fun select(
         lines: Sequence<String>,
@@ -647,6 +767,7 @@ object PublicConfigs {
         val byKind = lines.mapNotNull { parse(it) }
             .filter { it.kind in kinds && (!game || it.direct) && seen.add("${it.kind}|${it.host.lowercase()}|${it.port}") }
             .groupBy { it.kind }
+            .mapValues { (_, list) -> list.sortedByDescending { qualityScore(it) } }
         val longest = byKind.values.maxOfOrNull { it.size } ?: 0
         return (0 until longest).flatMap { index -> byKind.values.mapNotNull { it.getOrNull(index) } }
     }
@@ -795,7 +916,9 @@ object PublicConfigs {
         val finishedSources = java.util.Collections.synchronizedSet(HashSet<String>())
         val completedTasks = AtomicInteger(0)
         val answeredCount = AtomicInteger(0)
+        val telegramAnswered = AtomicInteger(0)
         val totalLinks = AtomicInteger(0)
+        val hasTelegramSources = sources.any { it.isTelegram }
         val rawGithubFailures = AtomicInteger(0)
         val rawGithubSuccesses = AtomicInteger(0)
         val startedAt = System.currentTimeMillis()
@@ -851,7 +974,10 @@ object PublicConfigs {
                     }
                     finishedSources.add(source.address)
                     results.add(item)
-                    if (item.second) answeredCount.incrementAndGet()
+                    if (item.second) {
+                        answeredCount.incrementAndGet()
+                        if (source.isTelegram) telegramAnswered.incrementAndGet()
+                    }
                     totalLinks.addAndGet(item.first.size)
                     completedTasks.incrementAndGet()
                 }
@@ -860,8 +986,9 @@ object PublicConfigs {
             while (completedTasks.get() < sources.size && System.currentTimeMillis() < deadline) {
                 if (cancelled?.get() == true) break
                 val elapsed = System.currentTimeMillis() - startedAt
-                if (minLinksDesired < Int.MAX_VALUE && elapsed >= 2000L &&
-                    answeredCount.get() >= 18 && totalLinks.get() >= minLinksDesired
+                val enoughTelegram = !hasTelegramSources || telegramAnswered.get() >= 6 || elapsed >= 8_000L
+                if (minLinksDesired < Int.MAX_VALUE && elapsed >= 2500L &&
+                    answeredCount.get() >= 28 && enoughTelegram && totalLinks.get() >= minLinksDesired
                 ) {
                     break
                 }
@@ -1561,12 +1688,9 @@ object PublicConfigs {
                                 ) {
                                     0
                                 } else {
-                                    // probeFast measures speed and falls back to HTTP 204 reachability.
-                                    // If all speed/204 payload URLs are blocked on this network yet
-                                    // Xray measureOutboundDelay already succeeded for a TCP/TLS sort,
-                                    // keep the config instead of discarding a working proxy.
-                                    AutoConfigTest.probeFast(context, guid, verifyTimeoutMs)
-                                        ?: if (!link.kind.udp) 1 else 0
+                                    // probeFast measures real payload transfer and falls back to HTTP 204 reachability.
+                                    // Never admit a proxy that fails both real transfer and 204 reachability.
+                                    AutoConfigTest.probeFast(context, guid, verifyTimeoutMs) ?: 0
                                 }
                             }
                             done.incrementAndGet()

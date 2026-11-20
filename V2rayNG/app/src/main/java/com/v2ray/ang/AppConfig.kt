@@ -274,7 +274,7 @@ object AppConfig {
     const val ROOT_OOM_SCORE = "-1000"          // oom_score_adj that makes the LMK never kill us
 
     /** hev-sock5-tunnel read-write-timeout value */
-    const val HEVTUN_RW_TIMEOUT = "300,60"
+    const val HEVTUN_RW_TIMEOUT = "600,180"
 
     // Google API rule constants
     const val GOOGLEAPIS_CN_DOMAIN = "domain:googleapis.cn"

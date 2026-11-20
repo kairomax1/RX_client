@@ -21,8 +21,10 @@ import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.OutboundTrafficStat
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.BrowserDialerMode
+import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.FragmentVpn
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.NotificationManager
@@ -79,6 +81,7 @@ object CoreServiceManager {
         "https://www.gstatic.com/generate_204",
         "https://connectivitycheck.gstatic.com/generate_204",
         "https://detectportal.firefox.com/success.txt",
+        "https://www.apple.com/library/test/success.html",
     )
 
     /** A short rest before a moved-to config is raised, so the old tunnel is really gone. */
@@ -279,7 +282,10 @@ object CoreServiceManager {
         // The app's own ways of reaching the internet are not watched: moving
         // away from one of them would change what the phone is doing, not only
         // where it does it.
-        if (guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))) return
+        if (guid == FIREFOX_VPN_GUID ||
+            FragmentVpn.isFragmentProfile(guid) ||
+            AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))
+        ) return
         // Asked for, this is; imposed, it is not. The switch in the settings is
         // there for a phone or a network where a config is better left alone.
         if (!SettingsManager.isAutoFailoverEnabled()) {
@@ -306,17 +312,28 @@ object CoreServiceManager {
                 }
                 if (verdict == Verdict.Unreachable) continue
                 misses++
+                if (misses == 2) {
+                    // Try one quiet in-place recovery before failing over or dropping:
+                    // for WireGuard, escalate MTU/noise anti-DPI if carrier started dropping data.
+                    if (currentConfig?.configType == EConfigType.WIREGUARD) {
+                        CoreOutboundBuilder.nextWgFallbackMode(guid)?.let { nextWg ->
+                            CoreOutboundBuilder.rememberWgMode(guid, nextWg)
+                            AppLog.info(AppLog.Section.Connection, "WireGuard tunnel stalled; stepping up to ${nextWg.key}")
+                        }
+                    }
+                    reloadCore()
+                    continue
+                }
                 if (misses < WATCH_MISSES_BEFORE_MOVING) continue
                 // The config answered nothing three times while the phone itself was
-                // online: it is gone. Another one of its group is taken.
+                // online: try another one of its group, or keep reloading in place
+                // so a single-server user never loses the VPN during transient drops.
                 val next = nextConfigAfter(guid)
                 if (next == null) {
-                    AppLog.error(AppLog.Section.Connection, "The config stopped answering and there is no other one left in its group; stopping")
-                    val control = serviceControl?.get()
-                    CoroutineScope(Dispatchers.Default).launch {
-                        control?.stopService()
-                    }
-                    return@launch
+                    AppLog.info(AppLog.Section.Connection, "Config stalled and no alternative in group; keeping tunnel alive and reloading")
+                    misses = 1
+                    reloadCore()
+                    continue
                 }
                 AppLog.info(AppLog.Section.Connection, "The config stopped answering; another one of its group is taken")
                 misses = 0
@@ -382,7 +399,11 @@ object CoreServiceManager {
     private fun nextConfigAfter(guid: String): String? {
         val group = currentConfig?.subscriptionId.orEmpty()
         val guids = (if (group.isEmpty()) MmkvManager.decodeAllServerList() else MmkvManager.decodeServerList(group))
-            .filter { it != FIREFOX_VPN_GUID && !AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(it)) }
+            .filter {
+                it != FIREFOX_VPN_GUID &&
+                    !FragmentVpn.isFragmentProfile(it) &&
+                    !AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(it))
+            }
         return Failover.next(guid, guids) { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }
     }
 
@@ -471,7 +492,24 @@ object CoreServiceManager {
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload start...")
 
             coreController.stopLoop()
-            launchCore(service, tunFd, isReload = true)
+            // Allow Xray to release its local SOCKS port (10808) cleanly before rebinding.
+            Thread.sleep(250L)
+
+            val retryDelays = longArrayOf(0L, 1_200L, 2_000L, 3_000L)
+            var lastError: Exception? = null
+            for (delayMs in retryDelays) {
+                if (serviceControl?.get() == null) break
+                if (delayMs > 0L) Thread.sleep(delayMs)
+                try {
+                    launchCore(service, tunFd, isReload = true)
+                    lastError = null
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                    LogUtil.w(AppConfig.TAG, "StartCore-Manager: Reload attempt failed (${e.message}), retrying...")
+                }
+            }
+            if (lastError != null) throw lastError
 
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload finished")
             true

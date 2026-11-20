@@ -18,6 +18,7 @@ import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.RemoteControl
 import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.FragmentVpn
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.util.HttpUtil
@@ -37,11 +38,15 @@ object CoreConfigManager {
      * Build the runtime configuration for normal startup.
      */
     fun getV2rayConfig(context: Context, guid: String): ConfigResult = synchronized(tuningBuildLock) {
+        if (FragmentVpn.isFragmentProfile(guid)) {
+            return FragmentVpn.buildXrayConfigResult(context, forSpeedtest = false)
+        }
         // Mux and fragment are one set of settings that the core reads while it
         // builds an outbound, so they have to be the ones this config was
         // measured with. Setting them here means a config change can never be
         // connected with the previous config's answer.
         Tuning.applyFor(guid)
+        CoreOutboundBuilder.applyWgModeFor(guid)
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
                 ?: return ConfigResult(
@@ -72,11 +77,20 @@ object CoreConfigManager {
         context: Context,
         guid: String,
         tuningOverride: Tuning.Choice? = null,
+        wgModeOverride: CoreOutboundBuilder.WireguardMode? = null,
     ): ConfigResult = synchronized(tuningBuildLock) {
+        if (FragmentVpn.isFragmentProfile(guid)) {
+            return FragmentVpn.buildXrayConfigResult(context, forSpeedtest = true)
+        }
         if (tuningOverride != null) {
             Tuning.apply(tuningOverride)
         } else {
             Tuning.applyFor(guid)
+        }
+        if (wgModeOverride != null) {
+            CoreOutboundBuilder.applyWgMode(wgModeOverride)
+        } else {
+            CoreOutboundBuilder.applyWgModeFor(guid)
         }
         try {
             val configContext = CoreConfigContextBuilder.build(context, guid)
@@ -473,6 +487,33 @@ object CoreConfigManager {
      * Trim runtime sections that are not needed for latency testing.
      */
     private fun postProcessForSpeedtest(v2rayConfig: V2rayConfig) {
+        // Resolve WireGuard peer endpoint domains before wiping dns.hosts so speedtest
+        // does not fall back to poisoned ISP DNS when dialing endpoint domains.
+        val dnsHosts = v2rayConfig.dns?.hosts
+        val preferIpv6 = MmkvManager.decodeSettingsBool(AppConfig.PREF_PREFER_IPV6) == true
+        v2rayConfig.outbounds.forEach { ob ->
+            if (ob.protocol.equals(EConfigType.WIREGUARD.name, ignoreCase = true)) {
+                ob.settings?.peers?.forEach { peer ->
+                    val ep = peer.endpoint.trim()
+                    val lastColon = ep.lastIndexOf(':')
+                    val closeBracket = ep.lastIndexOf(']')
+                    if (lastColon > 0 && (closeBracket < 0 || lastColon > closeBracket)) {
+                        val host = ep.substring(0, lastColon).trim().removeSurrounding("[", "]")
+                        val port = ep.substring(lastColon + 1).trim()
+                        if (host.isNotEmpty() && !Utils.isPureIpAddress(host)) {
+                            val mapped = when (val entry = dnsHosts?.get(host)) {
+                                is String -> entry
+                                is List<*> -> entry.firstOrNull() as? String
+                                else -> null
+                            } ?: HttpUtil.resolveHostToIP(HttpUtil.toIdnDomain(host), preferIpv6)?.firstOrNull()
+                            if (!mapped.isNullOrBlank()) {
+                                peer.endpoint = "${Utils.getIpv6Address(mapped)}:$port"
+                            }
+                        }
+                    }
+                }
+            }
+        }
         v2rayConfig.log.loglevel = MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
         v2rayConfig.inbounds.clear()
         v2rayConfig.routing.rules.clear()

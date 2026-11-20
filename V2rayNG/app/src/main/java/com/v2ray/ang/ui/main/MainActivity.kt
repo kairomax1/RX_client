@@ -264,6 +264,7 @@ class MainActivity : HelperBaseComponentActivity() {
             MainDestination.BackupRestore -> Intent(this, BackupActivity::class.java)
             MainDestination.XboxDns -> Intent(this, com.v2ray.ang.ui.xboxdns.XboxDnsActivity::class.java)
             MainDestination.FirefoxVpn -> Intent(this, com.v2ray.ang.ui.firefoxvpn.FirefoxVpnActivity::class.java)
+            MainDestination.FragmentVpn -> Intent(this, com.v2ray.ang.ui.fragmentvpn.FragmentVpnActivity::class.java)
             MainDestination.Log -> Intent(this, com.v2ray.ang.ui.applog.AppLogActivity::class.java)
             MainDestination.About -> Intent(this, AboutActivity::class.java)
         }

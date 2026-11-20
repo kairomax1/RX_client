@@ -264,12 +264,31 @@ object AetherEngine {
                     writeStatus(context, Status(Phase.Failed))
                     return
                 }
-                // Stay here while the engine lives; it reconnects by itself after a drop.
-                winner.process.waitFor()
+                // Keep checking whether the winning engine still carries traffic so a
+                // silent stall on a carrier triggers a fresh route search automatically.
+                var stallMisses = 0
+                var probeIdx = 0
+                while (!stopped() && winner.process.isRunning()) {
+                    Thread.sleep(30_000L)
+                    if (stopped() || !winner.process.isRunning()) break
+                    if (!isNetworkOnline(context)) {
+                        stallMisses = 0
+                        continue
+                    }
+                    val host = PROBE_HOSTS[probeIdx++ % PROBE_HOSTS.size]
+                    if (carriesTraffic(winner.port, host) >= 0) {
+                        stallMisses = 0
+                    } else if (++stallMisses >= 3) {
+                        AppLog.error(Section.Aether, "${winner.route.label}: tunnel stopped carrying traffic; searching for a fresh route")
+                        Relay.target = 0
+                        kill(winner)
+                        break
+                    }
+                }
                 Relay.target = 0
                 candidates.remove(winner)
                 if (stopped()) return
-                AppLog.error(Section.Aether, "Engine stopped while connected (${winner.lastWords()}); searching again")
+                AppLog.info(Section.Aether, "Engine stopped or stalled while connected (${winner.lastWords()}); searching again")
             }
         } catch (_: InterruptedException) {
             // Stopped on purpose.
@@ -687,7 +706,9 @@ object AetherEngine {
             try {
                 engine.connect(InetSocketAddress(HOST, port), 2000)
                 client.tcpNoDelay = true
+                client.keepAlive = true
                 engine.tcpNoDelay = true
+                engine.keepAlive = true
                 val back = pool.submit(Runnable { pump(engine, client) })
                 pump(client, engine)
                 runCatching { back.get() }
@@ -843,6 +864,18 @@ object AetherEngine {
         }
     } catch (e: Exception) {
         "other"
+    }
+
+    private fun isNetworkOnline(context: Context): Boolean = try {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectivity.allNetworks
+            .mapNotNull { connectivity.getNetworkCapabilities(it) }
+            .any {
+                !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+    } catch (_: Exception) {
+        true
     }
 
     private fun Process.isRunning(): Boolean = try {

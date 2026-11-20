@@ -3,6 +3,7 @@ package com.v2ray.ang.service
 import android.content.Context
 import com.v2ray.ang.core.CoreConfigManager
 import com.v2ray.ang.core.CoreNativeManager
+import com.v2ray.ang.core.CoreOutboundBuilder
 import com.v2ray.ang.dto.RealPingEvent
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isComplexType
@@ -180,6 +181,27 @@ class RealPingWorkerService(
                 }
             }
             Tuning.forget(guid)
+        }
+        if (config.configType == EConfigType.WIREGUARD) {
+            val currentMode = CoreOutboundBuilder.wgModeFor(guid)
+            val candidates = CoreOutboundBuilder.WireguardMode.entries.filter { it != currentMode }
+            for (mode in candidates) {
+                val built = CoreConfigManager.getV2rayConfig4Speedtest(context, guid, wgModeOverride = mode)
+                if (!built.status) continue
+                delay(150)
+                val bypassed = RealPingExecutionLimiter.run(config.configType) {
+                    CoreNativeManager.measureOutboundDelay(built.content, delayTestUrl)
+                }
+                if (bypassed > 0L) {
+                    CoreOutboundBuilder.rememberWgMode(guid, mode)
+                    Tuning.clearUnbypassable(guid)
+                    AppLog.info(
+                        AppLog.Section.Connection,
+                        "WireGuard bypassed -1ms (${config.remarks}) using ${mode.key} (${bypassed}ms)",
+                    )
+                    return bypassed
+                }
+            }
         }
         Tuning.markUnbypassable(guid)
         return retFailure

@@ -55,6 +55,7 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     XboxDns(R.drawable.ic_search_24dp, R.string.xbox_dns_title),
     PublicConfigs(R.drawable.ic_cloud_download_24dp, R.string.public_title),
     FirefoxVpn(R.drawable.rx_fox_badge, R.string.firefox_vpn_title),
+    FragmentVpn(R.drawable.ic_fragment_24dp, R.string.fragment_vpn_title),
     Log(R.drawable.ic_logcat_24dp, R.string.drawer_app_log),
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
@@ -66,10 +67,12 @@ internal val quickSheetItems = listOf(
     MainDestination.Routing,
     MainDestination.Settings,
     MainDestination.GamingMode,
+    MainDestination.FragmentVpn,
 )
 
 private val drawerItems = listOf(
     MainDestination.PublicConfigs,
+    MainDestination.FragmentVpn,
     MainDestination.XboxDns,
     MainDestination.FirefoxVpn,
     MainDestination.CheckUpdate,

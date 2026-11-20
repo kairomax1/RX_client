@@ -159,6 +159,9 @@
             android:name=".ui.firefoxvpn.FirefoxVpnActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.fragmentvpn.FragmentVpnActivity"
+            android:exported="false" />
+        <activity
             android:name=".ui.firefoxvpn.FirefoxVpnWebSignInActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden" />

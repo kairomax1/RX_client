@@ -242,6 +242,7 @@ class MainViewModel(
      */
     fun needsTuning(guid: String?): Boolean {
         if (guid == null) return false
+        if (com.v2ray.ang.handler.FragmentVpn.isFragmentProfile(guid)) return false
         val failedBefore = (dataSource.decodeAffiliationInfo(guid)?.testDelayMillis ?: 0L) < 0L
         if (Tuning.currentMode() == Tuning.Mode.NONE) {
             return failedBefore
@@ -454,6 +455,7 @@ class MainViewModel(
         val aetherPossible = AetherEngine.isAvailable(getApplication())
         val guids = dataSource.getServerGuidList(uiState.value.selectedGroupId).filter { guid ->
             guid != FIREFOX_TUNNEL_GUID &&
+                !com.v2ray.ang.handler.FragmentVpn.isFragmentProfile(guid) &&
                 !(aetherPossible && AetherEngine.isAetherProfile(dataSource.decodeServerConfig(guid)))
         }
         val next = Failover.next(
