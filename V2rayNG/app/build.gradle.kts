@@ -41,7 +41,7 @@ android {
         versionCode = (project.findProperty("rx.versionCode") as String?)?.toIntOrNull() ?: 4
         // A tester who checks the phone's Settings screen can tell two builds apart
         // from here on, which is how the version question is settled without a log.
-        versionName = (project.findProperty("rx.versionName") as String?) ?: "1.0.1"
+        versionName = (project.findProperty("rx.versionName") as String?) ?: "1.2"
 
         buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
 

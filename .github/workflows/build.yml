@@ -232,7 +232,7 @@ jobs:
             -Prx.keyAlias="$KEY_ALIAS" \
             -Prx.keyPassword="$KEY_PASSWORD" \
             -Prx.versionCode="$((4000004 + GITHUB_RUN_NUMBER))" \
-            -Prx.versionName="1.0.${GITHUB_RUN_NUMBER}"
+            -Prx.versionName="1.2"
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
