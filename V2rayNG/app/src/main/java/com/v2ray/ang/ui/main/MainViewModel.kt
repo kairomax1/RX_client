@@ -205,13 +205,14 @@ class MainViewModel(
     }
 
     /** What the screen shows while the best mux and fragment settings are looked for. */
-    fun setTuning(phase: TuningRunner.Phase) {
+    fun setTuning(phase: TuningRunner.Phase, mode: Tuning.Mode = Tuning.currentMode()) {
         // The attempt is already under way while the settings are looked for, so
         // the button offers to cancel it and nothing announces a connection that
         // is not there yet.
         _uiState.update {
             it.copy(
                 tuning = phase,
+                tuningMode = mode,
                 connectPhase = when (phase) {
                     TuningRunner.Phase.Searching -> ConnectPhase.Connecting
                     TuningRunner.Phase.Failed -> ConnectPhase.Failed
@@ -235,16 +236,20 @@ class MainViewModel(
 
     /**
      * True when this config's mux and fragment settings have never been measured
-     * here, were measured so long ago that the answer is no longer about this
-     * line, or the config previously failed (`-1ms`) and must verify whether
-     * fragment and mux can bypass the block before connecting.
+     * here (under the active Settings mode), were measured so long ago that the
+     * answer is no longer about this line, or the config previously failed
+     * (`-1ms`) and must verify whether allowed tuning can bypass the block.
      */
-    fun needsTuning(guid: String?): Boolean =
-        guid != null && (
-            Tuning.best(guid) == null ||
-                Tuning.stale(guid) ||
-                (dataSource.decodeAffiliationInfo(guid)?.testDelayMillis ?: 0L) < 0L
-            )
+    fun needsTuning(guid: String?): Boolean {
+        if (guid == null) return false
+        val failedBefore = (dataSource.decodeAffiliationInfo(guid)?.testDelayMillis ?: 0L) < 0L
+        if (Tuning.currentMode() == Tuning.Mode.NONE) {
+            return failedBefore
+        }
+        return Tuning.bestForCurrentMode(guid) == null ||
+            Tuning.stale(guid) ||
+            failedBefore
+    }
 
     /** Selects the built-in Aether profile and connects through it. */
     fun connectAether() {

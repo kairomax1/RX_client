@@ -980,10 +980,25 @@
     <string name="firefox_vpn_err_403">این حساب اجازه ندارد (۴۰۳)</string>
     <string name="firefox_vpn_err_429">سهم این حساب فعلاً تمام شده (۴۲۹)</string>
     <string name="rx_tuning_searching">دارم فرگمنت و موکس رو به بهترین حالتش پیدا می‌کنم</string>
+    <string name="rx_tuning_searching_mux">دارم موکس رو به بهترین حالتش پیدا می‌کنم</string>
+    <string name="rx_tuning_searching_fragment">دارم فرگمنت رو به بهترین حالتش پیدا می‌کنم</string>
     <string name="rx_tuning_done">پیداشون کردم، دارم وصل می‌شم</string>
+    <string name="rx_tuning_done_single">پیداش کردم، دارم وصل می‌شم</string>
     <string name="title_pref_auto_failover">رفتنِ خودکار به کانفیگِ بعدی</string>
     <string name="summary_pref_auto_failover">وقتی کانفیگی که وصل است از کار می‌افتد، برنامه بی‌صدا کانفیگِ دیگری از همان گروه را وصل می‌کند.</string>
     <string name="public_disconnected">اینترنت قطع شد؛ تست کانفیگ‌ها متوقف شد.</string>
     <string name="public_disconnected_saved">حالت آفلاین / قطعی اینترنت — %1$d از %2$d کانفیگ از حافظه و بسته برنامه به فهرست اضافه شد.</string>
     <string name="rx_tuning_failed">با فرگمنت و موکس هم دور نخورد؛ متوقف شد.</string>
+    <string name="rx_tuning_failed_mux">با موکس هم دور نخورد؛ متوقف شد.</string>
+    <string name="rx_tuning_failed_fragment">با فرگمنت هم دور نخورد؛ متوقف شد.</string>
+    <string name="settings_group_fragment_mux">فرگمنت و موکس</string>
+    <string name="settings_group_fragment_mux_desc">مشخص کنید کدام قابلیت روشن یا خاموش باشد؛ یا بر اساس اینترنت فعلی بهترین حالت را اعمال کنید.</string>
+    <string name="summary_pref_fragment_enabled">تکه‌تکه کردن دست‌دادن TLS برای عبور از محدودیت شبکه‌های سخت‌گیر.</string>
+    <string name="settings_apply_best_tuning">اعمال بهترین حالت</string>
+    <string name="settings_best_tuning_hint">بر اساس اینترنت فعلی، بهترین تنظیمات را برای گزینه‌های روشن پیدا و اعمال می‌کند.</string>
+    <string name="settings_best_tuning_offline">اینترنت متصل نیست؛ ابتدا به اینترنت وصل شوید.</string>
+    <string name="settings_best_tuning_applied">بهترین حالت برای %1$s اعمال شد.</string>
+    <string name="settings_best_tuning_applied_ms">بهترین حالت برای %1$s اعمال شد (%2$dms).</string>
+    <string name="settings_network_wifi">وای‌فای</string>
+    <string name="settings_network_cellular">اینترنت موبایل</string>
 </resources>

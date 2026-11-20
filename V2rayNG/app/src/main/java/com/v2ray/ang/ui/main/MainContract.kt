@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.handler.TuningRunner
 
 import com.v2ray.ang.core.AetherEngine
@@ -56,6 +57,7 @@ data class MainUiState(
      * fastest with, so the screen can say why the connection is not up yet.
      */
     val tuning: TuningRunner.Phase = TuningRunner.Phase.Idle,
+    val tuningMode: Tuning.Mode = Tuning.Mode.BOTH,
 )
 
 /**

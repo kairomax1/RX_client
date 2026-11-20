@@ -44,6 +44,8 @@ object AppConfig {
     const val PREF_FRAGMENT_LENGTH = "pref_fragment_length"
     const val PREF_FRAGMENT_INTERVAL = "pref_fragment_interval"
     const val PREF_FRAGMENT_MAXSPLIT = "pref_fragment_maxsplit"
+    const val PREF_RX_FRAGMENT_ENABLED = "pref_rx_fragment_enabled"
+    const val PREF_RX_MUX_ENABLED = "pref_rx_mux_enabled"
     const val PREF_OBSERVATORY_LEAST_PING_INTERVAL = "pref_observatory_least_ping_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_INTERVAL = "pref_observatory_least_load_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_METHOD = "pref_observatory_least_load_method"

@@ -6,20 +6,34 @@ import com.v2ray.ang.enums.Language
 import com.v2ray.ang.ui.compose.SettingsSection
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,10 +41,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,6 +65,7 @@ import com.v2ray.ang.handler.MmkvManager.rememberMmkvString
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.Sharing
 import com.v2ray.ang.handler.SharingGateway
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -111,6 +128,7 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val systemVpnSettingsAvailable by viewModel.systemVpnSettingsAvailable.collectAsStateWithLifecycle()
+    val bestTuningState by viewModel.bestTuningState.collectAsStateWithLifecycle()
     var uiSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     // Kept in storage so the switch stays where the user left it, also after a restart.
     var vpnSettingsExpanded by rememberMmkvBool(AppConfig.PREF_SHOW_DNS_SETTINGS, false)
@@ -178,6 +196,49 @@ fun SettingsScreen(
     var delayTestUrl by rememberMmkvString(AppConfig.PREF_DELAY_TEST_URL, "")
     var realPingConcurrency by rememberMmkvString(AppConfig.PREF_REAL_PING_CONCURRENCY, "16")
     var ipApiUrl by rememberMmkvString(AppConfig.PREF_IP_API_URL, "")
+
+    var fragmentAllowed by rememberMmkvBool(AppConfig.PREF_RX_FRAGMENT_ENABLED, true)
+    var muxAllowed by rememberMmkvBool(AppConfig.PREF_RX_MUX_ENABLED, true)
+    var fragmentPackets by rememberMmkvString(AppConfig.PREF_FRAGMENT_PACKETS, "tlshello")
+    var fragmentLength by rememberMmkvString(AppConfig.PREF_FRAGMENT_LENGTH, "50-100")
+    var fragmentInterval by rememberMmkvString(AppConfig.PREF_FRAGMENT_INTERVAL, "10-20")
+    var fragmentMaxSplit by rememberMmkvString(AppConfig.PREF_FRAGMENT_MAXSPLIT, "10")
+    var muxConcurrency by rememberMmkvString(AppConfig.PREF_MUX_CONCURRENCY, "8")
+    var muxXudpConcurrency by rememberMmkvString(AppConfig.PREF_MUX_XUDP_CONCURRENCY, AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY)
+    var muxXudpQuic by rememberMmkvString(AppConfig.PREF_MUX_XUDP_QUIC, "reject")
+
+    val reloadFragmentMuxFields: () -> Unit = {
+        fragmentPackets = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_PACKETS, "tlshello") ?: "tlshello"
+        fragmentLength = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_LENGTH, "50-100") ?: "50-100"
+        fragmentInterval = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_INTERVAL, "10-20") ?: "10-20"
+        fragmentMaxSplit = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_MAXSPLIT, "10") ?: "10"
+        muxConcurrency = MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_CONCURRENCY, "8") ?: "8"
+        muxXudpConcurrency = MmkvManager.decodeSettingsString(
+            AppConfig.PREF_MUX_XUDP_CONCURRENCY,
+            AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY,
+        ) ?: AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY
+        muxXudpQuic = MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_XUDP_QUIC, "reject") ?: "reject"
+    }
+
+    val vpnPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.applyBestTuning(context, fragmentAllowed, muxAllowed, reloadFragmentMuxFields)
+    }
+
+    val startBestTuning: () -> Unit = {
+        val needsVpnPerm = muxAllowed && mode == VPN && runCatching { VpnService.prepare(context) }.getOrNull() != null
+        val permIntent = if (needsVpnPerm) runCatching { VpnService.prepare(context) }.getOrNull() else null
+        if (permIntent != null) {
+            vpnPermissionLauncher.launch(permIntent)
+        } else {
+            viewModel.applyBestTuning(context, fragmentAllowed, muxAllowed, reloadFragmentMuxFields)
+        }
+    }
+
+    val fragmentPacketsOptions = listOf("tlshello", "1-3", "1-5", "1-2")
+    val muxQuicEntries = listOf("reject", "allow", "skip")
+    val muxQuicValues = listOf("reject", "allow", "skip")
 
     val isVpn = mode == VPN
     val hevTunEnabled = isVpn && useHevTun
@@ -290,10 +351,167 @@ fun SettingsScreen(
             }
 
             SettingsSection(
+                title = stringResource(R.string.settings_group_fragment_mux),
+                description = stringResource(R.string.settings_group_fragment_mux_desc),
+                icon = painterResource(R.drawable.ic_routing_24dp),
+                order = 1
+            ) {
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_fragment_enabled),
+                    summary = stringResource(R.string.summary_pref_fragment_enabled),
+                    checked = fragmentAllowed,
+                    onCheckedChange = { enabled ->
+                        fragmentAllowed = enabled
+                        MmkvManager.encodeSettings(AppConfig.PREF_RX_FRAGMENT_ENABLED, enabled)
+                        Tuning.onUserSettingsChanged()
+                    }
+                )
+                AnimatedVisibility(visible = fragmentAllowed) {
+                    Column {
+                        SettingsListItem(
+                            title = stringResource(R.string.title_pref_fragment_packets),
+                            entries = fragmentPacketsOptions,
+                            values = fragmentPacketsOptions,
+                            selectedValue = fragmentPackets,
+                            onSelected = {
+                                fragmentPackets = it
+                                MmkvManager.encodeSettings(AppConfig.PREF_FRAGMENT_PACKETS, it)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.title_pref_fragment_length),
+                            value = fragmentLength,
+                            onValueChanged = {
+                                val v = it.trim().ifEmpty { "50-100" }
+                                fragmentLength = v
+                                MmkvManager.encodeSettings(AppConfig.PREF_FRAGMENT_LENGTH, v)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.title_pref_fragment_interval),
+                            value = fragmentInterval,
+                            onValueChanged = {
+                                val v = it.trim().ifEmpty { "10-20" }
+                                fragmentInterval = v
+                                MmkvManager.encodeSettings(AppConfig.PREF_FRAGMENT_INTERVAL, v)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.title_pref_fragment_maxsplit),
+                            value = fragmentMaxSplit,
+                            keyboardNumber = true,
+                            onValueChanged = {
+                                val v = it.trim().ifEmpty { "10" }
+                                fragmentMaxSplit = v
+                                MmkvManager.encodeSettings(AppConfig.PREF_FRAGMENT_MAXSPLIT, v)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                    }
+                }
+
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_mux_enabled),
+                    summary = stringResource(R.string.summary_pref_mux_enabled),
+                    checked = muxAllowed,
+                    onCheckedChange = { enabled ->
+                        muxAllowed = enabled
+                        MmkvManager.encodeSettings(AppConfig.PREF_RX_MUX_ENABLED, enabled)
+                        Tuning.onUserSettingsChanged()
+                    }
+                )
+                AnimatedVisibility(visible = muxAllowed) {
+                    Column {
+                        SettingsEditItem(
+                            title = stringResource(R.string.title_pref_mux_concurrency),
+                            value = muxConcurrency,
+                            keyboardNumber = true,
+                            onValueChanged = {
+                                val v = it.trim().toIntOrNull()?.takeIf { n -> n > 0 }?.toString() ?: "8"
+                                muxConcurrency = v
+                                MmkvManager.encodeSettings(AppConfig.PREF_MUX_CONCURRENCY, v)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                        SettingsEditItem(
+                            title = stringResource(R.string.title_pref_mux_xudp_concurrency),
+                            value = muxXudpConcurrency,
+                            keyboardNumber = true,
+                            onValueChanged = {
+                                val v = it.trim().toIntOrNull()?.takeIf { n -> n > 0 }?.toString()
+                                    ?: AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY
+                                muxXudpConcurrency = v
+                                MmkvManager.encodeSettings(AppConfig.PREF_MUX_XUDP_CONCURRENCY, v)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                        SettingsListItem(
+                            title = stringResource(R.string.title_pref_mux_xudp_quic),
+                            entries = muxQuicEntries,
+                            values = muxQuicValues,
+                            selectedValue = muxXudpQuic,
+                            onSelected = {
+                                muxXudpQuic = it
+                                MmkvManager.encodeSettings(AppConfig.PREF_MUX_XUDP_QUIC, it)
+                                Tuning.onUserSettingsChanged()
+                            }
+                        )
+                    }
+                }
+
+                AnimatedVisibility(visible = fragmentAllowed || muxAllowed) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = bestTuningState.statusText.ifEmpty {
+                                    stringResource(R.string.settings_best_tuning_hint)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (bestTuningState.isError) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                        Button(
+                            onClick = startBestTuning,
+                            enabled = !bestTuningState.isRunning,
+                            shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                        ) {
+                            if (bestTuningState.isRunning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = stringResource(R.string.settings_apply_best_tuning),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+            }
+
+            SettingsSection(
                 title = stringResource(R.string.settings_group_connection),
                 description = stringResource(R.string.settings_group_connection_desc),
                 icon = painterResource(R.drawable.ic_routing_24dp),
-                order = 1
+                order = 2
             ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_auto_failover),
@@ -352,7 +570,7 @@ fun SettingsScreen(
                 title = stringResource(R.string.settings_group_list),
                 description = stringResource(R.string.settings_group_list_desc),
                 icon = painterResource(R.drawable.ic_grid_24dp),
-                order = 2
+                order = 3
             ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_speed_enabled),
@@ -372,7 +590,7 @@ fun SettingsScreen(
                 title = stringResource(R.string.title_pref_daily_maintenance),
                 description = stringResource(R.string.settings_group_maintenance_desc),
                 icon = painterResource(R.drawable.ic_refresh_24dp),
-                order = 3
+                order = 4
             ) {
                 SettingsSwitchItem(
                     title = stringResource(R.string.settings_maintenance_switch_title),
@@ -393,7 +611,7 @@ fun SettingsScreen(
                 title = stringResource(R.string.sharing_title),
                 description = stringResource(R.string.sharing_settings_desc),
                 icon = painterResource(R.drawable.ic_share_24dp),
-                order = 4
+                order = 5
             ) {
                 SettingsMenuItem(
                     title = stringResource(R.string.sharing_open),

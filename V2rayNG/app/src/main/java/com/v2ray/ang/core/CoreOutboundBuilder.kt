@@ -11,6 +11,7 @@ import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.extension.nullIfBlank
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.GamingMode
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -45,7 +46,8 @@ object CoreOutboundBuilder {
     /** Applies global outbound options (mux, protocol-specific tweaks, etc.). */
     private fun updateOutboundWithGlobalSettings(outbound: OutboundBean): Boolean {
         try {
-            var muxEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false)
+            var muxEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false) &&
+                Tuning.isMuxAllowed()
             val protocol = outbound.protocol
             if (protocol.equals(EConfigType.SHADOWSOCKS.name, true)
                 || protocol.equals(EConfigType.SOCKS.name, true)
@@ -642,7 +644,9 @@ object CoreOutboundBuilder {
      */
     private fun updateOutboundFragment(streamSettings: OutboundBean.StreamSettingsBean): Boolean {
         try {
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false) == false) {
+            if (!MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false) ||
+                !Tuning.isFragmentAllowed()
+            ) {
                 return true
             }
             if (streamSettings.security != AppConfig.TLS

@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.handler.TuningRunner
 
 import androidx.compose.runtime.CompositionLocalProvider
@@ -354,12 +355,24 @@ fun MainScreen(
         // While the best mux and fragment settings are being looked for, the
         // connection cannot come up yet, so the screen says why.
         val tuningPhase = uiState.tuning
+        val tuningMode = uiState.tuningMode
         TuningNotice(
             text = stringResource(
                 when (tuningPhase) {
-                    TuningRunner.Phase.Done -> R.string.rx_tuning_done
-                    TuningRunner.Phase.Failed -> R.string.rx_tuning_failed
-                    else -> R.string.rx_tuning_searching
+                    TuningRunner.Phase.Done -> when (tuningMode) {
+                        Tuning.Mode.MUX_ONLY, Tuning.Mode.FRAGMENT_ONLY -> R.string.rx_tuning_done_single
+                        else -> R.string.rx_tuning_done
+                    }
+                    TuningRunner.Phase.Failed -> when (tuningMode) {
+                        Tuning.Mode.MUX_ONLY -> R.string.rx_tuning_failed_mux
+                        Tuning.Mode.FRAGMENT_ONLY -> R.string.rx_tuning_failed_fragment
+                        else -> R.string.rx_tuning_failed
+                    }
+                    else -> when (tuningMode) {
+                        Tuning.Mode.MUX_ONLY -> R.string.rx_tuning_searching_mux
+                        Tuning.Mode.FRAGMENT_ONLY -> R.string.rx_tuning_searching_fragment
+                        else -> R.string.rx_tuning_searching
+                    }
                 }
             ),
             visible = tuningPhase == TuningRunner.Phase.Searching ||

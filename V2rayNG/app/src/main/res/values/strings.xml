@@ -1008,10 +1008,25 @@
     <string name="firefox_vpn_err_403">the account is not allowed (403)</string>
     <string name="firefox_vpn_err_429">the account has used its share for now (429)</string>
     <string name="rx_tuning_searching">I am looking for the best mux and fragment settings for this config</string>
+    <string name="rx_tuning_searching_mux">I am looking for the best mux settings for this config</string>
+    <string name="rx_tuning_searching_fragment">I am looking for the best fragment settings for this config</string>
     <string name="rx_tuning_done">Found them, connecting now</string>
+    <string name="rx_tuning_done_single">Found it, connecting now</string>
     <string name="title_pref_auto_failover">Keep the connection when a config dies</string>
     <string name="summary_pref_auto_failover">When the config in use stops carrying traffic, another one of the same group is taken quietly.</string>
     <string name="public_disconnected">Internet disconnected; testing stopped.</string>
     <string name="public_disconnected_saved">Offline/disconnected — %1$d of %2$d configs were added to the list from cache/bundle.</string>
     <string name="rx_tuning_failed">Could not bypass with fragment or mux; stopped.</string>
+    <string name="rx_tuning_failed_mux">Could not bypass with mux; stopped.</string>
+    <string name="rx_tuning_failed_fragment">Could not bypass with fragment; stopped.</string>
+    <string name="settings_group_fragment_mux">Fragment &amp; Mux</string>
+    <string name="settings_group_fragment_mux_desc">Choose which optimization is enabled, or apply the best settings for your current internet.</string>
+    <string name="summary_pref_fragment_enabled">Split TLS handshakes so strict networks do not drop the connection.</string>
+    <string name="settings_apply_best_tuning">Apply best settings</string>
+    <string name="settings_best_tuning_hint">Measures your active internet and tunes the enabled options before connecting.</string>
+    <string name="settings_best_tuning_offline">No internet connection detected; connect to the internet first.</string>
+    <string name="settings_best_tuning_applied">Best settings applied for %1$s.</string>
+    <string name="settings_best_tuning_applied_ms">Best settings applied for %1$s (%2$dms).</string>
+    <string name="settings_network_wifi">Wi-Fi</string>
+    <string name="settings_network_cellular">Mobile data</string>
 </resources>

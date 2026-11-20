@@ -38,17 +38,24 @@ object TuningRunner {
      * traffic, the tunnel is stopped and [Outcome.bypassed] is `false`.
      * [onPhase] is called as it moves along, so the screen can say what is happening.
      */
-    suspend fun tune(context: Context, guid: String, onPhase: (Phase) -> Unit): Outcome =
+    suspend fun tune(
+        context: Context,
+        guid: String,
+        mode: Tuning.Mode = Tuning.currentMode(),
+        onPhase: (Phase) -> Unit,
+    ): Outcome =
         withContext(Dispatchers.IO) {
             val profile = MmkvManager.decodeServerConfig(guid)
             val storedDelay = MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis ?: 0L
-            if (guid.isBlank() || !Tuning.worthTrying(profile)) {
+            val allowMux = mode.mux
+            val allowFragment = mode.fragment
+            if (guid.isBlank() || !Tuning.worthTrying(profile, allowMux = allowMux, allowFragment = allowFragment)) {
                 if (storedDelay < 0L && guid.isNotBlank()) {
                     onPhase(Phase.Searching)
                     Tuning.apply(Tuning.PLAIN)
                     val millis = withChoice(context) { Tuning.measure() }
                     if (millis != null) {
-                        Tuning.remember(guid, Tuning.PLAIN)
+                        Tuning.remember(guid, Tuning.PLAIN, mode)
                         MmkvManager.encodeServerTestDelayMillis(guid, millis)
                         onPhase(Phase.Done)
                         return@withContext Outcome(Tuning.PLAIN, bypassed = true)
@@ -61,22 +68,39 @@ object TuningRunner {
                 }
                 // Nothing to look for: the config is connected exactly as it is.
                 Tuning.apply(Tuning.PLAIN)
-                Tuning.remember(guid, Tuning.PLAIN)
+                Tuning.remember(guid, Tuning.PLAIN, mode)
                 onPhase(Phase.Unsupported)
                 return@withContext Outcome(Tuning.PLAIN, bypassed = true)
             }
 
             onPhase(Phase.Searching)
-            AppLog.info(AppLog.Section.Connection, "Tuning: looking for the fastest settings")
+            AppLog.info(AppLog.Section.Connection, "Tuning ($mode): looking for the fastest settings")
             var best = Tuning.PLAIN
             // The answer from last time leads the search and starts as the one to
             // beat: a line that has not changed costs two attempts instead of five,
             // and one that has changed is still found because the rest is measured.
-            val known = Tuning.best(guid)?.takeIf { !Tuning.stale(guid) }
+            val known = Tuning.bestForCurrentMode(guid)?.takeIf { !Tuning.stale(guid) }
             if (known != null) best = known
             var bestMillis = Long.MAX_VALUE
 
-            for (choice in Tuning.plan(profile, known)) {
+            val custom = Tuning.userCustomChoice(
+                allowMux = allowMux && Tuning.supportsMux(profile),
+                allowFragment = allowFragment && Tuning.supportsFragment(profile),
+            )
+            val basePlan = Tuning.plan(profile, known, allowMux = allowMux, allowFragment = allowFragment)
+            val candidates = if ((custom.mux || custom.fragment) && basePlan.none {
+                    it.mux == custom.mux && it.fragment == custom.fragment &&
+                        it.packets == custom.packets && it.length == custom.length &&
+                        it.interval == custom.interval && it.maxSplit == custom.maxSplit &&
+                        it.concurrency == custom.concurrency
+                }
+            ) {
+                basePlan + custom
+            } else {
+                basePlan
+            }
+
+            for (choice in candidates) {
                 coroutineContext.ensureActive()
                 Tuning.apply(choice)
                 val millis = withChoice(context) { Tuning.measure() }
@@ -107,7 +131,7 @@ object TuningRunner {
             }
 
             Tuning.apply(best)
-            Tuning.remember(guid, best)
+            Tuning.remember(guid, best, mode)
             if (storedDelay < 0L) {
                 MmkvManager.encodeServerTestDelayMillis(guid, bestMillis)
             }

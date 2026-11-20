@@ -353,8 +353,9 @@ class MainActivity : HelperBaseComponentActivity() {
     private fun tuneThenConnect(guid: String) {
         tuningJob?.cancel()
         tuningJob = lifecycleScope.launch {
-            val result = TuningRunner.tune(this@MainActivity, guid) { phase ->
-                mainViewModel.setTuning(phase)
+            val mode = com.v2ray.ang.handler.Tuning.currentMode()
+            val result = TuningRunner.tune(this@MainActivity, guid, mode) { phase ->
+                mainViewModel.setTuning(phase, mode)
             }
             if (!result.bypassed) {
                 // Neither plain nor fragment/mux bypassed the block: keep it stopped.
