@@ -135,11 +135,6 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val pendingEmail: String? = null,
         val needCodeType: String? = null,
         val connectionInfo: FirefoxVpnManager.ConnectionInfo? = null,
-        /**
-         * What the service says is left on this account, before any tunnel is up.
-         * Shown on its own so the allowance can be read without connecting first.
-         */
-        val accountQuota: Pair<Long, Long>? = null,
         val browserUrl: String? = null,
         val browserState: String? = null,
         val relayEnabled: Boolean = false,
@@ -225,50 +220,9 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 delay(1_000)
             }
         }
-        watchQuota()
     }
 
     private var usageJob: Job? = null
-    private var quotaJob: Job? = null
-
-    /**
-     * Keeps the remaining allowance the account really has, as the service
-     * reports it.
-     *
-     * The figure carried by a pass is the one that was left when that pass was
-     * minted. The app mints a pass per connection, so an account used for days
-     * still read as untouched, and the bar sat at zero used every time it
-     * connected — which is what the owner saw and reported. This asks the
-     * service, once when the screen opens and then every minute while a tunnel
-     * is up, and only replaces the figure when an answer actually arrives: a
-     * failed read keeps the last good one instead of drawing a full allowance.
-     */
-    private fun watchQuota() {
-        quotaJob?.cancel()
-        quotaJob = viewModelScope.launch {
-            while (isActive) {
-                // This is the view model, not the activity: the application is the
-                // context that lives as long as the account does.
-                val context = getApplication<Application>()
-                if (FirefoxVpnStore.loadAccounts(context).isNotEmpty()) {
-                    FirefoxVpnManager.liveQuota(context)?.let { (limit, remaining) ->
-                        val left = remaining.coerceIn(0L, limit)
-                        _state.update { state ->
-                            // Recorded whether or not a tunnel is up: the allowance is
-                            // the account's, not the connection's, and reading it only
-                            // after connecting was why it could never be checked first.
-                            val info = state.connectionInfo?.copy(
-                                quotaLimit = limit,
-                                quotaRemaining = left,
-                            )
-                            state.copy(connectionInfo = info, accountQuota = limit to left)
-                        }
-                    }
-                }
-                delay(if (_state.value.connectionInfo != null) 60_000 else 5 * 60_000)
-            }
-        }
-    }
 
     private fun loadState() {
         val accounts = FirefoxVpnStore.loadAccounts(getApplication())
@@ -1287,25 +1241,6 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                 // The way out through Cloudflare is left out of the screen for
                 // now; the code behind it stays, ready to be shown again.
 
-                // Usage. Shown before connecting as well, from the account's own
-                // figure: the allowance is the account's and can be read at any
-                // time, and being able to look before spending is the point.
-                val usageInfo = state.connectionInfo ?: state.accountQuota?.let { (limit, left) ->
-                    FirefoxVpnManager.ConnectionInfo(
-                        proxyHost = "",
-                        proxyPort = 0,
-                        proxyPassToken = "",
-                        countryName = state.countries
-                            .firstOrNull { it.code == state.selectedCountryCode }?.name.orEmpty(),
-                        quotaRemaining = left,
-                        quotaLimit = limit,
-                        localPort = 0,
-                    )
-                }
-                if (usageInfo != null) {
-                    item { SectionTitle(stringResource(R.string.firefox_vpn_section_usage)) }
-                    item { QuotaCard(usageInfo) }
-                }
             }
 
             // Bottom action
@@ -1639,51 +1574,6 @@ private fun TunnelState(tested: Boolean?, country: String) {
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
             color = ink
         )
-    }
-}
-
-@Composable
-private fun QuotaCard(info: FirefoxVpnManager.ConnectionInfo) {
-    val colors = MaterialTheme.colorScheme
-    val limit = info.quotaLimit.coerceAtLeast(0)
-    val used = (limit - info.quotaRemaining).coerceAtLeast(0)
-    Card {
-        Text(
-            text = info.countryName,
-            style = MaterialTheme.typography.titleSmall.copy(fontFamily = RxPromptFont),
-            color = colors.onSurface
-        )
-        Spacer(Modifier.height(6.dp))
-        if (limit > 0) {
-            val fraction = (used.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(colors.outline.copy(alpha = 0.25f))
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(fraction)
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(colors.primary)
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            // What is left is the number that answers the question being asked;
-            // the bar above already shows how much has gone.
-            Text(
-                text = stringResource(
-                    R.string.firefox_vpn_quota_left,
-                    info.quotaRemaining / 1_000_000_000.0,
-                    limit / 1_000_000_000.0
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant
-            )
-        }
     }
 }
 

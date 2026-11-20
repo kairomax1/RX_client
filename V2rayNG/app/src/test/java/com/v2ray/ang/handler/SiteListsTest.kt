@@ -48,4 +48,24 @@ class SiteListsTest {
     fun anEmptyAnswerIsEmpty() {
         assertTrue(SiteLists.parseNames("").isEmpty())
     }
+
+    @Test
+    fun youtubeAndEssentialDomainsAreNeverBlocked() {
+        val text = """
+            +.ads.example.com
+            +.youtubei.googleapis.com
+            +.youtube.googleapis.com
+            +.s.youtube.com
+            +.googlevideo.com
+            +.ytimg.com
+            +.fbcdn.net
+        """.trimIndent()
+        assertEquals(listOf("domain:ads.example.com"), SiteLists.parseNames(text))
+
+        val bundledAds = java.io.File("src/main/assets/rx_ad_domains.txt").readLines()
+        assertTrue("domain:youtubei.googleapis.com" !in bundledAds)
+        assertTrue("domain:youtube.googleapis.com" !in bundledAds)
+        assertTrue("full:s.youtube.com" !in bundledAds)
+        assertTrue("domain:fbcdn.net" !in bundledAds)
+    }
 }

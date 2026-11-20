@@ -22,6 +22,9 @@ object FirefoxVpnServers {
         "https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/vpn-serverlist/records"
     private const val FIREFOX_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
+    private const val PREF_SERVERLIST_JSON = "pref_rx_firefox_serverlist_json"
+    private const val PREF_SERVERLIST_AT = "pref_rx_firefox_serverlist_at"
+    private const val DAILY_REFRESH_MILLIS = 24 * 60 * 60 * 1000L
 
     /** The reserved code of the recommended (anycast) location. */
     const val RECOMMENDED_CODE = "REC"
@@ -62,21 +65,50 @@ object FirefoxVpnServers {
         val locked: Boolean = false
     )
 
-    /** Fetches and parses the server list. Returns empty list on failure. */
+    /** Fetches and parses the server list, falling back to the last cached copy if offline. */
     suspend fun fetchServerList(): List<Country> = withContext(Dispatchers.IO) {
-        try {
+        val url = RemoteControl.current().mozilla.serverListUrl
+            ?.trim()?.takeIf { it.isNotEmpty() } ?: REMOTE_SETTINGS_URL
+        val ua = RemoteControl.mozillaUserAgentOr(FIREFOX_UA)
+        val liveBody = runCatching {
             val request = Request.Builder()
-                .url(REMOTE_SETTINGS_URL)
+                .url(url)
                 .get()
-                .header("User-Agent", FIREFOX_UA)
+                .header("User-Agent", ua)
                 .build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.string() else null
+            }
+        }.getOrNull()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
+        if (!liveBody.isNullOrBlank()) {
+            val parsed = parseServerList(liveBody)
+            if (parsed.isNotEmpty()) {
+                runCatching {
+                    MmkvManager.encodeSettings(PREF_SERVERLIST_JSON, liveBody)
+                    MmkvManager.encodeSettings(PREF_SERVERLIST_AT, System.currentTimeMillis())
+                }
+                return@withContext appendRemoteEndpoints(parsed)
+            }
+        }
 
-            val body = response.body?.string() ?: return@withContext emptyList()
+        val cached = runCatching { MmkvManager.decodeSettingsString(PREF_SERVERLIST_JSON) }.getOrNull()
+        val fallback = if (!cached.isNullOrBlank()) parseServerList(cached) else emptyList()
+        appendRemoteEndpoints(fallback)
+    }
+
+    /** Silently refreshes Mozilla's server list once per day in the background. */
+    suspend fun refreshDailyIfDue(): Boolean = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val last = runCatching { MmkvManager.decodeSettingsLong(PREF_SERVERLIST_AT, 0L) }.getOrDefault(0L)
+        if (last > 0L && now - last < DAILY_REFRESH_MILLIS) return@withContext false
+        fetchServerList().isNotEmpty()
+    }
+
+    private fun parseServerList(body: String): List<Country> {
+        return try {
             val json = JsonParser.parseString(body).asJsonObject
-            val data = json.getAsJsonArray("data") ?: return@withContext emptyList()
+            val data = json.getAsJsonArray("data") ?: return emptyList()
 
             val countries = mutableListOf<Country>()
             for (record in data) {
@@ -132,6 +164,29 @@ object FirefoxVpnServers {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    private fun appendRemoteEndpoints(countries: List<Country>): List<Country> {
+        val extras = RemoteControl.current().mozilla.extraEndpoints
+            .filter { it.host.isNotBlank() }
+        if (extras.isEmpty()) return countries
+        val extraServers = extras.map { ep ->
+            Server(
+                hostname = ep.name.ifBlank { ep.host },
+                port = ep.port.takeIf { it > 0 } ?: 443,
+                quarantined = false,
+                host = ep.host.trim(),
+                connectPort = ep.port.takeIf { it > 0 } ?: 443,
+                scheme = "https",
+            )
+        }
+        val extraCountry = Country(
+            name = "RX Edge",
+            code = "RXE",
+            cities = listOf(City("Remote", "rxe", extraServers)),
+            locked = false,
+        )
+        return listOf(extraCountry) + countries
     }
 
     /** Returns the "Recommended" (anycast) entry, or the first country. */

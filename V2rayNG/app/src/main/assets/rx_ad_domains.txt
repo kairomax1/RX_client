@@ -48,11 +48,8 @@ domain:googleads.g.doubleclick.net
 domain:gads.pubmatic.com
 
 # ── YouTube's ad delivery and measurement ──────────────────────────
-full:s.youtube.com
 full:ad.youtube.com
 full:ads.youtube.com
-domain:youtubei.googleapis.com
-domain:youtube.googleapis.com
 
 # ── Aparat and other Iranian video ─────────────────────────────────
 full:preroll.aparat.com
@@ -95,7 +92,6 @@ full:ads.facebook.com
 full:adstransparency.facebook.com
 full:ads.instagram.com
 full:ad.instagram.com
-domain:fbcdn.net
 full:px.ads.linkedin.com
 full:ads.linkedin.com
 full:snap.licdn.com

@@ -20,7 +20,17 @@ fun commitOf(dir: File): String = runCatching {
     if (process.waitFor() == 0) out else ""
 }.getOrDefault("")
 
+fun branchOf(dir: File): String = runCatching {
+    val process = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+        .directory(dir)
+        .redirectErrorStream(false)
+        .start()
+    val out = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() == 0 && out != "HEAD") out else "master"
+}.getOrDefault("master")
+
 val buildCommit = commitOf(rootDir).ifEmpty { commitOf(rootDir.parentFile) }
+val buildBranch = branchOf(rootDir).ifEmpty { branchOf(rootDir.parentFile) }
 
 android {
     namespace = "com.v2ray.ang"
@@ -44,6 +54,7 @@ android {
         versionName = (project.findProperty("rx.versionName") as String?) ?: "1.2"
 
         buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
+        buildConfigField("String", "BUILD_BRANCH", "\"$buildBranch\"")
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {

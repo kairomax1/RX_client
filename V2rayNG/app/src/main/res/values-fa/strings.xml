@@ -881,7 +881,7 @@
     <string name="public_short">فقط %1$d از %2$d تا پیدا شد؛ بقیه‌ی کانفیگ‌های مخزن روی اینترنت تو جواب ندادند</string>
     <string name="public_step_round">دور %1$d: %2$d از %3$d آماده است</string>
     <string name="public_stopping">باشه، همین‌ها را نگه می‌دارم…</string>
-    <string name="public_no_line">اینترنت گوشی همین حالا وصل نیست. تا وصل نشود هیچ کانفیگی امتحان نمی‌شود و هیچ عددی بالا نمی‌رود.</string>
+    <string name="public_no_line">اینترنت گوشی همین حالا قطع است. با زدن شروع، کانفیگ‌های ذخیره و آفلاینِ داخل برنامه بدون نیاز به اینترنت اضافه می‌شوند.</string>
     <string name="public_none">از این اینترنت به هیچ سروری نرسیدیم. نوع‌ها را عوض کن یا با شبکه‌ی دیگری امتحان کن.</string>
     <string name="public_origin_saved">به منبع‌ها راه نبود؛ از فهرست ذخیره‌شده‌ی دفعه‌ی قبل استفاده شد.</string>
     <string name="public_origin_bundled">به منبع‌ها راه نبود؛ از فهرست داخل خود برنامه استفاده شد (ممکن است قدیمی باشد).</string>
@@ -984,6 +984,6 @@
     <string name="title_pref_auto_failover">رفتنِ خودکار به کانفیگِ بعدی</string>
     <string name="summary_pref_auto_failover">وقتی کانفیگی که وصل است از کار می‌افتد، برنامه بی‌صدا کانفیگِ دیگری از همان گروه را وصل می‌کند.</string>
     <string name="public_disconnected">اینترنت قطع شد؛ تست کانفیگ‌ها متوقف شد.</string>
-    <string name="public_disconnected_saved">اینترنت قطع شد — %1$d از %2$d کانفیگِ تست‌شده در فهرست نگه داشته شد.</string>
+    <string name="public_disconnected_saved">حالت آفلاین / قطعی اینترنت — %1$d از %2$d کانفیگ از حافظه و بسته برنامه به فهرست اضافه شد.</string>
     <string name="rx_tuning_failed">با فرگمنت و موکس هم دور نخورد؛ متوقف شد.</string>
 </resources>

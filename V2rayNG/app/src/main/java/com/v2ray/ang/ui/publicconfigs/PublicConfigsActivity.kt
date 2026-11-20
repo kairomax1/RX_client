@@ -172,15 +172,8 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
         val lineLost = AtomicBoolean(false)
         cancelled = flag
         disconnected = lineLost
-        // Asked before the screen says it is working. With no line there is
-        // nothing to measure, so the screen says that instead of counting attempts
-        // that never left the phone.
-        _state.update { it.copy(running = true, progress = null, outcome = null, noLine = false) }
+        _state.update { it.copy(running = true, stopping = false, progress = null, outcome = null, noLine = false) }
         viewModelScope.launch(Dispatchers.IO) {
-            if (!PublicConfigs.hasLine(getApplication())) {
-                _state.update { it.copy(running = false, noLine = true) }
-                return@launch
-            }
             val outcome = runCatching {
                 PublicConfigs.collect(getApplication(), _state.value.options, flag, lineLost) { progress ->
                     _state.update { it.copy(progress = progress) }
@@ -191,7 +184,7 @@ class PublicConfigsViewModel(application: Application) : AndroidViewModel(applic
                     running = false,
                     stopping = false,
                     outcome = outcome,
-                    noLine = outcome.disconnected,
+                    noLine = outcome.disconnected && outcome.added == 0,
                 )
             }
         }
@@ -226,23 +219,32 @@ class PublicConfigsActivity : BaseComponentActivity() {
                 setResult(
                     RESULT_OK,
                     Intent()
-                        .putExtra(EXTRA_KEEP, state.options.count)
+                        .putExtra(EXTRA_KEEP, added.coerceAtLeast(carried).coerceAtLeast(state.options.count))
                         .putExtra(EXTRA_AUTO_CONNECT, autoConnect),
                 )
             }
         }
         LaunchedEffect(outcome) {
-            if (outcome != null && !outcome.disconnected && added > 0) {
+            if (outcome != null && added > 0) {
+                val autoConnect = !outcome.disconnected
                 setResult(
                     RESULT_OK,
                     Intent()
-                        .putExtra(EXTRA_KEEP, state.options.count)
-                        .putExtra(EXTRA_AUTO_CONNECT, true),
+                        .putExtra(EXTRA_KEEP, added)
+                        .putExtra(EXTRA_AUTO_CONNECT, autoConnect),
                 )
-                finish()
+                if (autoConnect) finish()
             }
         }
         PublicConfigsScreen(state, viewModel::change, viewModel::start, viewModel::stop) {
+            if (carried > 0 || added > 0) {
+                setResult(
+                    RESULT_OK,
+                    Intent()
+                        .putExtra(EXTRA_KEEP, added.coerceAtLeast(carried))
+                        .putExtra(EXTRA_AUTO_CONNECT, outcome != null && !outcome.disconnected),
+                )
+            }
             viewModel.stop()
             finish()
         }

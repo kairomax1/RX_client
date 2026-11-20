@@ -136,9 +136,10 @@ object AetherEngine {
     private fun statusFile(context: Context) = File(workDir(context), "rx-status")
     private fun winnerFile(context: Context, network: String) = File(workDir(context), "rx-winner-$network")
 
-    /** True when this build carries an engine that can run on this phone. */
+    /** True when this build carries an engine that can run on this phone and remote policy allows it. */
     fun isAvailable(context: Context): Boolean =
-        Build.VERSION.SDK_INT >= MIN_SDK && binary(context).exists()
+        com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.aether } &&
+            Build.VERSION.SDK_INT >= MIN_SDK && binary(context).exists()
 
     /** True for the profile that stands for the engine. */
     fun isAetherProfile(profile: ProfileItem?): Boolean = isAetherEndpoint(

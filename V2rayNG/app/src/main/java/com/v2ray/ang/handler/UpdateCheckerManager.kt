@@ -15,6 +15,9 @@ import kotlinx.coroutines.withContext
 
 object UpdateCheckerManager {
     suspend fun checkForUpdate(includePreRelease: Boolean = false): CheckUpdateResult = withContext(Dispatchers.IO) {
+        if (!includePreRelease && !RemoteControl.isFeatureEnabled { it.autoUpdate }) {
+            return@withContext CheckUpdateResult(hasUpdate = false)
+        }
         // A key the owner made once lets this phone read what nobody else can: a release
         // kept as a draft. Without it the newest thing the phone can see is the last
         // release that was published, which is why a tester's build never arrived.

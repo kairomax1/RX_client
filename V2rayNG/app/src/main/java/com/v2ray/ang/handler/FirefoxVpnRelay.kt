@@ -299,6 +299,7 @@ object FirefoxVpnRelay {
         val pool: ExecutorService = Executors.newCachedThreadPool { runnable ->
             Thread(runnable, "firefox-vpn-probe").apply { isDaemon = true }
         }
+        val probeTarget = RemoteControl.mozillaProbeTargetOr(PROBE_TARGET)
         val jobs = mutableListOf<Future<Probe>>()
         try {
             val token = bearerToken
@@ -308,7 +309,7 @@ object FirefoxVpnRelay {
                         Probe(
                             endpoint,
                             candidate,
-                            tryShape(endpoint.host, endpoint.port, token, candidate, PROBE_TARGET)
+                            tryShape(endpoint.host, endpoint.port, token, candidate, probeTarget)
                         )
                     }
                 )
@@ -400,8 +401,10 @@ object FirefoxVpnRelay {
      */
     fun measure(endpoint: Endpoint, token: String, timeoutMillis: Int = PROBE_TIMEOUT_MILLIS): Int? {
         val started = System.nanoTime()
-        val pageHost = PROBE_TARGET.substringBefore(':')
-        val pagePort = PROBE_TARGET.substringAfter(':').toInt()
+        val probeTarget = RemoteControl.mozillaProbeTargetOr(PROBE_TARGET)
+        val pageHost = probeTarget.substringBefore(':')
+        val pagePort = probeTarget.substringAfter(':', "443").toIntOrNull() ?: 443
+        val ua = RemoteControl.mozillaUserAgentOr(FIREFOX_UA)
         return try {
             // The number is what a tunnel really costs, so it is measured the
             // way one is opened: on a connection that is ready when there is
@@ -413,7 +416,7 @@ object FirefoxVpnRelay {
                 outer.soTimeout = timeoutMillis
                 outer.getOutputStream().apply {
                     write(
-                        connectRequest(PROBE_TARGET, token, endpoint.host, SHAPES[0])
+                        connectRequest(probeTarget, token, endpoint.host, SHAPES[0])
                             .toByteArray(Charsets.ISO_8859_1)
                     )
                     flush()
@@ -433,7 +436,7 @@ object FirefoxVpnRelay {
                     write(
                         (
                             "GET /generate_204 HTTP/1.1\r\nHost: $pageHost\r\n" +
-                                "User-Agent: $FIREFOX_UA\r\nConnection: close\r\n\r\n"
+                                "User-Agent: $ua\r\nConnection: close\r\n\r\n"
                             ).toByteArray(Charsets.ISO_8859_1)
                     )
                     flush()
@@ -588,11 +591,11 @@ object FirefoxVpnRelay {
             // silent after the connection was announced.
             val pipe = upstream
             val back = thread(name = "firefox-vpn-down", isDaemon = true) {
-                pump(pipe.input, toClient, down = true)
+                pump(pipe.input, toClient, down = true, clientSocket = client)
             }
-            pump(fromClient, pipe.output, down = false)
+            pump(fromClient, pipe.output, down = false, clientSocket = null)
             try {
-                back.join(2000)
+                back.join(60_000)
             } catch (_: Exception) {
             }
         } catch (e: Exception) {
@@ -628,7 +631,7 @@ object FirefoxVpnRelay {
             append("CONNECT $target HTTP/1.1\r\n")
             append("Host: ").append(if (shape.hostIsTarget) target else host).append("\r\n")
             append("Proxy-Authorization: Bearer $token\r\n")
-            if (shape.withAgent) append("User-Agent: $FIREFOX_UA\r\n")
+            if (shape.withAgent) append("User-Agent: ${RemoteControl.mozillaUserAgentOr(FIREFOX_UA)}\r\n")
             append("\r\n")
         }
 
@@ -846,7 +849,7 @@ object FirefoxVpnRelay {
         return if (authority.contains(':')) authority else "$authority:80"
     }
 
-    private fun pump(input: InputStream, output: OutputStream, down: Boolean) {
+    private fun pump(input: InputStream, output: OutputStream, down: Boolean, clientSocket: Socket?) {
         val buffer = ByteArray(PUMP_BUFFER_BYTES)
         while (true) {
             val read = try {
@@ -863,9 +866,12 @@ object FirefoxVpnRelay {
                 break
             }
         }
-        try {
-            output.close()
-        } catch (_: Exception) {
+        // Never call output.close() on the upstream TLS pipe: closing SSLSocket.getOutputStream()
+        // terminates the entire SSLSocket while the downstream pump may still be receiving data.
+        if (down && clientSocket != null) {
+            runCatching { clientSocket.shutdownOutput() }
+        } else if (!down) {
+            runCatching { output.flush() }
         }
     }
 }

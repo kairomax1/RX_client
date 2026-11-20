@@ -39,12 +39,49 @@ object SiteLists {
     /** The widest a list may grow, however large the answer is. */
     private const val MAX_ADS = 5_000
 
+    /**
+     * Core video, social, and API domains that must never be blackholed by a
+     * third-party advert list (e.g. YouTube InnerTube API & CDN).
+     */
+    internal val ESSENTIAL_PROTECTED_DOMAINS = setOf(
+        "youtube.com",
+        "youtu.be",
+        "yt.be",
+        "s.youtube.com",
+        "youtubei.googleapis.com",
+        "youtube.googleapis.com",
+        "googlevideo.com",
+        "ytimg.com",
+        "ggpht.com",
+        "youtube-nocookie.com",
+        "youtubemusic.com",
+        "youtubekids.com",
+        "fbcdn.net",
+        "instagram.com",
+        "cdninstagram.com",
+        "googleapis.com",
+    )
+
+    internal fun isProtectedOrUnblocked(ruleOrDomain: String): Boolean {
+        val bare = ruleOrDomain.trim().lowercase()
+            .removePrefix("domain:")
+            .removePrefix("full:")
+            .removePrefix("+.")
+            .removePrefix(".")
+        if (bare in ESSENTIAL_PROTECTED_DOMAINS) return true
+        return bare in RemoteControl.unblockedDomainKeys()
+    }
+
     /** The names held from the last good answer; empty when there has been none. */
     fun adDomains(): List<String> = try {
-        MmkvManager.decodeSettingsString(PREF_ADS).orEmpty()
-            .lineSequence()
-            .filter { it.isNotBlank() }
-            .toList()
+        if (!RemoteControl.isFeatureEnabled { it.adBlock }) {
+            emptyList()
+        } else {
+            MmkvManager.decodeSettingsString(PREF_ADS).orEmpty()
+                .lineSequence()
+                .filter { it.isNotBlank() && !isProtectedOrUnblocked(it) }
+                .toList()
+        }
     } catch (e: Throwable) {
         // Asked while the routing is being assembled; with no store to read there
         // are simply no advert names, which is the same as having never fetched
@@ -67,8 +104,9 @@ object SiteLists {
      * which is the old number when the answer was not good enough to trust.
      */
     suspend fun refresh(): Int = withContext(Dispatchers.IO) {
+        val url = RemoteControl.current().routing.adListUrl?.trim()?.takeIf { it.isNotEmpty() } ?: ADS_URL
         val names = parseNames(
-            HttpUtil.getUrlContent(UrlContentRequest(url = ADS_URL, timeout = FETCH_TIMEOUT_MS)).orEmpty()
+            HttpUtil.getUrlContent(UrlContentRequest(url = url, timeout = FETCH_TIMEOUT_MS)).orEmpty()
         )
         if (names.size < MIN_ADS) {
             AppLog.error(
@@ -89,6 +127,7 @@ object SiteLists {
         .map { it.removePrefix("+.").removePrefix(".") }
         .filter { it.isNotBlank() && !it.startsWith("#") }
         .filter { name -> name.all { c -> (c.isLetterOrDigit() && c.code < 128) || c == '-' || c == '.' } }
+        .filterNot { isProtectedOrUnblocked(it) }
         .map { "domain:$it" }
         .distinct()
         .toList()

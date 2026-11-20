@@ -139,5 +139,23 @@ class PublicConfigsTest {
         assertEquals("\uD83C\uDF10", PublicConfigs.flag("d1"))
         assertEquals(PublicConfigs.SOURCES.size, PublicConfigs.SOURCES.map { it.address }.toSet().size, "no source twice")
         assertEquals("https://cdn.jsdelivr.net/gh/a/b@main/c.txt", PublicConfigs.Source("a/b", "main", "c.txt").mirror)
+        assertEquals(true, PublicConfigs.SOURCES.any { it.isTelegram })
+    }
+
+    @Test
+    fun telegramHtmlChannelsAreParsedCleanly() {
+        val html = """
+            <div class="tgme_widget_message_text js-message_text" dir="auto">
+              <code>vless://11111111-1111-1111-1111-111111111111@1.2.3.4:443?security=reality&amp;sni=a.com&amp;pbk=abc#ch1</code><br/>
+              trojan://secret@5.6.7.8:443?sni=b.com#ch2
+            </div>
+        """.trimIndent()
+        val lines = PublicConfigs.toLines(html)
+        assertEquals(2, lines.size)
+        assertEquals(
+            "vless://11111111-1111-1111-1111-111111111111@1.2.3.4:443?security=reality&sni=a.com&pbk=abc#ch1",
+            lines[0],
+        )
+        assertEquals("trojan://secret@5.6.7.8:443?sni=b.com#ch2", lines[1])
     }
 }

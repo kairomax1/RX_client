@@ -577,7 +577,7 @@ object CoreConfigManager {
         if (!sniffAllTlsAndHttp) {
             inbound1.sniffing?.destOverride?.clear()
         }
-        if (sniffAllTlsAndHttp) {
+        if (sniffAllTlsAndHttp && RemoteControl.current().routing.blockUdp443 != false) {
             // What the core is told to read out of every connection. `http` and
             // `tls` are what the rules match on and cost nothing worth measuring;
             // `quic` makes the core reassemble and parse QUIC headers for every
@@ -1216,6 +1216,26 @@ object CoreConfigManager {
                 ?: "AsIs"
 
         val rulesetItems = GamingMode.effectiveRulesets()
+        val isHttpOutbound = v2rayConfig.outbounds.firstOrNull()?.protocol == EConfigType.HTTP.name.lowercase()
+        val hasUdp443Block = rulesetItems?.any {
+            it.enabled && it.outboundTag == AppConfig.TAG_BLOCKED &&
+                it.network?.contains("udp", ignoreCase = true) == true &&
+                it.port == "443"
+        } == true
+        val shouldBlockUdp443 = (RemoteControl.current().routing.blockUdp443 ?: true) &&
+            (isHttpOutbound || GamingMode.isEnabled()) &&
+            !hasUdp443Block
+        if (shouldBlockUdp443) {
+            // Drop QUIC on UDP 443 so YouTube/Chrome/Google fall back cleanly to TCP/TLS inside
+            // the tunnel rather than stalling on an HTTP proxy (Mozilla) or leaking direct.
+            v2rayConfig.routing.rules.add(
+                V2rayConfig.RoutingBean.RulesBean(
+                    outboundTag = AppConfig.TAG_BLOCKED,
+                    network = "udp",
+                    port = "443",
+                )
+            )
+        }
         rulesetItems?.forEach { key ->
             appendRoutingUserRule(configContext, key, v2rayConfig, policyGroupBalancerTags)
         }

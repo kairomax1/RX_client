@@ -81,7 +81,9 @@ object GamingMode {
      */
     val DIRECT_RESOLVERS = listOf("178.22.122.100", "185.51.200.2")
 
-    fun isEnabled(): Boolean = MmkvManager.decodeSettingsBool(PREF_ENABLED, false)
+    fun isEnabled(): Boolean =
+        RemoteControl.isFeatureEnabled { it.gamingMode } &&
+            MmkvManager.decodeSettingsBool(PREF_ENABLED, false)
 
     fun setEnabled(enabled: Boolean) {
         AppLog.info(
@@ -273,7 +275,15 @@ object GamingMode {
      * The second half is read every time rather than remembered for the life of
      * the process, so a list renewed while the tunnel is up is used as it is.
      */
-    private val adDomains: List<String> get() = bundledAdDomains + SiteLists.adDomains()
+    private val adDomains: List<String>
+        get() {
+            if (!RemoteControl.isFeatureEnabled { it.adBlock }) return emptyList()
+            val extra = RemoteControl.current().routing.blockDomains
+                .mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
+            return (bundledAdDomains + SiteLists.adDomains() + extra)
+                .filterNot { SiteLists.isProtectedOrUnblocked(it) }
+                .distinct()
+        }
 
     private val bundledAdDomains: List<String> by lazy { readList(AD_ASSET) }
 
@@ -341,6 +351,23 @@ object GamingMode {
                 domain = adDomains,
             )
         }
+        val remoteRouting = RemoteControl.current().routing
+        val remoteProxy = remoteRouting.proxyDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
+        if (remoteProxy.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "RemoteControl: proxy domains",
+                outboundTag = AppConfig.TAG_PROXY,
+                domain = remoteProxy,
+            )
+        }
+        val remoteDirect = remoteRouting.directDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
+        if (remoteDirect.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "RemoteControl: direct domains",
+                outboundTag = AppConfig.TAG_DIRECT,
+                domain = remoteDirect,
+            )
+        }
         // The services that can only be answered from outside come first: a
         // blocked name must reach the tunnel before any rule that could send it
         // out directly. Then the games whose line the owner chose, then the rest.
@@ -362,6 +389,23 @@ object GamingMode {
                 remarks = "Adverts and trackers",
                 outboundTag = AppConfig.TAG_BLOCKED,
                 domain = adDomains,
+            )
+        }
+        val remoteRouting = RemoteControl.current().routing
+        val remoteProxy = remoteRouting.proxyDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
+        if (remoteProxy.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "RemoteControl: proxy domains",
+                outboundTag = AppConfig.TAG_PROXY,
+                domain = remoteProxy,
+            )
+        }
+        val remoteDirect = remoteRouting.directDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
+        if (remoteDirect.isNotEmpty()) {
+            rules += RulesetItem(
+                remarks = "RemoteControl: direct domains",
+                outboundTag = AppConfig.TAG_DIRECT,
+                domain = remoteDirect,
             )
         }
         rules += base

@@ -252,11 +252,16 @@ object XboxDns {
                 return known.size
             }
             val before = known.size
+            val policy = RemoteControl.current().dnsScanner
+            val disabled = policy.disabledSources.map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+            val effectiveSources = (policy.extraSources.filter { it.startsWith("http://") || it.startsWith("https://") } + LIST_SOURCES)
+                .filterNot { src -> disabled.any { src.lowercase().contains(it) } }
+                .distinct()
             val answered = AtomicInteger(0)
-            val parsedBySource = java.util.Collections.synchronizedList(ArrayList<List<Int>>(LIST_SOURCES.size))
+            val parsedBySource = java.util.Collections.synchronizedList(ArrayList<List<Int>>(effectiveSources.size))
             val pool = Executors.newFixedThreadPool(LIST_FETCH_THREADS)
             try {
-                val tasks = LIST_SOURCES.map { source ->
+                val tasks = effectiveSources.map { source ->
                     Callable {
                         val tagKey = "rx_dns_tag_" + source.hashCode().toUInt().toString(16)
                         val tag = if (ignoreTags) null else MmkvManager.decodeSettingsString(tagKey).takeIf { file.exists() }

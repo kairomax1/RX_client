@@ -8,6 +8,7 @@ import androidx.work.Configuration
 import androidx.work.WorkManager
 import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.handler.BackgroundSyncManager
 import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.PublicConfigs
@@ -57,6 +58,8 @@ class AngApplication : Application() {
         DailyMaintenance.sync(this)
         PublicConfigs.schedule(this)
         XboxDns.scheduleDaily(this)
+        BackgroundSyncManager.schedule(this)
+        BackgroundSyncManager.kickIfDue(this)
         UpdateNotifier.scheduleWatch(this)
     }
 }

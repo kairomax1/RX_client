@@ -72,11 +72,20 @@ class DailyMaintenanceWorker(
         // Only when there is a line to fetch it over: offline, the request would sit
         // on its timeout and hold up everything after it.
         if (isOnline()) {
+            runCatching { com.v2ray.ang.handler.RemoteControl.refreshIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: remote control failed", it) }
+
+            runCatching { com.v2ray.ang.handler.FirefoxVpnServers.refreshDailyIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Mozilla server list failed", it) }
+
             runCatching { com.v2ray.ang.handler.XboxDns.refreshDailyIfDue(applicationContext) }
                 .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: DNS scanner list failed", it) }
 
             runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
                 .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+
+            runCatching { com.v2ray.ang.handler.BackgroundSyncManager.syncAll(applicationContext) }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: background sync failed", it) }
         }
 
         runCatching { repairCloudflareConfig() }
