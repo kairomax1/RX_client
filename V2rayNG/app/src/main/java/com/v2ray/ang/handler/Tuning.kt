@@ -157,11 +157,11 @@ object Tuning {
             choices += known
         }
         when {
-            fragment && mux -> {
-                choices += FRAGMENT
-                choices += MUX
-                choices += FRAGMENT_FINE
-                choices += BOTH
+            allowMux && allowFragment -> {
+                if (fragment) choices += FRAGMENT
+                if (mux) choices += MUX
+                if (fragment) choices += FRAGMENT_FINE
+                if (mux && fragment) choices += BOTH
             }
             fragment -> {
                 choices += FRAGMENT_WIDE
