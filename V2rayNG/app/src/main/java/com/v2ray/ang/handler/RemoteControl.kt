@@ -157,7 +157,7 @@ object RemoteControl {
         }
 
         val token = runCatching { MmkvManager.decodeSettingsString(AppConfig.PREF_GITHUB_TOKEN).orEmpty().trim() }.getOrDefault("")
-        val headers = if (token.isNotEmpty()) mapOf("Authorization" to "Bearer $token") else null
+        val headers: String? = if (token.isNotEmpty()) gson.toJson(mapOf("Authorization" to "Bearer $token")) else null
         val httpPort = runCatching { SettingsManager.getHttpPort() }.getOrDefault(0)
         val proxyUser = runCatching { SettingsManager.getSocksUsername() }.getOrNull()
         val proxyPass = runCatching { SettingsManager.getSocksPassword() }.getOrNull()

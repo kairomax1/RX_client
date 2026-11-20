@@ -16,6 +16,7 @@ import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.RemoteControl
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.Tuning
