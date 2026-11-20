@@ -165,6 +165,26 @@ jobs:
             -Prx.storePassword="$STORE_PASSWORD" \
             -Prx.keyAlias="$KEY_ALIAS" \
             -Prx.keyPassword="$KEY_PASSWORD"
+          cd ..
+          # AGP signs what it needs for minSdk 24; v1 (JAR) signing can silently go missing,
+          # and a package without it is refused by some installers as invalid. Re-sign every
+          # APK with all three schemes so the file a tester downloads is the file that
+          # installs. Re-signing does not touch zip alignment, which the check below verifies.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
+                     V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
+            echo "Re-signing $apk"
+            "$BUILD_TOOLS/apksigner" sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-pass "pass:${STORE_PASSWORD}" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "pass:${KEY_PASSWORD}" \
+              --min-sdk-version 21 \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              "$apk"
+          done
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
@@ -193,6 +213,41 @@ jobs:
             }
           done
           echo "All release and debug APKs carry the same certificate."
+
+      - name: Refuse an APK that a phone cannot update
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # 4000004 is the highest versionCode any earlier build carried. A file at or below it
+          # installs on a clean phone but is silently refused by one that already has RX VPN,
+          # which is the "App not installed" report this gate exists to make unshippable.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in *.apk; do
+            CODE=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+            NAME=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+            echo "$apk: versionCode=$CODE versionName=$NAME"
+            if [ -z "$CODE" ] || [ "$CODE" -le 4000004 ]; then
+              echo "::error::$apk carries versionCode ${CODE:-none}; it must be greater than 4000004 or a phone with RX VPN installed will refuse it"
+              exit 1
+            fi
+          done
+
+      - name: Verify v1, v2 and v3 signatures
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # An installer that understands only one scheme accepts the package only when that
+          # scheme is really there. All three must verify on the arm64 build, which is what
+          # most phones download.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
+          echo "Checking $APK"
+          for scheme in "v1 scheme" "v2 scheme" "v3 scheme"; do
+            "$BUILD_TOOLS/apksigner" verify --min-sdk-version 21 --verbose "$APK" 2>&1 \
+              | grep -qE "Verified using ${scheme}.*: true" || {
+                echo "::error::$APK is missing a valid ${scheme} signature"
+                exit 1
+              }
+            echo "${scheme}: verified"
+          done
 
       - name: Report APK facts
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release
@@ -255,10 +310,33 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RXVPN-apk
+          # compression-level 0 stores the entries uncompressed. The default (6) packs them with
+          # Zstandard (ZIP method 93), which Windows Explorer, Linux unzip and every Android file
+          # manager refuse — the downloaded RXVPN-apk.zip simply will not open, so the app inside
+          # can never be installed. An uncompressed artifact opens everywhere.
+          compression-level: 0
           path: |
             V2rayNG/app/build/outputs/apk/playstore/release/*.apk
             V2rayNG/app/build/outputs/apk/playstore/release/SHA256SUMS.txt
             V2rayNG/app/build/outputs/apk/playstore/release/APK-FACTS.txt
+          if-no-files-found: error
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RXVPN-arm64-v8a
+          # A single APK needs no extraction at all: it downloads as its own .zip that stores
+          # the APK uncompressed, so a phone can open it and install straight away.
+          compression-level: 0
+          path: V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_*_arm64-v8a.apk
+          if-no-files-found: error
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RXVPN-universal
+          compression-level: 0
+          path: V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_*_universal.apk
           if-no-files-found: error
 
   release:

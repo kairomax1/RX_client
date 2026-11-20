@@ -229,3 +229,21 @@ Nine items, delivered together.
   list. Android 9 and older open the release page in the browser.
 - **No automatic publishing.** A push to `master` only builds and tests. A release is made by
   running `build.yml` by hand with `release_tag`.
+
+## Fifth fix round (version 1.0.2) — the download really arrives, the APK really installs
+
+- **The Actions artifact would not open as a zip.** `actions/upload-artifact@v4` packs the
+  downloadable `RXVPN-apk.zip` with Zstandard (ZIP method 93); Windows Explorer, Linux `unzip`
+  and Android file managers cannot read that method, so the tester could not extract the APKs
+  and the app could never be installed. `Upload APKs` now sets `compression-level: 0` (entries
+  stored uncompressed), and two single APKs ship as their own always-openable artifacts
+  (`RXVPN-arm64-v8a`, `RXVPN-universal`) — those need no extraction at all.
+- **Every build carried the same versionCode.** `versionCode` was frozen at 4, so every playstore
+  APK reported 4000004 and a phone that already had RX VPN refused the new file ("App not
+  installed"). It now defaults to 5 → playstore 4000005, fdroid 5000405, still overridable with
+  `-Prx.versionCode` / `-Prx.versionName`. CI (`build.yml`) refuses to ship an APK at or below
+  4000004.
+- **v1 (JAR) signing could silently go missing** (AGP signs for the modern schemes; `enableV1Signing`
+  is not a guarantee). CI now re-signs every release/debug APK with apksigner
+  (`--min-sdk-version 21`, v1+v2+v3) and fails unless all three schemes verify on the arm64 APK.
+- `versionName` is `1.0.2`; `versionCode` default 5 (was frozen at 4 / `1.0.1`).

@@ -13,8 +13,13 @@ android {
         applicationId = "com.mobix.vpn"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.1"
+        // 4 was frozen into every build this project shipped, and a phone only updates an
+        // installed app when the new file carries a higher number, so an installed copy could
+        // never be replaced in place ("App not installed"). Everything shipped so far carries
+        // 4000004 (1000000 * abi + versionCode), so 5 leads that fleet. A build can still
+        // override both numbers with -Prx.versionCode / -Prx.versionName.
+        versionCode = (project.findProperty("rx.versionCode") as String?)?.toIntOrNull() ?: 5
+        versionName = (project.findProperty("rx.versionName") as String?) ?: "1.0.2"
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
@@ -178,11 +183,8 @@ android {
         )
     }
 
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-    }
+    // A single packaging block covers every variant. A duplicate one lived here before and was
+    // removed; two blocks saying the same thing only risked drifting apart.
 
     testOptions {
         unitTests.all {
