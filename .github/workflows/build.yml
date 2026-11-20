@@ -142,10 +142,28 @@ jobs:
       - name: Copy the Aether engine into the app module
         run: |
           if [ -f libs-aether/arm64-v8a/libaether.so ]; then
+            SYSROOT_LIB="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
             for abi in arm64-v8a armeabi-v7a x86_64; do
               mkdir -p "V2rayNG/app/libs/${abi}"
               cp libs-aether/${abi}/*.so "V2rayNG/app/libs/${abi}/"
+              case "$abi" in
+                arm64-v8a)   triple="aarch64-linux-android" ;;
+                armeabi-v7a) triple="arm-linux-androideabi" ;;
+                x86_64)      triple="x86_64-linux-android" ;;
+              esac
+              if [ -f "V2rayNG/app/libs/${abi}/libc++_shared.so" ] && [ -f "${SYSROOT_LIB}/${triple}/libc++_shared.so" ]; then
+                cp "${SYSROOT_LIB}/${triple}/libc++_shared.so" "V2rayNG/app/libs/${abi}/libc++_shared.so"
+              fi
             done
+            # Verify all undefined symbols of libaether.so against NDK 30 libc++_shared.so (when needed)
+            LLVM_NM=$(ls "$ANDROID_HOME"/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm | head -1)
+            if [ -f "V2rayNG/app/libs/arm64-v8a/libc++_shared.so" ]; then
+              "$LLVM_NM" -D --defined-only "V2rayNG/app/libs/arm64-v8a/libc++_shared.so" | awk '{print $NF}' | sort -u > "$RUNNER_TEMP/libcxx_syms.txt"
+              MISSING=$("$LLVM_NM" -D --undefined-only "V2rayNG/app/libs/arm64-v8a/libaether.so" | awk '{print $NF}' | grep '^_Z.*__ndk1' | grep -vxFf "$RUNNER_TEMP/libcxx_syms.txt" || true)
+              if [ -n "$MISSING" ]; then
+                echo "::warning::Missing NDK C++ symbols in NDK 30 libc++_shared.so: $MISSING"
+              fi
+            fi
             echo "Aether engine included (commit $(cat libs-aether/AETHER_COMMIT))"
             ls -la V2rayNG/app/libs/arm64-v8a
           else
@@ -347,7 +365,7 @@ jobs:
 
             "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$V101" 2>/dev/null > "$RUNNER_TEMP/v101.xml"
             "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$SAMPLE" 2>/dev/null > "$RUNNER_TEMP/v12.xml"
-            XML_DIFF=$(diff -u "$RUNNER_TEMP/v101.xml" "$RUNNER_TEMP/v12.xml" | grep -E "^[+-][^+-]" | grep -v "versionCode" | tr '\n' '|' | head -c 900)
+            XML_DIFF=$(diff -u "$RUNNER_TEMP/v101.xml" "$RUNNER_TEMP/v12.xml" | grep -E "^[+-][^+-]" | grep -E "E: |name\(|icon\(|foregroundServiceType|process\(|extractNativeLibs" | tr '\n' '|' | head -c 900)
             echo "::notice title=manifest-diff::$XML_DIFF"
 
             unzip -Z1 "$V101" | sort > "$RUNNER_TEMP/v101.files"
