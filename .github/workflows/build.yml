@@ -393,20 +393,38 @@ jobs:
             V2rayNG/app/build/outputs/apk/playstore/release/APK-FACTS.txt
           if-no-files-found: error
 
-      - name: Upload arm64-v8a APK
-        uses: actions/upload-artifact@v4
+      - name: Prepare direct APK and standard ZIP files
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          mkdir -p "$RUNNER_TEMP/direct"
+          ARM64_APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
+          UNI_APK=$(ls RXVPN_*_universal.apk | head -1)
+          cp "$ARM64_APK" "$RUNNER_TEMP/direct/RXVPN_1.2_arm64-v8a.apk"
+          cp "$UNI_APK" "$RUNNER_TEMP/direct/RXVPN_1.2_universal.apk"
+          # Standard Info-ZIP (no Zip64, no streaming data descriptor) so built-in Android File Managers extract it cleanly.
+          zip -0 -j "$RUNNER_TEMP/direct/RXVPN_1.2_arm64-v8a.zip" "$ARM64_APK"
+          unzip -t "$RUNNER_TEMP/direct/RXVPN_1.2_arm64-v8a.zip"
+          ls -lh "$RUNNER_TEMP/direct"
+
+      - name: Upload direct arm64-v8a APK (no ZIP wrapper)
+        uses: actions/upload-artifact@v7
         with:
-          name: RXVPN-arm64-v8a
-          compression-level: 0
-          path: V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_*_arm64-v8a.apk
+          archive: false
+          path: ${{ runner.temp }}/direct/RXVPN_1.2_arm64-v8a.apk
           if-no-files-found: error
 
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v4
+      - name: Upload standard arm64-v8a ZIP (non-Zip64)
+        uses: actions/upload-artifact@v7
         with:
-          name: RXVPN-universal
-          compression-level: 0
-          path: V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_*_universal.apk
+          archive: false
+          path: ${{ runner.temp }}/direct/RXVPN_1.2_arm64-v8a.zip
+          if-no-files-found: error
+
+      - name: Upload direct universal APK (no ZIP wrapper)
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ${{ runner.temp }}/direct/RXVPN_1.2_universal.apk
           if-no-files-found: error
 
   release:
