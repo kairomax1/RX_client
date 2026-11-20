@@ -97,7 +97,7 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
 
     data class UiState(
         val config: FragmentVpn.Config = FragmentVpn.currentConfig(),
-        val aetherAvailable: Boolean = AetherEngine.isAvailable(application),
+        val aetherAvailable: Boolean = false,
         val isRunning: Boolean = false,
         val isConnecting: Boolean = false,
         val isProbing: Boolean = false,
@@ -329,10 +329,10 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                             break
                         }
                         AetherEngine.Phase.Searching -> {
-                            val detail = if (status.route.isNotBlank() && status.total > 0) {
+                            val detail = if (status.label.isNotBlank() && status.total > 0) {
                                 app.getString(
                                     R.string.fragment_vpn_tunnel_searching,
-                                    status.route,
+                                    status.label,
                                     status.attempt.coerceAtLeast(1),
                                     status.total,
                                 )
