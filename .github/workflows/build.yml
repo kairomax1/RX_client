@@ -386,10 +386,27 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RXVPN-apk
+          compression-level: 0
           path: |
             V2rayNG/app/build/outputs/apk/playstore/release/*.apk
             V2rayNG/app/build/outputs/apk/playstore/release/SHA256SUMS.txt
             V2rayNG/app/build/outputs/apk/playstore/release/APK-FACTS.txt
+          if-no-files-found: error
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RXVPN-arm64-v8a
+          compression-level: 0
+          path: V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_*_arm64-v8a.apk
+          if-no-files-found: error
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RXVPN-universal
+          compression-level: 0
+          path: V2rayNG/app/build/outputs/apk/playstore/release/RXVPN_*_universal.apk
           if-no-files-found: error
 
   release:
