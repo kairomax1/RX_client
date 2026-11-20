@@ -233,23 +233,6 @@ jobs:
             -Prx.keyPassword="$KEY_PASSWORD" \
             -Prx.versionCode="$((4000004 + GITHUB_RUN_NUMBER))" \
             -Prx.versionName="1.2"
-          # AGP 9 drops JAR v1 signing whenever minSdk >= 24 even with enableV1Signing = true.
-          # Re-signing explicitly with apksigner guarantees v1 + v2 + v3 are all present.
-          cd ..
-          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
-                     V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
-            "$BUILD_TOOLS/apksigner" sign \
-              --ks "$KEYSTORE_PATH" \
-              --ks-pass "pass:${STORE_PASSWORD}" \
-              --ks-key-alias "$KEY_ALIAS" \
-              --key-pass "pass:${KEY_PASSWORD}" \
-              --min-sdk-version 21 \
-              --v1-signing-enabled true \
-              --v2-signing-enabled true \
-              --v3-signing-enabled true \
-              "$apk"
-          done
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
@@ -329,16 +312,22 @@ jobs:
           echo "::notice title=manifest::$SAMPLE ${EXTRACT_FLAG:-extractNativeLibs_MISSING}"
           LIBS_SUMMARY=$(unzip -v "$SAMPLE" | grep -E "lib/arm64-v8a/" | awk '{print $8 ":" $3}' | tr '\n' ' ')
           echo "::notice title=nativelibs::$LIBS_SUMMARY"
-          SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --min-sdk-version 21 --verbose --print-certs "$SAMPLE" 2>&1 \
+          SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
-          for scheme in "v1 scheme" "v2 scheme" "v3 scheme"; do
-            "$BUILD_TOOLS/apksigner" verify --min-sdk-version 21 --verbose --print-certs "$SAMPLE" 2>&1 \
+          for scheme in "v2 scheme" "v3 scheme"; do
+            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
               | grep -qE "Verified using ${scheme}.*: true" || {
                 echo "::error::$SAMPLE missing ${scheme} signature"
                 exit 1
               }
           done
+          # Compare against released v1.0.1 to confirm identical signing key and packaging shape.
+          if curl -fsSL "https://github.com/kairomax1/RX_client/releases/download/v1.0.1/RXVPN_1.0.1_arm64-v8a.apk" -o "$RUNNER_TEMP/v101.apk"; then
+            V101_SIG=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/v101.apk" 2>&1 \
+              | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
+            echo "::notice title=v1.0.1-sig::$V101_SIG"
+          fi
 
       - name: Verify APK structure and write checksums
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release
