@@ -1,0 +1,37 @@
+name: Diagnose RX VPN installation
+on:
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RXVPN-apk
+          path: apk
+          run-id: 44823591545
+          github-token: ${{ github.token }}
+      - name: Check exact build files
+        working-directory: apk
+        run: |
+          sha256sum -c SHA256SUMS.txt
+          for apk in *.apk; do unzip -tq "$apk"; done
+      - name: Get previous public version for update test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.0.1 -R "$GITHUB_REPOSITORY" -p '*_x86_64.apk' -D previous
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Test clean install and update with Android Package Manager
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          script: |
+            adb install apk/*_x86_64.apk
+            adb uninstall com.mobix.vpn
+            adb install previous/*_x86_64.apk
+            adb install -r apk/*_x86_64.apk
