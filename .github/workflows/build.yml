@@ -244,6 +244,7 @@ jobs:
               --ks-pass "pass:${STORE_PASSWORD}" \
               --ks-key-alias "$KEY_ALIAS" \
               --key-pass "pass:${KEY_PASSWORD}" \
+              --min-sdk-version 21 \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
@@ -328,11 +329,11 @@ jobs:
           echo "::notice title=manifest::$SAMPLE ${EXTRACT_FLAG:-extractNativeLibs_MISSING}"
           LIBS_SUMMARY=$(unzip -v "$SAMPLE" | grep -E "lib/arm64-v8a/" | awk '{print $8 ":" $3}' | tr '\n' ' ')
           echo "::notice title=nativelibs::$LIBS_SUMMARY"
-          SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
+          SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --min-sdk-version 21 --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
           for scheme in "v1 scheme" "v2 scheme" "v3 scheme"; do
-            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
+            "$BUILD_TOOLS/apksigner" verify --min-sdk-version 21 --verbose --print-certs "$SAMPLE" 2>&1 \
               | grep -qE "Verified using ${scheme}.*: true" || {
                 echo "::error::$SAMPLE missing ${scheme} signature"
                 exit 1
