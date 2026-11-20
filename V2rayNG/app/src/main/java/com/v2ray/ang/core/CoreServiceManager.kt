@@ -188,8 +188,10 @@ object CoreServiceManager {
                 (if (GamingMode.isEnabled()) ", DNS mode on" else ""),
         )
         // The Aether profile is only a pointer to the engine's local port; the engine itself
-        // has to be running behind it.
-        if (AetherEngine.isAetherProfile(config)) AetherEngine.start(service) else AetherEngine.stop()
+        // has to be running behind it (Fragment VPN also uses Aether when tunnel mode is on).
+        val useAether = AetherEngine.isAetherProfile(config) ||
+            (FragmentVpn.isFragmentProfile(guid) && FragmentVpn.shouldUseAetherTunnel(service))
+        if (useAether) AetherEngine.start(service) else AetherEngine.stop()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {

@@ -53,13 +53,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.core.CoreNativeManager
 import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.FragmentVpn
 import com.v2ray.ang.handler.MmkvManager
-import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
@@ -77,6 +78,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.URL
 
 class FragmentVpnActivity : BaseComponentActivity() {
 
@@ -92,9 +97,11 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
 
     data class UiState(
         val config: FragmentVpn.Config = FragmentVpn.currentConfig(),
+        val aetherAvailable: Boolean = AetherEngine.isAvailable(application),
         val isRunning: Boolean = false,
         val isConnecting: Boolean = false,
         val isProbing: Boolean = false,
+        val statusDetail: String? = null,
         val presetPings: Map<FragmentVpn.Preset, Long> = emptyMap(),
         val livePingMs: Long? = FragmentVpn.currentConfig().lastPingMs,
         val ipInfo: String? = null,
@@ -111,10 +118,11 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
             while (isActive) {
                 val active = FragmentVpn.isActiveRunning(getApplication())
                 _state.update { cur ->
-                    if (cur.isRunning != active) {
+                    if (cur.isConnecting) {
+                        cur
+                    } else if (cur.isRunning != active) {
                         cur.copy(
                             isRunning = active,
-                            isConnecting = if (active) false else cur.isConnecting,
                             dirtyWhileRunning = if (!active) false else cur.dirtyWhileRunning,
                         )
                     } else cur
@@ -130,8 +138,20 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
         _state.update {
             it.copy(
                 config = cfg,
+                aetherAvailable = AetherEngine.isAvailable(getApplication()),
                 isRunning = active,
                 livePingMs = cfg.lastPingMs ?: it.livePingMs,
+            )
+        }
+    }
+
+    fun setTunnelEnabled(enabled: Boolean) {
+        FragmentVpn.saveTunnelEnabled(enabled)
+        _state.update {
+            it.copy(
+                config = FragmentVpn.currentConfig(),
+                error = null,
+                dirtyWhileRunning = it.isRunning,
             )
         }
     }
@@ -228,12 +248,21 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun startFragmentVpn() {
-        if (_state.value.isProbing) return
+        if (_state.value.isProbing || _state.value.isConnecting) return
         viewModelScope.launch {
-            _state.update { it.copy(isConnecting = true, error = null, dirtyWhileRunning = false) }
+            _state.update {
+                it.copy(
+                    isConnecting = true,
+                    error = null,
+                    statusDetail = null,
+                    dirtyWhileRunning = false,
+                )
+            }
             val app = getApplication<Application>()
+            val useTunnel = FragmentVpn.shouldUseAetherTunnel(app)
             val cfg = FragmentVpn.currentConfig()
-            val probeResults = if (cfg.preset == FragmentVpn.Preset.AUTO) {
+
+            val probeResults = if (!useTunnel && cfg.preset == FragmentVpn.Preset.AUTO) {
                 _state.update { it.copy(isProbing = true) }
                 withContext(Dispatchers.IO) { FragmentVpn.probePresets(app) }
             } else {
@@ -241,7 +270,7 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
             }
             _state.update { it.copy(isProbing = false, config = FragmentVpn.currentConfig()) }
 
-            if (probeResults.isNotEmpty() && probeResults.values.none { it > 0L }) {
+            if (!useTunnel && probeResults.isNotEmpty() && probeResults.values.none { it > 0L }) {
                 _state.update {
                     it.copy(
                         isConnecting = false,
@@ -253,6 +282,7 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                 return@launch
             }
 
+            val startedAt = System.currentTimeMillis()
             withContext(Dispatchers.IO) {
                 if (ServiceRuntimeState.isRunning(app)) {
                     LauncherManager.stopService(app)
@@ -263,10 +293,9 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                 LauncherManager.startService(app, guid = guid)
             }
 
-            // Wait up to 8s for VPN runtime state and measure live ping + own IP/ISP.
             var up = false
-            repeat(16) {
-                delay(500L)
+            repeat(20) {
+                delay(400L)
                 if (FragmentVpn.isActiveRunning(app)) {
                     up = true
                     return@repeat
@@ -277,34 +306,158 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                     it.copy(
                         isConnecting = false,
                         isRunning = false,
+                        statusDetail = null,
                         error = app.getString(R.string.fragment_vpn_start_failed),
                     )
                 }
                 return@launch
             }
 
-            val measuredPing = withContext(Dispatchers.IO) {
-                val testJson = FragmentVpn.buildXrayConfigJson(app, forSpeedtest = true)
-                runCatching {
-                    CoreNativeManager.measureOutboundDelay(testJson, SettingsManager.getDelayTestUrl())
-                }.getOrDefault(-1L)
+            if (useTunnel) {
+                val deadline = System.currentTimeMillis() + AetherEngine.MAX_SEARCH_MILLIS
+                var ready = false
+                var failed = false
+                while (System.currentTimeMillis() < deadline && FragmentVpn.isActiveRunning(app)) {
+                    val status = withContext(Dispatchers.IO) { AetherEngine.readStatus(app, startedAt) }
+                    when (status?.phase) {
+                        AetherEngine.Phase.Ready -> {
+                            ready = true
+                            break
+                        }
+                        AetherEngine.Phase.Failed -> {
+                            failed = true
+                            break
+                        }
+                        AetherEngine.Phase.Searching -> {
+                            val detail = if (status.route.isNotBlank() && status.total > 0) {
+                                app.getString(
+                                    R.string.fragment_vpn_tunnel_searching,
+                                    status.route,
+                                    status.attempt.coerceAtLeast(1),
+                                    status.total,
+                                )
+                            } else null
+                            _state.update { it.copy(statusDetail = detail) }
+                        }
+                        null -> {}
+                    }
+                    delay(450L)
+                }
+                if (!ready || failed || !FragmentVpn.isActiveRunning(app)) {
+                    withContext(Dispatchers.IO) { LauncherManager.stopService(app) }
+                    _state.update {
+                        it.copy(
+                            isConnecting = false,
+                            isRunning = false,
+                            statusDetail = null,
+                            error = app.getString(R.string.fragment_vpn_tunnel_failed),
+                        )
+                    }
+                    return@launch
+                }
             }
+
+            val (measuredPing, ipText) = withContext(Dispatchers.IO) {
+                val ping = probeSocks204(SettingsManager.getSocksPort(), SettingsManager.getDelayTestUrl())
+                    .takeIf { it > 0L }
+                    ?: if (!useTunnel) {
+                        runCatching {
+                            CoreNativeManager.measureOutboundDelay(
+                                FragmentVpn.buildXrayConfigJson(app, forSpeedtest = true),
+                                SettingsManager.getDelayTestUrl(),
+                            )
+                        }.getOrDefault(-1L)
+                    } else -1L
+                val exit = probeSocksIp(SettingsManager.getSocksPort())
+                ping to exit
+            }
+
+            if (!useTunnel && measuredPing <= 0L && ipText.isNullOrBlank()) {
+                withContext(Dispatchers.IO) { LauncherManager.stopService(app) }
+                _state.update {
+                    it.copy(
+                        isConnecting = false,
+                        isRunning = false,
+                        statusDetail = null,
+                        livePingMs = -1L,
+                        error = app.getString(R.string.fragment_vpn_probe_failed),
+                    )
+                }
+                return@launch
+            }
+
             if (measuredPing > 0L) FragmentVpn.saveLastPing(measuredPing)
-            val whoAmI = withContext(Dispatchers.IO) { runCatching { PublicConfigs.whoAmI() }.getOrNull() }
-            val ipText = whoAmI?.let { (ip, country) ->
-                listOf(ip, country).filter { it.isNotBlank() }.joinToString(" · ")
-            }
-            AppLog.info(AppLog.Section.Connection, "Fragment VPN active (${FragmentVpn.currentConfig().resolvedPreset.key}, ${measuredPing}ms)")
+            AppLog.info(
+                AppLog.Section.Connection,
+                "Fragment VPN active (tunnel=$useTunnel, preset=${FragmentVpn.currentConfig().resolvedPreset.key}, ${measuredPing}ms)",
+            )
             _state.update {
                 it.copy(
                     isConnecting = false,
                     isRunning = true,
+                    statusDetail = null,
                     presetPings = if (probeResults.isNotEmpty()) probeResults else it.presetPings,
                     livePingMs = measuredPing.takeIf { p -> p > 0L } ?: it.livePingMs,
                     ipInfo = ipText ?: it.ipInfo,
                 )
             }
         }
+    }
+
+    private fun probeSocks204(socksPort: Int, targetUrl: String): Long {
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(AppConfig.LOOPBACK, socksPort))
+        val urls = listOf(targetUrl, "https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204").distinct()
+        for (url in urls) {
+            val elapsed = runCatching {
+                val t0 = System.currentTimeMillis()
+                val conn = URL(url).openConnection(proxy) as HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.instanceFollowRedirects = false
+                try {
+                    val code = conn.responseCode
+                    if (code in 200..299) (System.currentTimeMillis() - t0).coerceAtLeast(1L) else -1L
+                } finally {
+                    conn.disconnect()
+                }
+            }.getOrDefault(-1L)
+            if (elapsed > 0L) return elapsed
+        }
+        return -1L
+    }
+
+    private fun probeSocksIp(socksPort: Int): String? {
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(AppConfig.LOOPBACK, socksPort))
+        val detailed = runCatching {
+            val conn = URL("http://ip-api.com/json?fields=query,country,isp").openConnection(proxy) as HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            try {
+                if (conn.responseCode in 200..299) conn.inputStream.bufferedReader().readText() else null
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
+        if (!detailed.isNullOrBlank()) {
+            val ip = Regex("\"query\"\\s*:\\s*\"([^\"]+)\"").find(detailed)?.groupValues?.get(1).orEmpty()
+            val country = Regex("\"country\"\\s*:\\s*\"([^\"]+)\"").find(detailed)?.groupValues?.get(1).orEmpty()
+            val isp = Regex("\"isp\"\\s*:\\s*\"([^\"]+)\"").find(detailed)?.groupValues?.get(1).orEmpty()
+            val formatted = listOf(ip, country, isp).filter { it.isNotBlank() }.joinToString(" · ")
+            if (formatted.isNotBlank()) return formatted
+        }
+        return runCatching {
+            val conn = URL("https://api.ipify.org").openConnection(proxy) as HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            try {
+                if (conn.responseCode in 200..299) {
+                    conn.inputStream.bufferedReader().readText().trim()
+                        .takeIf { it.length in 7..45 && it.none { c -> c.isWhitespace() } }
+                } else null
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
     }
 
     fun stopFragmentVpn() {
@@ -444,13 +597,17 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
                     )
 
                     Text(
-                        text = stringResource(
-                            R.string.fragment_vpn_active_params,
-                            presetLabel(state.config.resolvedPreset),
-                            state.config.packets,
-                            state.config.length,
-                            state.config.delay,
-                        ),
+                        text = if (state.aetherAvailable && state.config.useTunnel) {
+                            stringResource(R.string.fragment_vpn_active_tunnel)
+                        } else {
+                            stringResource(
+                                R.string.fragment_vpn_active_params,
+                                presetLabel(state.config.resolvedPreset),
+                                state.config.packets,
+                                state.config.length,
+                                state.config.delay,
+                            )
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.primary,
                     )
@@ -485,16 +642,18 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
                             onClick = onToggleClick,
                             modifier = Modifier.weight(1f),
                         )
-                        RxPromptButton(
-                            text = if (state.isProbing) {
-                                stringResource(R.string.fragment_vpn_probing_short)
-                            } else {
-                                stringResource(R.string.fragment_vpn_probe_best)
-                            },
-                            tone = RxPromptTone.Ghost,
-                            onClick = { if (!state.isProbing) viewModel.probePresets() },
-                            modifier = Modifier.weight(1f),
-                        )
+                        if (!state.aetherAvailable || !state.config.useTunnel) {
+                            RxPromptButton(
+                                text = if (state.isProbing) {
+                                    stringResource(R.string.fragment_vpn_probing_short)
+                                } else {
+                                    stringResource(R.string.fragment_vpn_probe_best)
+                                },
+                                tone = RxPromptTone.Ghost,
+                                onClick = { if (!state.isProbing) viewModel.probePresets() },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
 
                     if (state.isProbing || state.isConnecting) {
@@ -504,7 +663,7 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                             Text(
-                                text = if (state.isProbing) {
+                                text = state.statusDetail ?: if (state.isProbing) {
                                     stringResource(R.string.fragment_vpn_probing_hint)
                                 } else {
                                     stringResource(R.string.fragment_vpn_connecting_hint)
@@ -525,7 +684,44 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
                     }
                 }
 
-                // Preset Selector Card
+                // Tunnel Mode Card (when Aether is available)
+                if (state.aetherAvailable) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(rxGlassBrush())
+                            .border(1.dp, colors.outline.copy(alpha = 0.18f), RoundedCornerShape(20.dp))
+                            .padding(16.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = stringResource(R.string.fragment_vpn_tunnel_title),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onSurface,
+                                )
+                                Text(
+                                    text = stringResource(R.string.fragment_vpn_tunnel_summary),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.onSurface.copy(alpha = 0.74f),
+                                )
+                            }
+                            Switch(
+                                checked = state.config.useTunnel,
+                                onCheckedChange = { viewModel.setTunnelEnabled(it) },
+                            )
+                        }
+                    }
+                }
+
+                // Preset Selector Card (for Direct SNI Fragment mode)
+                if (!state.aetherAvailable || !state.config.useTunnel) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -628,6 +824,7 @@ private fun FragmentVpnScreen(viewModel: FragmentVpnViewModel, onBack: () -> Uni
                             }
                         }
                     }
+                }
                 }
 
                 // DoH & Routing Options Card

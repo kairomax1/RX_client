@@ -3,6 +3,7 @@ package com.v2ray.ang.handler
 import android.content.Context
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.core.CoreNativeManager
 import com.v2ray.ang.dto.ConfigResult
 import com.v2ray.ang.dto.V2rayConfig
@@ -10,17 +11,20 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.util.JsonUtil
+import com.v2ray.ang.util.Utils
 
 /**
- * Server-less Fragment VPN: routes traffic directly from the user's own connection
- * through an Xray `freedom` outbound armed with `finalmask` TCP fragmentation and
- * UDP noise + encrypted DoH, bypassing SNI/TLS filtering without any remote proxy server.
+ * Server-less Fragment VPN: works out of the box without any remote server by routing
+ * traffic through the built-in Aether (MASQUE HTTP/2 + Fragment + ECH + WireGuard/Noize)
+ * encrypted tunnel when available, or directly through Xray `freedom` with `finalmask`
+ * TCP fragmentation + DoH in direct SNI-fragment mode.
  */
 object FragmentVpn {
 
     const val PROFILE_GUID = "rx-fragment-vpn"
     const val GROUP_ID = "rx_fragment_vpn"
 
+    private const val PREF_USE_TUNNEL = "pref_rx_frag_vpn_use_tunnel"
     private const val PREF_PRESET = "pref_rx_frag_vpn_preset"
     private const val PREF_AUTO_WINNER = "pref_rx_frag_vpn_auto_winner"
     private const val PREF_PACKETS = "pref_rx_frag_vpn_packets"
@@ -65,6 +69,7 @@ object FragmentVpn {
     }
 
     data class Config(
+        val useTunnel: Boolean,
         val preset: Preset,
         val resolvedPreset: Preset,
         val packets: String,
@@ -79,11 +84,21 @@ object FragmentVpn {
 
     fun isFragmentProfile(guid: String?): Boolean = guid == PROFILE_GUID
 
+    fun isTunnelEnabled(): Boolean = MmkvManager.decodeSettingsBool(PREF_USE_TUNNEL, true)
+
+    fun saveTunnelEnabled(enabled: Boolean) {
+        MmkvManager.encodeSettings(PREF_USE_TUNNEL, enabled)
+    }
+
+    fun shouldUseAetherTunnel(context: Context): Boolean =
+        isTunnelEnabled() && AetherEngine.isAvailable(context)
+
     fun isActiveRunning(context: Context): Boolean =
         ServiceRuntimeState.isRunning(context) &&
             MmkvManager.getSelectServer() == PROFILE_GUID
 
     fun currentConfig(): Config {
+        val useTunnel = isTunnelEnabled()
         val selected = Preset.fromKey(MmkvManager.decodeSettingsString(PREF_PRESET))
         val winner = Preset.fromKey(MmkvManager.decodeSettingsString(PREF_AUTO_WINNER))
             .takeIf { it in Preset.measurablePresets } ?: Preset.BALANCED
@@ -113,6 +128,7 @@ object FragmentVpn {
         val doh = DohOption.fromKey(MmkvManager.decodeSettingsString(PREF_DOH))
         val lastPing = MmkvManager.decodeSettingsString(PREF_LAST_PING)?.toLongOrNull()
         return Config(
+            useTunnel = useTunnel,
             preset = selected,
             resolvedPreset = resolved,
             packets = packets,
@@ -165,12 +181,13 @@ object FragmentVpn {
                 ),
             )
         }
+        val useTunnel = shouldUseAetherTunnel(context)
         val profile = MmkvManager.decodeServerConfig(PROFILE_GUID)
             ?: ProfileItem.create(EConfigType.CUSTOM)
         profile.subscriptionId = GROUP_ID
         profile.remarks = context.getString(R.string.fragment_vpn_title)
-        profile.server = "1.1.1.1"
-        profile.serverPort = "443"
+        profile.server = if (useTunnel) AetherEngine.HOST else "1.1.1.1"
+        profile.serverPort = if (useTunnel) AetherEngine.PORT.toString() else "443"
         MmkvManager.encodeServerConfig(PROFILE_GUID, profile)
         MmkvManager.encodeServerRaw(PROFILE_GUID, buildXrayConfigJson(context, forSpeedtest = false))
         return PROFILE_GUID
@@ -221,6 +238,7 @@ object FragmentVpn {
         forSpeedtest: Boolean = false,
     ): String {
         val cfg = currentConfig()
+        val useTunnel = !forSpeedtest && presetOverride == null && shouldUseAetherTunnel(context)
         val activePreset = presetOverride ?: cfg.resolvedPreset
         val packets = if (presetOverride == null && cfg.preset == Preset.CUSTOM) cfg.packets else activePreset.packets
         val length = if (presetOverride == null && cfg.preset == Preset.CUSTOM) cfg.length else activePreset.length
@@ -229,11 +247,17 @@ object FragmentVpn {
         val ipv6Enabled = runCatching { MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true }.getOrDefault(false)
         val domainStrategy = if (ipv6Enabled) "UseIP" else "UseIPv4"
         val logLevel = runCatching { MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) }.getOrNull() ?: "warning"
+        val needTun = !forSpeedtest && SettingsManager.isVpnMode() && !SettingsManager.isUsingHevTun()
 
         val inbounds = arrayListOf<V2rayConfig.InboundBean>()
         if (!forSpeedtest) {
             val sniffingDest = arrayListOf("http", "tls")
             if (cfg.dropQuic) sniffingDest.add("quic")
+            val sniffing = V2rayConfig.InboundBean.SniffingBean(
+                enabled = true,
+                destOverride = sniffingDest,
+                routeOnly = false,
+            )
             inbounds.add(
                 V2rayConfig.InboundBean(
                     tag = "socks",
@@ -245,63 +269,77 @@ object FragmentVpn {
                         udp = true,
                         userLevel = AppConfig.DEFAULT_LEVEL,
                     ),
-                    sniffing = V2rayConfig.InboundBean.SniffingBean(
-                        enabled = true,
-                        destOverride = sniffingDest,
-                        routeOnly = false,
-                    ),
+                    sniffing = sniffing,
                 )
             )
+            if (needTun) {
+                val tunTemplate = runCatching {
+                    val raw = Utils.readTextFromAssets(context, "v2ray_config_with_tun.json")
+                    JsonUtil.fromJson(raw, V2rayConfig::class.java)?.inbounds?.firstOrNull { it.tag == "tun" }
+                }.getOrNull()
+                if (tunTemplate != null) {
+                    tunTemplate.settings?.mtu = SettingsManager.getVpnMtu()
+                    tunTemplate.sniffing = sniffing
+                    inbounds.add(tunTemplate)
+                }
+            }
         }
 
-        val fragmentProxyOutbound = V2rayConfig.OutboundBean(
-            tag = AppConfig.TAG_PROXY,
-            protocol = AppConfig.PROTOCOL_FREEDOM,
-            settings = V2rayConfig.OutboundBean.OutSettingsBean(
-                domainStrategy = domainStrategy,
-            ),
-            streamSettings = V2rayConfig.OutboundBean.StreamSettingsBean(
-                network = null,
-                sockopt = V2rayConfig.OutboundBean.StreamSettingsBean.SockoptBean(
-                    TcpNoDelay = true,
-                    tcpKeepAliveIdle = 30,
+        val proxyOutbound = if (useTunnel) {
+            V2rayConfig.OutboundBean(
+                tag = AppConfig.TAG_PROXY,
+                protocol = EConfigType.SOCKS.name.lowercase(),
+                settings = V2rayConfig.OutboundBean.OutSettingsBean(
+                    address = AetherEngine.HOST,
+                    port = AetherEngine.PORT,
+                    level = AppConfig.DEFAULT_LEVEL,
+                ),
+                streamSettings = V2rayConfig.OutboundBean.StreamSettingsBean(
+                    network = "tcp",
+                    sockopt = V2rayConfig.OutboundBean.StreamSettingsBean.SockoptBean(
+                        TcpNoDelay = true,
+                        tcpKeepAliveIdle = 30,
+                    ),
+                ),
+                mux = null,
+            )
+        } else {
+            V2rayConfig.OutboundBean(
+                tag = AppConfig.TAG_PROXY,
+                protocol = AppConfig.PROTOCOL_FREEDOM,
+                settings = V2rayConfig.OutboundBean.OutSettingsBean(
                     domainStrategy = domainStrategy,
-                    happyEyeballs = V2rayConfig.OutboundBean.StreamSettingsBean.HappyEyeballsBean(
-                        prioritizeIPv6 = ipv6Enabled,
-                        maxConcurrentTry = 4,
-                        tryDelayMs = 250,
-                        interleave = 2,
+                ),
+                streamSettings = V2rayConfig.OutboundBean.StreamSettingsBean(
+                    network = null,
+                    sockopt = V2rayConfig.OutboundBean.StreamSettingsBean.SockoptBean(
+                        TcpNoDelay = true,
+                        tcpKeepAliveIdle = 30,
+                        domainStrategy = domainStrategy,
+                        happyEyeballs = V2rayConfig.OutboundBean.StreamSettingsBean.HappyEyeballsBean(
+                            prioritizeIPv6 = ipv6Enabled,
+                            maxConcurrentTry = 4,
+                            tryDelayMs = 250,
+                            interleave = 2,
+                        ),
+                    ),
+                    finalmask = V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean(
+                        tcp = listOf(
+                            V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
+                                type = "fragment",
+                                settings = V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
+                                    packets = packets,
+                                    length = length,
+                                    delay = delay,
+                                    maxSplit = maxSplit,
+                                ),
+                            )
+                        ),
                     ),
                 ),
-                finalmask = V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean(
-                    tcp = listOf(
-                        V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                            type = "fragment",
-                            settings = V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
-                                packets = packets,
-                                length = length,
-                                delay = delay,
-                                maxSplit = maxSplit,
-                            ),
-                        )
-                    ),
-                    udp = listOf(
-                        V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                            type = "noise",
-                            settings = V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
-                                noise = listOf(
-                                    V2rayConfig.OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean.NoiseMaskBean(
-                                        rand = activePreset.noiseRand,
-                                        delay = activePreset.noiseDelay,
-                                    )
-                                )
-                            ),
-                        )
-                    ),
-                ),
-            ),
-            mux = null,
-        )
+                mux = null,
+            )
+        }
 
         val directOutbound = V2rayConfig.OutboundBean(
             tag = AppConfig.TAG_DIRECT,
@@ -333,14 +371,15 @@ object FragmentVpn {
             mux = null,
         )
 
-        val outbounds = arrayListOf(fragmentProxyOutbound, directOutbound, blockOutbound)
+        val outbounds = arrayListOf(proxyOutbound, directOutbound, blockOutbound)
         if (!forSpeedtest) outbounds.add(dnsOutbound)
 
         val rules = arrayListOf<V2rayConfig.RoutingBean.RulesBean>()
         if (!forSpeedtest) {
+            val dnsInboundTags = if (needTun) listOf("socks", "tun") else listOf("socks")
             rules.add(
                 V2rayConfig.RoutingBean.RulesBean(
-                    inboundTag = listOf("socks"),
+                    inboundTag = dnsInboundTags,
                     port = "53",
                     outboundTag = "dns-out",
                 )
@@ -402,6 +441,8 @@ object FragmentVpn {
             "https://1.1.1.1/dns-query",
             "https://8.8.8.8/dns-query",
             "https://9.9.9.9/dns-query",
+            "1.1.1.1",
+            "8.8.8.8",
         ).distinct()
         dohList.forEachIndexed { idx, url ->
             dnsServers.add(

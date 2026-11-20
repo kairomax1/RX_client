@@ -160,4 +160,21 @@ class PublicConfigsGroupsTest {
         assertTrue(activitySrc.contains("carried > 0 || added > 0"))
         assertTrue(mainActivitySrc.contains("RefreshGroups"))
     }
+
+    @Test
+    fun dailyRefreshDoesNotThrottleGroupRebuildAndMainObservesUpdatesImmediately() {
+        val publicSrc = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
+        val mainVmSrc = java.io.File("src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt").readText()
+        val mainActivitySrc = java.io.File("src/main/java/com/v2ray/ang/ui/main/MainActivity.kt").readText()
+
+        // refreshSourcesDaily must not stamp KEY_CHECKED (which blocked refreshIfDue right after it).
+        val refreshDailyBody = publicSrc.substringAfter("fun refreshSourcesDaily").substringBefore("fun refreshIfDue")
+        assertFalse(refreshDailyBody.contains("KEY_CHECKED"))
+
+        assertTrue(publicSrc.contains("val groupUpdated: StateFlow<Long>"))
+        assertTrue(publicSrc.contains("notifyGroupUpdated()"))
+        assertTrue(mainVmSrc.contains("PublicConfigs.groupUpdated"))
+        assertTrue(mainActivitySrc.contains("override fun onResume()"))
+        assertTrue(mainActivitySrc.contains("SettingsChangeManager.consumeSetupGroupTab()"))
+    }
 }

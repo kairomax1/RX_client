@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -281,8 +283,30 @@ class MainViewModel(
     // ---------- Service events ----------
     init {
         collectServiceEvents()
+        collectPublicConfigUpdates()
         setupGroupTab()
         refreshUiSettings()
+    }
+
+    private fun collectPublicConfigUpdates() {
+        viewModelScope.launch {
+            com.v2ray.ang.handler.PublicConfigs.groupUpdated
+                .drop(1)
+                .collectLatest {
+                    delay(120L)
+                    setupGroupTab(forceRefresh = true).join()
+                    val hasPublic = withContext(ioDispatcher) {
+                        dataSource.getServerGuidList(com.v2ray.ang.handler.PublicConfigs.GROUP_ID).isNotEmpty()
+                    }
+                    val currentId = _uiState.value.selectedGroupId
+                    val currentEmpty = withContext(ioDispatcher) {
+                        dataSource.getServerGuidList(currentId).isEmpty()
+                    }
+                    if (hasPublic && (currentEmpty || currentId == com.v2ray.ang.handler.PublicConfigs.GROUP_ID)) {
+                        subscriptionIdChanged(com.v2ray.ang.handler.PublicConfigs.GROUP_ID)
+                    }
+                }
+        }
     }
 
     private fun collectServiceEvents() {
@@ -774,7 +798,11 @@ class MainViewModel(
                 dataSource.initAssets()
                 dataSource.syncSubscriptions()
                 val keep = dataSource.renewPublicConfigs(_uiState.value.isRunning)
-                if (keep > 0) testPublicConfigs(keep, connect = false)
+                if (keep > 0) {
+                    val currentEmpty = dataSource.getServerGuidList(_uiState.value.selectedGroupId).isEmpty()
+                    val onPublic = _uiState.value.selectedGroupId == com.v2ray.ang.handler.PublicConfigs.GROUP_ID
+                    testPublicConfigs(keep, connect = false, openTab = currentEmpty || onPublic)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {

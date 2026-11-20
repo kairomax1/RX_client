@@ -281,12 +281,12 @@ class MainRepository(
 
     override fun renewPublicConfigs(connected: Boolean): Int {
         PublicConfigs.schedule(app)
-        // refreshIfDue renews the group itself when it can, so the answer is whether it
-        // did; asking it and then collecting again would test every candidate twice.
+        // refreshIfDue renews the group itself when due (including daily 24h updates and
+        // initial population when the group is empty).
         if (PublicConfigs.refreshIfDue(app)) return PublicConfigs.savedOptions().count
-        // New lists are waiting: the group is rebuilt, unless a tunnel is up (the servers
-        // have to be tried on the bare connection) or the user never asked for public configs.
-        if (connected || !PublicConfigs.fresh.value || !PublicConfigs.hasGroup()) return 0
+        // New lists are waiting: rebuild the group unless a tunnel is up (candidates
+        // must be measured on the bare connection).
+        if (connected || (!PublicConfigs.fresh.value && PublicConfigs.hasGroup())) return 0
         val options = PublicConfigs.savedOptions()
         val outcome = PublicConfigs.collect(app, options, java.util.concurrent.atomic.AtomicBoolean(false)) {}
         return if (outcome.added > 0) options.count else 0

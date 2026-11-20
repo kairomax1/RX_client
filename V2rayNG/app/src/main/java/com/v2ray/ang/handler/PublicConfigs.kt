@@ -1072,7 +1072,6 @@ object PublicConfigs {
         val largeListing = download(context, small = false, ignoreTags = true)
         if (smallListing.answered + largeListing.answered > 0) {
             MmkvManager.encodeSettings(KEY_DAILY_SOURCES, now)
-            MmkvManager.encodeSettings(KEY_CHECKED, now)
         }
         if (smallListing.changed || largeListing.changed) {
             setFresh(true)
@@ -1085,27 +1084,33 @@ object PublicConfigs {
     }
 
     /**
-     * Looks at the short lists when the last look is older than fifteen minutes, or when
-     * the current public configs are dead. True when the group was renewed.
+     * Looks at the short lists when the last look is older than fifteen minutes, when
+     * the current public configs are dead, or when the daily 24h update is due.
+     * True when the group was renewed.
      */
     fun refreshIfDue(context: Context): Boolean {
         val now = System.currentTimeMillis()
-        if (now - MmkvManager.decodeSettingsLong(KEY_CHECKED, 0L) < REFRESH_MILLIS) return false
+        val lastRebuilt = MmkvManager.decodeSettingsLong(KEY_REBUILT, 0L)
+        val dailyDue = !hasGroup() || (now - lastRebuilt >= DAILY_MILLIS)
+        if (!dailyDue && now - MmkvManager.decodeSettingsLong(KEY_CHECKED, 0L) < REFRESH_MILLIS) return false
 
         // The lists are only looked at again after fifteen minutes, so the marker
         // is written before the work starts — otherwise two calls at once would
         // both download. It is put back when the work cannot finish, below, so a
         // check that was blocked is not counted as one that was done.
         MmkvManager.encodeSettings(KEY_CHECKED, now)
+        if (dailyDue) {
+            runCatching { refreshSourcesDaily(context) }
+        }
         val dead = areGroupConfigsDead()
-        val listing = download(context, small = true, ignoreTags = dead)
+        val listing = download(context, small = true, ignoreTags = dead || dailyDue)
         if (dead) {
             // Also refresh large lists when existing configs are dead so fresh sources are available.
             download(context, small = false, ignoreTags = true)
         }
-        val old = now - MmkvManager.decodeSettingsLong(KEY_REBUILT, 0L) >= REBUILD_MILLIS
-        if (listing.changed || dead) setFresh(true)
-        if (!listing.changed && !old && !dead) return false
+        val old = now - lastRebuilt >= REBUILD_MILLIS
+        if (listing.changed || dead || dailyDue) setFresh(true)
+        if (!dailyDue && !listing.changed && !old && !dead) return false
         if (ServiceRuntimeState.isRunning(context)) {
             MmkvManager.encodeSettings(KEY_CHECKED, now - REFRESH_MILLIS)
             AppLog.info(AppLog.Section.Other, "Public configs: a tunnel is up; the group is renewed at the next idle check")
@@ -1125,7 +1130,7 @@ object PublicConfigs {
             setFresh(false)
             MmkvManager.encodeSettings(KEY_REBUILT, now)
             MmkvManager.encodeSettings(KEY_CHECKED, now)
-            runCatching { SettingsChangeManager.makeSetupGroupTab() }
+            notifyGroupUpdated()
             return true
         }
         return false
@@ -1141,6 +1146,15 @@ object PublicConfigs {
 
     /** True when the public group holds configs, so there is something to renew. */
     fun hasGroup(): Boolean = MmkvManager.decodeServerList(GROUP_ID).isNotEmpty()
+
+    /** Emits a new timestamp every time [GROUP_ID] rows change so the main table updates immediately. */
+    val groupUpdated: StateFlow<Long> by lazy { groupUpdatedState }
+    private val groupUpdatedState = MutableStateFlow(0L)
+
+    private fun notifyGroupUpdated() {
+        groupUpdatedState.value = System.currentTimeMillis()
+        runCatching { SettingsChangeManager.makeSetupGroupTab() }
+    }
 
     /** True while lists newer than the configs in the group are waiting. */
     val fresh: StateFlow<Boolean> by lazy { freshState }
@@ -1467,7 +1481,10 @@ object PublicConfigs {
                                 val added = importIntoGroup(context, profile, link.raw, pingMs, speed)
                                 imported += added
                                 if (added > 0) carried += added
-                                if (added > 0) recordVerifiedLink(context, link.raw)
+                                if (added > 0) {
+                                    recordVerifiedLink(context, link.raw)
+                                    notifyGroupUpdated()
+                                }
                             }
                             report()
                         }
@@ -1516,7 +1533,7 @@ object PublicConfigs {
         setFresh(false)
         MmkvManager.encodeSettings(KEY_REBUILT, System.currentTimeMillis())
         if (imported > 0) {
-            runCatching { SettingsChangeManager.makeSetupGroupTab() }
+            notifyGroupUpdated()
         }
         AppLog.info(
             AppLog.Section.Other,

@@ -139,6 +139,13 @@ class MainActivity : HelperBaseComponentActivity() {
         checkAndRequestPermission(PermissionType.POST_NOTIFICATIONS) {}
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (SettingsChangeManager.consumeSetupGroupTab()) {
+            mainViewModel.onAction(MainAction.RefreshGroups)
+        }
+    }
+
     @Composable
     override fun ScreenContent() {
         val context = LocalContext.current
