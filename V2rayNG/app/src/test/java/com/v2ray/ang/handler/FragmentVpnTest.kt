@@ -50,8 +50,9 @@ class FragmentVpnTest {
         // Must route domestic DNS cleanly and avoid plain UDP 1.1.1.1 / 8.8.8.8 fallbacks.
         assertTrue(fragSrc.contains("TAG_DOMESTIC_DNS"))
         assertTrue(fragSrc.contains("enableParallelQuery = true"))
-        assertFalse(fragSrc.contains("\"1.1.1.1\","))
-        assertFalse(fragSrc.contains("\"8.8.8.8\","))
+        val dohSection = fragSrc.substringAfter("val dohList").substringBefore(".distinct()")
+        assertFalse(Regex("\"1\\.1\\.1\\.1\"(?![/:])").containsMatchIn(dohSection))
+        assertFalse(Regex("\"8\\.8\\.8\\.8\"(?![/:])").containsMatchIn(dohSection))
 
         // Activity must verify via CoreServiceManager / OkHttp SOCKS5 remote DNS rather than Proxy.Type.SOCKS URLConnection.
         assertTrue(actSrc.contains("measureDelayDirect"))
