@@ -63,6 +63,7 @@ class FragmentVpnTest {
         assertFalse(fragSrc.contains("remote-dns"))
 
         val enStrings = File("src/main/res/values/strings.xml").readText()
+        val faStrings = File("src/main/res/values-fa/strings.xml").readText()
         assertTrue(enStrings.contains("fragment_vpn_no_traffic"))
         assertTrue(faStrings.contains("fragment_vpn_no_traffic"))
 
