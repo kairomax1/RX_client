@@ -65,4 +65,11 @@ class UpdateReleaseTest {
         for (i in 1 until ranges.size) assertEquals(ranges[i - 1].last + 1, ranges[i].first)
         assertEquals(10_000_003L, ranges.sumOf { it.last - it.first + 1 })
     }
+
+    @Test
+    fun testBuildsAreNeverOffered() {
+        val names = listOf("RXVPN_1.0.2_test-debug_arm64-v8a.apk", "RXVPN_1.0.2_arm64-v8a.apk")
+        assertEquals("RXVPN_1.0.2_arm64-v8a.apk", UpdateRelease.pickApk(names, listOf("arm64-v8a")) { it })
+        assertEquals(null, UpdateRelease.pickApk(names.take(1), listOf("arm64-v8a")) { it })
+    }
 }

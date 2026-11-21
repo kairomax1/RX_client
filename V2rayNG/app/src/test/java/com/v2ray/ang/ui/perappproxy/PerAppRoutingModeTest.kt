@@ -24,10 +24,21 @@ class PerAppRoutingModeTest {
     }
 
     @Test
-    fun bulkSelectionEnablesOnlyModeButPreservesBypassMode() {
-        assertEquals(PerAppRoutingMode.ONLY_SELECTED, PerAppRoutingMode.afterBulkSelection(PerAppRoutingMode.ALL))
-        assertEquals(PerAppRoutingMode.ONLY_SELECTED, PerAppRoutingMode.afterBulkSelection(PerAppRoutingMode.ONLY_SELECTED))
+    fun bulkSelectionTurnsOnEverythingButThePickedApps() {
+        assertEquals(PerAppRoutingMode.EXCEPT_SELECTED, PerAppRoutingMode.afterBulkSelection(PerAppRoutingMode.ALL))
         assertEquals(PerAppRoutingMode.EXCEPT_SELECTED, PerAppRoutingMode.afterBulkSelection(PerAppRoutingMode.EXCEPT_SELECTED))
+        // A phone that still carries the old "only the apps I picked" keeps it
+        // until the next choice: turning it into "everything but the picked
+        // ones" here would send everyone's traffic the other way round.
+        assertEquals(PerAppRoutingMode.ONLY_SELECTED, PerAppRoutingMode.afterBulkSelection(PerAppRoutingMode.ONLY_SELECTED))
+    }
+
+    @Test
+    fun twoSortsAreOfferedAndTheThirdIsNot() {
+        assertEquals(
+            listOf(PerAppRoutingMode.ALL, PerAppRoutingMode.EXCEPT_SELECTED),
+            PerAppRoutingMode.choices(),
+        )
     }
 
     @Test

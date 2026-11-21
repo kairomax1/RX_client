@@ -72,6 +72,8 @@ object UpdateDownloader {
         url: String,
         size: Long = 0L,
         sha256: String? = null,
+        /** Sent with every request, but only to the host the URL names. */
+        headers: Map<String, String> = emptyMap(),
         onProgress: (Progress) -> Unit = {},
     ): File? = withContext(Dispatchers.IO) {
         val target = targetFile(context, version)
@@ -90,12 +92,12 @@ object UpdateDownloader {
                 try {
                     val ok = if (size >= MIN_SEGMENTED_BYTES) {
                         try {
-                            segmented(route, target, size, onProgress)
+                            segmented(route, target, size, headers, onProgress)
                         } catch (e: RangeNotSupported) {
-                            single(route, target, size, onProgress)
+                            single(route, target, size, headers, onProgress)
                         }
                     } else {
-                        single(route, target, size, onProgress)
+                        single(route, target, size, headers, onProgress)
                     }
                     if (ok && verify(target, size, sha256)) return@withContext target
                     if (ok) {
@@ -115,10 +117,14 @@ object UpdateDownloader {
 
     private fun routes(url: String, mirrorsAllowed: Boolean): List<Route> {
         val list = ArrayList<Route>()
-        val port = runCatching { SettingsManager.getHttpPort() }.getOrDefault(0)
-        // With the tunnel up, the local proxy is the way most likely to reach GitHub.
-        if (port > 0 && isListening(port)) list += Route("tunnel", url, port)
+        // The phone's own line first, then the tunnel, then a mirror. The order used
+        // to put the tunnel in front of everything, which is wrong for the simplest
+        // case there is: a phone on an unfiltered connection can fetch the file
+        // itself, and going through a tunnel to reach GitHub makes the download
+        // depend on whichever config happens to be up at that moment.
         list += Route("direct", url)
+        val port = runCatching { SettingsManager.getHttpPort() }.getOrDefault(0)
+        if (port > 0 && isListening(port)) list += Route("tunnel", url, port)
         if (mirrorsAllowed) MIRRORS.forEachIndexed { i, mirror -> list += Route("mirror${i + 1}", mirror + url) }
         return list
     }
@@ -130,7 +136,13 @@ object UpdateDownloader {
         false
     }
 
-    private fun client(route: Route): OkHttpClient {
+    /**
+     * A client that carries [headers], but only to the host they belong to: a download
+     * follows a redirect to a storage address, and a key meant for the API is not
+     * handed to whatever stands at the other end of that redirect.
+     */
+    private fun client(route: Route, headers: Map<String, String> = emptyMap()): OkHttpClient {
+        val owner = runCatching { java.net.URI(route.url).host }.getOrNull()
         val builder = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
@@ -147,13 +159,32 @@ object UpdateDownloader {
                 }
             }
         }
+        if (headers.isNotEmpty() && owner != null) {
+            builder.addInterceptor { chain ->
+                val same = chain.request().url.host.equals(owner, ignoreCase = true)
+                val request = if (same) {
+                    chain.request().newBuilder().apply {
+                        headers.forEach { (key, value) -> header(key, value) }
+                    }.build()
+                } else {
+                    chain.request()
+                }
+                chain.proceed(request)
+            }
+        }
         return builder.build()
     }
 
     private fun partFile(target: File, index: Int) = File(target.parentFile, "${target.name}.s$index")
 
     /** Several ranges at once, each into its own resumable piece, joined at the end. */
-    private suspend fun segmented(route: Route, target: File, size: Long, onProgress: (Progress) -> Unit): Boolean =
+    private suspend fun segmented(
+        route: Route,
+        target: File,
+        size: Long,
+        headers: Map<String, String>,
+        onProgress: (Progress) -> Unit,
+    ): Boolean =
         coroutineScope {
             val ranges = UpdateRelease.segments(size, SEGMENTS)
             val parts = ranges.indices.map { partFile(target, it) }
@@ -162,7 +193,7 @@ object UpdateDownloader {
                 if (file.length() > ranges[i].last - ranges[i].first + 1) file.delete()
             }
             val done = AtomicLong(parts.sumOf { it.length() })
-            val http = client(route)
+            val http = client(route, headers)
             val meter = launch { meter(done, size, onProgress) }
             try {
                 ranges.indices.map { i ->
@@ -170,7 +201,7 @@ object UpdateDownloader {
                         var attempt = 0
                         while (true) {
                             try {
-                                fetchRange(http, route.url, ranges[i], parts[i], done)
+                                fetchRange(http, route.url, ranges[i], parts[i], done, headers)
                                 break
                             } catch (e: RangeNotSupported) {
                                 throw e
@@ -196,13 +227,21 @@ object UpdateDownloader {
             true
         }
 
-    private suspend fun fetchRange(http: OkHttpClient, url: String, range: LongRange, part: File, done: AtomicLong) {
+    private suspend fun fetchRange(
+        http: OkHttpClient,
+        url: String,
+        range: LongRange,
+        part: File,
+        done: AtomicLong,
+        headers: Map<String, String>,
+    ) {
         val length = range.last - range.first + 1
         val have = part.length()
         if (have >= length) return
         val request = Request.Builder().url(url)
             .header("Range", "bytes=${range.first + have}-${range.last}")
             .header("Accept-Encoding", "identity")
+            .apply { headers.forEach { (key, value) -> header(key, value) } }
             .build()
         http.newCall(request).execute().use { response ->
             if (response.code == 200) throw RangeNotSupported()
@@ -225,12 +264,18 @@ object UpdateDownloader {
     }
 
     /** One plain stream, continued from the bytes already on disk when the server allows it. */
-    private suspend fun single(route: Route, target: File, size: Long, onProgress: (Progress) -> Unit): Boolean =
+    private suspend fun single(
+        route: Route,
+        target: File,
+        size: Long,
+        headers: Map<String, String>,
+        onProgress: (Progress) -> Unit,
+    ): Boolean =
         coroutineScope {
             val part = File(target.parentFile, "${target.name}.part")
             if (size > 0 && part.length() > size) part.delete()
             val have = part.length()
-            val http = client(route)
+            val http = client(route, headers)
             val done = AtomicLong(have)
             val meter = launch { meter(done, size, onProgress) }
             try {

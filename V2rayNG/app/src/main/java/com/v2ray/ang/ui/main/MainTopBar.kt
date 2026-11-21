@@ -1,5 +1,7 @@
 package com.v2ray.ang.ui.main
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.v2ray.ang.handler.PublicConfigs
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
 import com.v2ray.ang.ui.compose.AppTopBar
+import com.v2ray.ang.ui.compose.RxFanDropdownMenu
 import com.v2ray.ang.ui.compose.RxDropdownMenu
 import com.v2ray.ang.ui.compose.rememberAnimationsEnabled
 
@@ -67,8 +70,10 @@ fun MainTopBar(
     onSearchClose: () -> Unit,
     onSearchToggle: (Boolean) -> Unit,
     onMenuClick: () -> Unit,
+    onPublicConfigs: () -> Unit,
     onAction: (MainAction) -> Unit,
-    onMoreMenuAction: (MainMoreMenuAction) -> Unit
+    onMoreMenuAction: (MainMoreMenuAction) -> Unit,
+    onNavigate: (MainDestination) -> Unit,
 ) {
     if (showSearch) {
         AppTopBar(
@@ -112,12 +117,23 @@ fun MainTopBar(
                                 contentDescription = stringResource(R.string.acc_more),
                             )
                         }
-                        RxDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        // Opens by unfolding out of the button rather than fading in.
+                        RxFanDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             CompositionLocalProvider(LocalLayoutDirection provides localeDirection) {
-                                MoreMenuContent { action ->
-                                    showMenu = false
-                                    onMoreMenuAction(action)
-                                }
+                                MoreMenuContent(
+                                    onAction = { action ->
+                                        showMenu = false
+                                        onAction(action)
+                                    },
+                                    onMoreMenuAction = { action ->
+                                        showMenu = false
+                                        onMoreMenuAction(action)
+                                    },
+                                    onNavigate = { destination ->
+                                        showMenu = false
+                                        onNavigate(destination)
+                                    },
+                                )
                             }
                         }
                     }
@@ -148,8 +164,27 @@ fun MainTopBar(
                             contentDescription = stringResource(R.string.acc_search),
                         )
                     }
+                    IconButton(onClick = { onAction(MainAction.PingAndSortAll) }) {
+                        Icon(
+                            painterResource(R.drawable.ic_ping_24dp),
+                            contentDescription = stringResource(R.string.acc_ping_sort),
+                        )
+                    }
                 }
                 Spacer(Modifier.weight(1f))
+                // Free public configs: the dot says that newer lists are waiting.
+                val publicFresh by PublicConfigs.fresh.collectAsStateWithLifecycle()
+                Box {
+                    IconButton(onClick = onPublicConfigs) {
+                        Icon(
+                            painterResource(R.drawable.ic_cloud_download_24dp),
+                            contentDescription = stringResource(R.string.public_title),
+                        )
+                    }
+                    if (publicFresh) {
+                        UpdateDotBadge(Modifier.align(Alignment.TopEnd).padding(top = 9.dp, end = 9.dp))
+                    }
+                }
                 Text(
                     text = stringResource(R.string.app_name),
                     fontSize = 22.sp,

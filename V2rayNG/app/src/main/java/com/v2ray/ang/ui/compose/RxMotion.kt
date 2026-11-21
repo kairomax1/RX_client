@@ -10,9 +10,18 @@ import androidx.compose.ui.graphics.drawscope.scale
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -323,6 +332,104 @@ fun RxDropdownMenu(
         shadowElevation = 14.dp,
         border = rxFloatingBorder(),
         content = content,
+    )
+}
+
+/**
+ * A menu that opens by unfolding: the body tips down out of the button it hangs from and
+ * settles, and each row then swings in from the side, one after the next. Everything else
+ * about it is the app's own floating surface.
+ */
+@Composable
+fun RxFanDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        // The body is drawn below, so it can be folded while it opens.
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        RxUnfoldSurface(content = content)
+    }
+}
+
+/** The surface of [RxFanDropdownMenu]: hinged on its top edge, and folded back while closed. */
+@Composable
+private fun RxUnfoldSurface(content: @Composable ColumnScope.() -> Unit) {
+    val animate = rememberAnimationsEnabled()
+    val open = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (!animate) return@LaunchedEffect
+        open.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 520f))
+    }
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = Modifier
+            .graphicsLayer {
+                val shown = open.value
+                // Tipped back while closed, so it looks like a flap let down from the button.
+                rotationX = -38f * (1f - shown)
+                scaleX = 0.94f + 0.06f * shown
+                scaleY = 0.82f + 0.18f * shown
+                alpha = shown.coerceIn(0f, 1f)
+                transformOrigin = TransformOrigin(0.5f, 0f)
+            }
+            .shadow(14.dp, shape)
+            .clip(shape)
+            .background(rxFloatingColor())
+            .border(rxFloatingBorder(), shape),
+        content = content,
+    )
+}
+
+/** A row of [RxFanDropdownMenu]: it swings in from the side, a little after the row above it. */
+@Composable
+fun RxFanMenuItem(
+    index: Int,
+    text: String,
+    onClick: () -> Unit,
+    iconRes: Int? = null,
+    /** Red: for the entries that throw configs away. */
+    danger: Boolean = false,
+) {
+    val animate = rememberAnimationsEnabled()
+    val progress = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (!animate) return@LaunchedEffect
+        delay(70L + index * 42L)
+        progress.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 400f))
+    }
+    val tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    val leadingIcon: (@Composable () -> Unit)? = if (iconRes != null) {
+        {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = tint,
+            )
+        }
+    } else {
+        null
+    }
+    DropdownMenuItem(
+        text = { Text(text = text, style = MaterialTheme.typography.bodyMedium, color = tint) },
+        onClick = onClick,
+        leadingIcon = leadingIcon,
+        modifier = Modifier.graphicsLayer {
+            val shown = progress.value
+            alpha = shown.coerceIn(0f, 1f)
+            translationX = (1f - shown) * 24.dp.toPx()
+            scaleX = 0.96f + 0.04f * shown
+        },
     )
 }
 

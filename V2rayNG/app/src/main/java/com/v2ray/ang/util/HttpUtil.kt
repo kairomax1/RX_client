@@ -92,7 +92,7 @@ object HttpUtil {
 
             val ipList = sortedAddresses.mapNotNull { it.hostAddress }
 
-            LogUtil.i(AppConfig.TAG, "Resolved IPs for $host: ${ipList.joinToString()}")
+            LogUtil.i(AppConfig.TAG, "Resolved the server name to ${ipList.size} address(es)")
 
             return ipList
         } catch (e: Exception) {
@@ -112,7 +112,7 @@ object HttpUtil {
      */
     fun getUrlContent(request: UrlContentRequest): String? {
         val url = request.url ?: return null
-        val client = buildOkHttpClient(request.timeout, request.httpPort, request.proxyUsername, request.proxyPassword, followRedirects = true)
+        val client = buildOkHttpClient(request.timeout, request.httpPort, request.socksPort, request.proxyUsername, request.proxyPassword, followRedirects = true)
         val requestBuilder = Request.Builder()
             .url(url)
             .get()
@@ -155,7 +155,7 @@ object HttpUtil {
 
         while (redirects++ < maxRedirects) {
             if (currentUrl == null) continue
-            val client = buildOkHttpClient(request.timeout, request.httpPort, request.proxyUsername, request.proxyPassword, followRedirects = false)
+            val client = buildOkHttpClient(request.timeout, request.httpPort, request.socksPort, request.proxyUsername, request.proxyPassword, followRedirects = false)
             val finalUserAgent = if (request.userAgent.isNullOrBlank()) {
                 "RXVPN/${BuildConfig.VERSION_NAME}"
             } else {
@@ -228,6 +228,7 @@ object HttpUtil {
     private fun buildOkHttpClient(
         timeout: Int,
         httpPort: Int,
+        socksPort: Int = 0,
         proxyUsername: String?,
         proxyPassword: String?,
         followRedirects: Boolean
@@ -238,9 +239,14 @@ object HttpUtil {
             .followRedirects(followRedirects)
             .followSslRedirects(followRedirects)
 
-        if (httpPort != 0) {
-            builder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress(LOOPBACK, httpPort)))
-            if (!proxyUsername.isNullOrBlank() && !proxyPassword.isNullOrBlank()) {
+        val proxyPort = if (socksPort != 0) socksPort else httpPort
+        if (proxyPort != 0) {
+            // SOCKS when the tunnel is to carry the request: this build's core
+            // opens that door and no other. OkHttp speaks SOCKS itself, and the
+            // name is resolved by the far end, exactly as a browser's would be.
+            val type = if (socksPort != 0) Proxy.Type.SOCKS else Proxy.Type.HTTP
+            builder.proxy(Proxy(type, InetSocketAddress.createUnresolved(LOOPBACK, proxyPort)))
+            if (type == Proxy.Type.HTTP && !proxyUsername.isNullOrBlank() && !proxyPassword.isNullOrBlank()) {
                 builder.proxyAuthenticator { _, response ->
                     if (response.request.header("Proxy-Authorization") != null) {
                         null
@@ -280,7 +286,7 @@ object HttpUtil {
         targetFile: File
     ): Boolean {
         val url = request.url ?: return false
-        val client = buildOkHttpClient(request.timeout, request.httpPort, request.proxyUsername, request.proxyPassword, followRedirects = true)
+        val client = buildOkHttpClient(request.timeout, request.httpPort, request.socksPort, request.proxyUsername, request.proxyPassword, followRedirects = true)
         val requestBuilder = Request.Builder()
             .url(url)
             .get()
