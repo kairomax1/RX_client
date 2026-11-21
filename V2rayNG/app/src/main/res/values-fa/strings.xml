@@ -1016,6 +1016,7 @@
     <string name="fragment_vpn_connecting_hint">در حال راه‌اندازی هسته فرگمنت و بررسی برقراری ارتباط…</string>
     <string name="fragment_vpn_apply_reconnect">اعمال تغییرات و اتصال مجدد</string>
     <string name="fragment_vpn_probe_failed">هیچ‌کدام از حالت‌های فرگمنت روی این اینترنت پاسخ نداد.</string>
+    <string name="fragment_vpn_no_traffic">متصل شد، اما سایت‌های تست روی این اینترنت پاسخ ندادند. حالت فرگمنت (فیلترینگ شدید / تکه‌تکه ریز) را تغییر دهید یا از یک سرور استفاده کنید.</string>
     <string name="fragment_vpn_start_failed">راه‌اندازی سرویس فرگمنت ناموفق بود؛ دسترسی VPN یا گزارش را بررسی کنید.</string>
     <string name="fragment_vpn_preset_section">الگوی فرگمنت</string>
     <string name="fragment_vpn_preset_auto">خودکار</string>

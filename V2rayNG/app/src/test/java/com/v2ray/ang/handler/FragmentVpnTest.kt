@@ -58,7 +58,13 @@ class FragmentVpnTest {
         assertFalse(Regex("\"1\\.1\\.1\\.1\"(?![/:])").containsMatchIn(dohSection))
         assertFalse(Regex("\"8\\.8\\.8\\.8\"(?![/:])").containsMatchIn(dohSection))
         assertFalse(dohSection.contains("tls://"))
+        assertTrue(dohSection.contains("https+local://"))
+        assertTrue(fragSrc.contains("tcp+local://208.67.222.222:5353"))
         assertFalse(fragSrc.contains("remote-dns"))
+
+        val enStrings = File("src/main/res/values/strings.xml").readText()
+        assertTrue(enStrings.contains("fragment_vpn_no_traffic"))
+        assertTrue(faStrings.contains("fragment_vpn_no_traffic"))
 
         // Activity must verify via CoreServiceManager / OkHttp SOCKS5 remote DNS rather than Proxy.Type.SOCKS URLConnection.
         assertTrue(actSrc.contains("measureDelayDirect"))

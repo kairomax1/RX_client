@@ -42,11 +42,11 @@ object FragmentVpn {
         val delay: String,
         val maxSplit: String,
     ) {
-        AUTO("auto", "tlshello", "50-100", "1-3", "32"),
-        BALANCED("balanced", "tlshello", "50-100", "1-3", "32"),
-        STRICT_ISP("strict", "tlshello", "30-60", "1-3", "48"),
-        LOW_SPLIT("fine", "1-3", "40-80", "1-3", "32"),
-        CUSTOM("custom", "tlshello", "50-100", "1-3", "32");
+        AUTO("auto", "1-3", "10-25", "8-15", "64"),
+        BALANCED("balanced", "1-3", "10-25", "8-15", "64"),
+        STRICT_ISP("strict", "1-3", "5-15", "12-22", "64"),
+        LOW_SPLIT("fine", "tlshello", "10-25", "8-15", "64"),
+        CUSTOM("custom", "1-3", "10-25", "8-15", "64");
 
         companion object {
             fun fromKey(key: String?): Preset = entries.firstOrNull { it.key == key } ?: AUTO
@@ -91,22 +91,22 @@ object FragmentVpn {
             .takeIf { it in Preset.measurablePresets } ?: Preset.BALANCED
         val resolved = if (selected == Preset.AUTO) winner else selected
         val packets = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_PACKETS)?.trim().takeUnless { it.isNullOrEmpty() } ?: "tlshello"
+            MmkvManager.decodeSettingsString(PREF_PACKETS)?.trim().takeUnless { it.isNullOrEmpty() } ?: "1-3"
         } else {
             resolved.packets
         }
         val length = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_LENGTH)?.trim().takeUnless { it.isNullOrEmpty() } ?: "50-100"
+            MmkvManager.decodeSettingsString(PREF_LENGTH)?.trim().takeUnless { it.isNullOrEmpty() } ?: "10-25"
         } else {
             resolved.length
         }
         val delay = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_DELAY)?.trim().takeUnless { it.isNullOrEmpty() } ?: "1-3"
+            MmkvManager.decodeSettingsString(PREF_DELAY)?.trim().takeUnless { it.isNullOrEmpty() } ?: "8-15"
         } else {
             resolved.delay
         }
         val maxSplit = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_MAXSPLIT)?.trim().takeUnless { it.isNullOrEmpty() } ?: "32"
+            MmkvManager.decodeSettingsString(PREF_MAXSPLIT)?.trim().takeUnless { it.isNullOrEmpty() } ?: "64"
         } else {
             resolved.maxSplit
         }
@@ -133,10 +133,10 @@ object FragmentVpn {
     }
 
     fun saveCustomParams(packets: String, length: String, delay: String, maxSplit: String) {
-        MmkvManager.encodeSettings(PREF_PACKETS, packets.trim().ifEmpty { "tlshello" })
-        MmkvManager.encodeSettings(PREF_LENGTH, length.trim().ifEmpty { "50-100" })
-        MmkvManager.encodeSettings(PREF_DELAY, delay.trim().ifEmpty { "1-3" })
-        MmkvManager.encodeSettings(PREF_MAXSPLIT, maxSplit.trim().ifEmpty { "32" })
+        MmkvManager.encodeSettings(PREF_PACKETS, packets.trim().ifEmpty { "1-3" })
+        MmkvManager.encodeSettings(PREF_LENGTH, length.trim().ifEmpty { "10-25" })
+        MmkvManager.encodeSettings(PREF_DELAY, delay.trim().ifEmpty { "8-15" })
+        MmkvManager.encodeSettings(PREF_MAXSPLIT, maxSplit.trim().ifEmpty { "64" })
     }
 
     fun saveDropQuic(enabled: Boolean) {
@@ -194,9 +194,8 @@ object FragmentVpn {
      */
     fun probePresets(context: Context): Map<Preset, Long> {
         val delayTestUrls = listOf(
-            SettingsManager.getDelayTestUrl(),
             "https://cp.cloudflare.com/generate_204",
-            "https://www.gstatic.com/generate_204",
+            SettingsManager.getDelayTestUrl(),
         ).distinct()
         val results = linkedMapOf<Preset, Long>()
         for (preset in Preset.measurablePresets) {
@@ -285,6 +284,9 @@ object FragmentVpn {
                 destOverride = sniffingDest,
                 routeOnly = false,
             )
+            val socksUsername = if (socksPortOverride == null) SettingsManager.getSocksUsername() else null
+            val socksPassword = if (socksPortOverride == null) SettingsManager.getSocksPassword() else null
+            val useSocksAuth = socksUsername != null && socksPassword != null
             inbounds.add(
                 V2rayConfig.InboundBean(
                     tag = "socks",
@@ -292,7 +294,17 @@ object FragmentVpn {
                     protocol = "socks",
                     listen = AppConfig.LOOPBACK,
                     settings = V2rayConfig.InboundBean.InSettingsBean(
-                        auth = "noauth",
+                        auth = if (useSocksAuth) "password" else "noauth",
+                        accounts = if (useSocksAuth) {
+                            listOf(
+                                V2rayConfig.InboundBean.InSettingsBean.SocksAccountBean(
+                                    user = socksUsername,
+                                    pass = socksPassword,
+                                )
+                            )
+                        } else {
+                            null
+                        },
                         udp = true,
                         userLevel = AppConfig.DEFAULT_LEVEL,
                     ),
@@ -447,21 +459,33 @@ object FragmentVpn {
                 )
             )
         }
-        // Only encrypted DoH (https://) resolvers supported by Xray-core (`app/dns/nameserver.go`).
-        // Leave `tag` unset so every remote DoH server inherits `dns.tag` (AppConfig.TAG_DNS),
-        // matches the TAG_DNS -> TAG_PROXY routing rule, and shares one PolicyID so
-        // `enableParallelQuery = true` races all resolvers simultaneously instead of sequentially.
-        val dohList = listOf(
+        // Encrypted DoH resolvers supported by Xray-core (`app/dns/nameserver.go`).
+        // 1) IP-literal DoH uses `https+local://` (direct socket without fragment — TLS ClientHello
+        //    has no SNI for IP literals anyway, so fragmenting it into ~25 TLS records only risks
+        //    handshake timeouts/drops while still defeating port-53 UDP hijacking).
+        // 2) Domain DoH uses `https://` routed through TAG_PROXY (freedom + fragment) with static
+        //    `hosts` entries so SNI-filtered DoH hostnames still bootstrap cleanly.
+        // Leaving `tag` unset lets all Group 0 DoH entries inherit `dns.tag` (AppConfig.TAG_DNS)
+        // and share one PolicyID so `enableParallelQuery = true` races them simultaneously.
+        val selectedLocalDoh = cfg.doh.url
+            .takeIf { url ->
+                val host = url.removePrefix("https://").substringBefore("/")
+                Utils.isPureIpAddress(host)
+            }
+            ?.let { "https+local://${it.removePrefix("https://")}" }
+        val dohList = listOfNotNull(
+            selectedLocalDoh,
+            "https+local://94.140.14.14/dns-query",
+            "https+local://94.140.15.15/dns-query",
+            "https+local://208.67.222.222/dns-query",
+            "https+local://208.67.220.220/dns-query",
+            "https+local://149.112.112.112/dns-query",
+            "https+local://185.222.222.222/dns-query",
+            "https+local://1.1.1.1/dns-query",
+            "https+local://1.0.0.1/dns-query",
+            "https+local://8.8.8.8/dns-query",
+            "https+local://9.9.9.9/dns-query",
             cfg.doh.url,
-            "https://94.140.14.14/dns-query",
-            "https://94.140.15.15/dns-query",
-            "https://208.67.222.222/dns-query",
-            "https://149.112.112.112/dns-query",
-            "https://185.222.222.222/dns-query",
-            "https://1.1.1.1/dns-query",
-            "https://1.0.0.1/dns-query",
-            "https://8.8.8.8/dns-query",
-            "https://9.9.9.9/dns-query",
             "https://dns.adguard-dns.com/dns-query",
             "https://doh.opendns.com/dns-query",
             "https://dns.quad9.net/dns-query",
@@ -473,7 +497,22 @@ object FragmentVpn {
             dnsServers.add(
                 V2rayConfig.DnsBean.ServersBean(
                     address = url,
-                    timeoutMs = 2500L,
+                    timeoutMs = 5000L,
+                )
+            )
+        }
+        // Group 1 last-resort fallback (`tag = "fallback-dns"` gives it a separate PolicyID so
+        // Xray only touches it if EVERY Group 0 encrypted DoH resolver fails). OpenDNS on port
+        // 5353 bypasses ISP port-53 DNS hijacking even when port-443 DoH is throttled.
+        listOf(
+            "tcp+local://208.67.222.222:5353",
+            "tcp+local://208.67.220.220:5353",
+        ).forEach { url ->
+            dnsServers.add(
+                V2rayConfig.DnsBean.ServersBean(
+                    address = url,
+                    tag = "fallback-dns",
+                    timeoutMs = 4000L,
                 )
             )
         }

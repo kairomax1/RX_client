@@ -1044,6 +1044,7 @@
     <string name="fragment_vpn_connecting_hint">Starting Xray direct fragment core and verifying connectivity…</string>
     <string name="fragment_vpn_apply_reconnect">Apply changes &amp; reconnect</string>
     <string name="fragment_vpn_probe_failed">No fragment preset responded on this internet connection.</string>
+    <string name="fragment_vpn_no_traffic">Connected, but test sites did not respond on this ISP. Try switching preset (Strict ISP / Fine Split) or using a server config.</string>
     <string name="fragment_vpn_start_failed">Could not start Fragment VPN service. Check VPN permission or logs.</string>
     <string name="fragment_vpn_preset_section">Fragmentation Preset</string>
     <string name="fragment_vpn_preset_auto">Auto</string>

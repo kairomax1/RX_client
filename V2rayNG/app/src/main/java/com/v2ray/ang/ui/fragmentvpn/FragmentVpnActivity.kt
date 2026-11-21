@@ -286,10 +286,18 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
             }
 
             if (measuredPing > 0L) FragmentVpn.saveLastPing(measuredPing)
-            AppLog.info(
-                AppLog.Section.Connection,
-                "Fragment VPN active (direct user IP, preset=${FragmentVpn.currentConfig().resolvedPreset.key}, ${measuredPing}ms)",
-            )
+            val noTraffic = measuredPing <= 0L && ipText == null
+            if (noTraffic) {
+                AppLog.error(
+                    AppLog.Section.Connection,
+                    "Fragment VPN connected, but test URLs did not respond (preset=${FragmentVpn.currentConfig().resolvedPreset.key})",
+                )
+            } else {
+                AppLog.info(
+                    AppLog.Section.Connection,
+                    "Fragment VPN active (direct user IP, preset=${FragmentVpn.currentConfig().resolvedPreset.key}, ${measuredPing}ms)",
+                )
+            }
             _state.update {
                 it.copy(
                     isConnecting = false,
@@ -297,6 +305,7 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                     presetPings = if (probeResults.isNotEmpty()) probeResults else it.presetPings,
                     livePingMs = measuredPing.takeIf { p -> p > 0L } ?: it.livePingMs,
                     ipInfo = ipText ?: it.ipInfo,
+                    error = if (noTraffic) app.getString(R.string.fragment_vpn_no_traffic) else null,
                 )
             }
         }
@@ -304,8 +313,8 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun measureLiveDelay(): Long {
         val urls = listOf(
-            SettingsManager.getDelayTestUrl(),
             "https://cp.cloudflare.com/generate_204",
+            SettingsManager.getDelayTestUrl(),
             "https://www.gstatic.com/generate_204",
         ).distinct()
         val socksPort = SettingsManager.getSocksPort()
@@ -316,7 +325,7 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                     HttpUtil.getUrlContent(
                         UrlContentRequest(
                             url = url,
-                            timeout = 5000,
+                            timeout = 6000,
                             socksPort = socksPort,
                         )
                     )
@@ -351,7 +360,7 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
             val formatted = listOf(ip, country, isp).filter { it.isNotBlank() }.joinToString(" · ")
             if (formatted.isNotBlank()) return formatted
         }
-        return runCatching {
+        val ipify = runCatching {
             HttpUtil.getUrlContent(
                 UrlContentRequest(
                     url = "https://api.ipify.org",
@@ -359,6 +368,17 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
                     socksPort = socksPort,
                 )
             )?.trim()?.takeIf { it.length in 7..45 && it.none { c -> c.isWhitespace() } }
+        }.getOrNull()
+        if (ipify != null) return ipify
+        return runCatching {
+            HttpUtil.getUrlContent(
+                UrlContentRequest(
+                    url = "https://1.1.1.1/cdn-cgi/trace",
+                    timeout = 5000,
+                    socksPort = socksPort,
+                )
+            )?.lineSequence()?.firstOrNull { it.startsWith("ip=") }?.substringAfter("ip=")?.trim()
+                ?.takeIf { it.length in 7..45 && it.none { c -> c.isWhitespace() } }
         }.getOrNull()
     }
 
