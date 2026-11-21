@@ -229,3 +229,280 @@ Nine items, delivered together.
   list. Android 9 and older open the release page in the browser.
 - **No automatic publishing.** A push to `master` only builds and tests. A release is made by
   running `build.yml` by hand with `release_tag`.
+
+## DNS mode (split tunnel by site list)
+
+- Logic: `handler/DnsMode.kt`. When `pref_rx_dns_mode` is on, the core is given `DnsMode.rulesets()`
+  instead of the user's stored routing rules (those are not modified and come back when the mode
+  is switched off). Listed sites (filtered + restricted + the user's own) and Telegram's networks
+  go through the config; everything else goes out directly. Sniffing is forced on, because the
+  rules match on the site name.
+- The lists are plain domain names kept in the code, so the mode does not depend on geo files.
+- It is not a DNS server: an Android app cannot listen on port 53. For a console or TV the card
+  shows the phone's proxy address (LAN IP + the app's proxy port); that needs "proxy sharing" on,
+  the device on the phone's Wi-Fi/hotspot, and no proxy password.
+- UI: fifth tile of the quick sheet (`MainDestination.DnsMode`) opens `MainDnsModeCard`;
+  state in `DnsModeViewModel`. A running tunnel is restarted after each change.
+- Not tested on a device. With the "dynamic port" setting on, the port changes at every start.
+
+### DNS mode, round 2
+
+- Fix: the tunnelled-sites rule now comes before the local-network rule. Inside Iran filtered
+  names resolve to 10.10.34.x, which the local-network rule used to send out directly.
+  `routeOnly` is forced off in the mode so the sniffed name replaces that fake address.
+- The Google family is tunnelled whole (YouTube and Play need googleapis/gstatic/...), plus the
+  `.google`/`.goog` endings (labs.google = Flow) and more AI services.
+- Switching the mode on runs the automatic test over every config and connects to the lowest
+  ping (`MainViewModel.testAllAndConnectBest` → `connectBestTick` → `MainAction.RestartService`).
+- Xbox page (`handler/ConsoleDns.kt`): probes public anti-sanction DNS services from the phone
+  and shows the fastest one whose two addresses both answer. The addresses are from memory and
+  were not checked from the build machine; the probe on the phone is the check.
+- Aether engine, researched (not integrated yet): `QW-AI-Code/Aether` vendors the engine in
+  `native/aether` (Rust, core 2.4.0, AGPL-3.0). It is a command-line executable shipped as
+  `libaether.so`, started as a process (`core/AetherProcess.kt`) and offering SOCKS on
+  127.0.0.1:1819; built with `cargo ndk` (`scripts/build-natives.sh`, needs quiche/BoringSSL;
+  Tor is an optional cargo feature costing 6-8 MB per ABI). Plan for RX VPN: build it in CI
+  without Tor, run it as a process, and point an Xray `socks` outbound at it, so it works as a
+  config-less "proxy" for DNS mode and as a standalone connection.
+
+### DNS mode, round 3 + Aether
+
+- Big site list: `assets/rx_dns_mode_sites.txt` (~6,800 entries) generated from
+  v2fly/domain-list-community (MIT, commit 777d056): VPN/anti-censorship services, Google,
+  social, communication, AI, dev, media, entertainment, crypto, game publishers. IP-check and speed-test sites are removed. Adult
+  sites are not included.
+  Loaded lazily by `DnsMode.bundledSites`; the short Kotlin lists remain as the fallback.
+- Top bar: ping button = `MainAction.PingAndSortAll` (the automatic test over every config:
+  ping, badges, sort by ping).
+- `UpdateRelease.pickApk` ignores assets with "debug" in the name.
+- Aether: `build-aether.sh` builds the engine from the pinned commit in CI (cached; every step
+  is `continue-on-error`, so a failed engine build still yields an APK without it). Arm64,
+  armv7, x86_64 only; Android 8+. `core/AetherEngine.kt` starts it as a process on
+  127.0.0.1:1819 from `CoreServiceManager.launchCore` when the selected profile is the built-in
+  SOCKS profile "Aether", and stops it in `stopCoreLoop`. DNS mode falls back to that profile
+  when no config answers; the card has a "connect with Aether" button. Never run on a device.
+
+### Aether, round 2
+
+- First device test: "connection failed". The engine opens its SOCKS port only after a route
+  is proven, which can take longer than the 25 s connect watchdog; and nothing was visible,
+  because `LogUtil.i` is dropped at the default log level and no log screen was reachable.
+- `AetherEngine` now runs a supervisor thread in the service process: it walks `ROUTES`
+  (MASQUE, +ECH, HTTP/2+fragment, WireGuard, WireGuard gfw, IPv6 variants, Gool), waits for
+  the port, remembers the winning route per network (`files/aether/rx-winner-<network>`) and
+  writes its progress to `files/aether/rx-status` for the UI process.
+- `MainViewModel.awaitAetherRoute` holds the connection check until the engine is ready and
+  shows "route N of M"; the connect watchdog is extended for the Aether profile.
+- Engine output is logged at warning level with the prefix `Aether>`; the existing log screen
+  (`ui/logcat`) is now in the drawer ("App log").
+- DNS card: shows primary/secondary of the best anti-sanction DNS on its first page.
+- Still open from the user's list: Xbox DNS scanner with a large resolver list, in-app Xbox
+  web section, half-price (Iranian server) badge, ad blocking.
+
+### App log + Aether, round 3
+
+- Second device test: the search stayed on route 1 and then failed; the cause is not known,
+  because the old log screen (Android logcat) is empty on the user's phone (Xiaomi).
+- `handler/AppLog.kt`: the app's own log file (`files/logs/rx-app.log`, rotated at 400 KB),
+  written by both processes. Sections (Connection, Core, Aether, DnsMode, Test, Subscription,
+  Update, Other), levels (Debug/Info/Error), modes (Normal/Errors/Debug). Whole configs and
+  share links are refused by `sanitize`. Every `LogUtil` call is mirrored into it regardless of
+  the Android log level; key steps are also logged explicitly. Log messages are English
+  diagnostic text; the screen chrome is localised.
+- `ui/applog/`: new log screen in the app's own style (fog background, chips for mode and
+  section with counts, glass lines, staggered arrival, rising notes). "Make a log file" writes
+  the complete log to the cache and opens the share sheet. The drawer entry opens this screen;
+  the old `ui/logcat` screen is no longer reachable.
+- Aether: 14 routes (several ECH key sources: default, Google DoH, Quad9 DoH, 8.8.8.8 with
+  crypto.cloudflare.com; HTTP/2+fragment with and without ECH; WireGuard; dual stack; IPv6;
+  Gool; MASQUE x2), two rounds. Early exits and timeouts are logged with the engine's exit
+  code and its last lines. Speed comparison between several working routes is NOT done yet:
+  the first route that carries data wins (the engine's own `--balanced` scan picks the
+  fastest gateway inside a route).
+
+### Aether, round 4: racing routes
+
+- Device log (Hamrah Aval, cellular): the sequential search needed 5 minutes; ten routes failed
+  one after the other and the eleventh (MASQUE IPv6) connected in 26 s. Three of four ECH key
+  sources did not answer; only `crypto.cloudflare.com` via 8.8.8.8 gave a key.
+- `AetherEngine` now races up to `PARALLEL` (4) engines, each on a private port (1830+). A
+  route is ready once a web request went through it; after the first one, others get 2.5 s to
+  be compared and the one with the quickest answer stays. A relay on 1819 forwards TCP to the
+  winner (SOCKS UDP goes to the engine's own UDP port directly).
+- Remembered per network: the winner (by label) and failure counts (`rx-failed-<network>`);
+  the winner searches alone for 12 s, failed routes go to the back. IPv6-only routes are
+  skipped without a public IPv6 address. A route gets 40 s, up to 75 s while the engine reports
+  progress.
+- The ECH key is fetched by the app (HTTPS record over UDP from 8 resolvers × 2 names, first
+  well-formed answer) and passed with `--ech <base64>`; ECH routes are skipped without a key.
+- Identities are registered once, alone (`--register masque`, `--register wg`), before any
+  race, marker `rx-identities`.
+- Not verified on a device: the relay under load, several engines sharing one working
+  directory (`lastconn` files), CPU/battery cost of four concurrent scans.
+- Log: the exported file follows the chosen tab and mode; server names/addresses are no longer
+  logged by `HttpUtil`; the update-check line no longer says "new version" before comparing.
+
+### Xbox DNS scanner
+
+- Drawer entry "Xbox DNS scanner" -> `ui/xboxdns/XboxDnsActivity` (own RX-style screen).
+- Bundled data (regenerate by re-collecting the lists; all are plain address lists from GitHub):
+  - `assets/rx_dns_all.bin`: 107,697 IPv4 addresses, 4 bytes each. Sources: trickest/resolvers,
+    janmasarik/resolvers, proabiral/Fresh-Resolvers, BonJarber/fresh-resolvers,
+    blechschmidt/massdns (lists/resolvers.txt), six2dez/resolvers_reconftw, rix4uni/resolvers,
+    bp0lr/dmut-resolvers, blacklanternsecurity/public-dns-servers,
+    shelld3v/fresh-public-dns-servers, kamalalhagh/kevinnet-dns.
+  - `assets/rx_dns_named.txt`: 47 named services (anti-sanction, ISP, global), from
+    Hadooshi/Iran-DNS-Toolbox. `assets/rx_dns_priority.txt`: 100 more addresses named by
+    Iranian DNS tools (IranDNSFinder, smart-dns-ir, dns-switcher, DnsManager, free-dns-setter,
+    akaDns, Iran-DNS-Switcher, DNS-on-Tray). None of these addresses were verified by us.
+- `handler/XboxDns.kt`: sweep (one UDP socket, two names per server, ~850 servers/s, about
+  two minutes for the whole list), relay detection (both names answered with one routable
+  address), proof (four Xbox names resolved, TLS handshake with certificate check against each
+  answer; pass = 3 of 4). Proved: named services that answered, all relays, the 20 quickest
+  ordinary resolvers.
+- `handler/DnsProxy.kt` + `ui/xboxdns/XboxWebActivity`: xbox.com in a WebView whose proxy
+  (androidx.webkit ProxyController) is a local proxy resolving every name at the DNS under
+  test. The app is excluded from its own VPN, so this traffic goes out directly, like a
+  console's. No credentials are handled by the app; cookies stay in the WebView until
+  "sign out".
+- Not verified on a device: the sweep rate on mobile networks (operators may drop bursts of
+  DNS packets), Microsoft sign-in inside a WebView, how many relays exist in practice.
+- Log: web links are masked in `AppLog.sanitize` (a subscription link was found in a log).
+
+### Xbox DNS scanner, round 2: the app's names, not the site
+
+- Device test of round 1: a server that "passed" still gave "not available in your country" in
+  the Xbox app, and no relay was found at all. Cause: the sweep asked `login.live.com` and
+  `www.xbox.com`, which anti-sanction services do not relay, and the site opens from Iran
+  directly, so passing proved nothing.
+- `XboxDns.APP_NAMES` (8 names the Xbox app/console use; the site is gone). Sweep asks the
+  first two (`sisu.xboxlive.com`, `user.auth.xboxlive.com`) of every address. Addresses given
+  by many servers are taken as Microsoft's own (`commonAddresses`); a server giving a routable
+  address that is neither common nor in the coarse Microsoft ranges (`MICROSOFT`, written from
+  memory, not checked against the published Azure list) is a suspect. Suspects and all named
+  anti-sanction services are examined: all 8 names asked; relay = one unusual address for an
+  Xbox Live name plus at least one more name, and that address presents the real certificate
+  for each (`examine`). Ordinary resolvers are no longer proved, only listed folded away.
+- Country: `seenCountry` asks `geo.prod.do.dsp.mp.microsoft.com/geo` through the relay address
+  (SNI). Works only if the relay passes that name on; otherwise empty. Not verified against the
+  live service from the build machine (no access); the answer format is from public write-ups.
+- Data: 39 more named services (Iranian: Server.ir, DynX, Zeus, DNS Pro, more Shelter/Vanilla/
+  Radar/Begzar addresses...; Russian relays built for the same Microsoft block: xbox-dns.ru,
+  Fly Xbox, GeoHide, Comss.one, Malw.link, Mafioznik, DNS-AI, AstraCat). Whether the Russian
+  ones serve Iranian callers is unknown; the scan decides. Found through GitHub code search for
+  files naming known anti-sanction addresses (about 280 list-like files from about 200
+  repositories); addresses in at least two repositories went into `rx_dns_all.bin` (now
+  123,211), in at least eight into `rx_dns_priority.txt` (7,240). Private, docker and
+  filter-page addresses were removed from both; the `HostIran (Server 2)` typo was fixed.
+  Licences of the source repositories were not checked.
+- Screen: progress card fixed above the list; relays in their own section, appended in order
+  of arrival during the scan and sorted once at the end; ordinary resolvers behind a toggle;
+  one compact card per service.
+- Removed: `DnsProxy`, `XboxWebActivity`, the androidx.webkit dependency (the site test).
+- Not built: a phone-wide DNS switch inside the app. It needs a second `VpnService`, which the
+  service guide routes through `LauncherManager`; the user tests with a DNS changer app.
+- Not verified on a device: everything above. In particular whether real Microsoft addresses
+  outside `MICROSOFT` show up as false relays, and whether a network that answers all DNS
+  itself (transparent DNS proxy) hides every relay (the log says so when over 90% answer).
+
+## Free public configs
+
+`handler/PublicConfigs.kt` is the whole feature; `ui/publicconfigs/PublicConfigsActivity.kt` is its screen
+(cloud button beside the app name, and the first drawer entry).
+
+- Sources: `PublicConfigs.SOURCES`, 48 lists in 27 GitHub repositories. The 30 "small" ones (short,
+  or tested by their makers) are always read; the 18 large ones only when the small ones did not
+  give enough servers. Each list is kept in `files/rx-public/` with its ETag, so an unchanged
+  list costs one short request. Order of fallback per list: GitHub raw, jsDelivr mirror, kept copy;
+  with nothing at all, the pack in `assets/rx_public_configs.txt` (1,500 links; regenerate before
+  a release, it ages in weeks). Shared accounts of commercial VPNs (the Windscribe WireGuard
+  lists going around) are left out on purpose.
+- Refused: certificate checking off, VLESS/Trojan without TLS, Shadowsocks without AEAD, VMess with
+  alterId, SOCKS/HTTP, sorts the core cannot run (TUIC, SSR, OpenVPN), and servers whose address
+  resolves into Cloudflare's ranges (`isCloudflare`).
+- Two tests: a TCP connect from the phone (UDP sorts: address check only), then the app's usual
+  real test through the core on three times the wanted number. `prune` keeps the quickest that
+  answered and renames them "flag CC · TYPE · n" (country from ip-api.com's batch endpoint).
+  After the download measurement on the best few, the head of the list is selected and, when
+  the user started the run, connected to (`MainViewModel.testPublicConfigs`).
+- Game mode: only configs reached straight over TCP/UDP (no ws/grpc/xhttp transports).
+- Mux and Fragment are the app-wide settings, set from the screen; they are NOT tried per config
+  (a profile has no field for them).
+- Renewal: lists are looked at every three hours (`PublicConfigsWorker`, and when the app opens).
+  A change lights the dot; the next time the app is open with no tunnel up, the group is
+  collected and tested again with the saved options, without connecting.
+- Failover: `CoreServiceManager.watchPublicConfig` asks through the tunnel every minute while a
+  public config runs; three failures in a row move to the next config of the group.
+- The notification's small icon is the vector `drawable/ic_stat_name.xml`; the old PNG sets and the
+  proxy/direct icon swap are gone. The old logcat screen is deleted.
+- Not built: relays for the domestic-only network. What the reports from the 2026 shutdowns
+  name as working is DNS tunnelling (dnstt and relatives) through resolvers inside the country,
+  which needs a new client core and tunnel servers; a domestic VPS relay needs a paid server.
+
+### Task F (2026-11-15): DNS scanner for Xbox / Discord / games, more sources, WireGuard, clean-up
+- Scanner is now "DNS scanner" (`xbox_dns_title`); first page asks the purpose
+  (`XboxDns.Purpose`): Xbox (method unchanged), Discord, Games (picker over `XboxDns.GAMES`).
+- "Opens" = resolve the app's own host through the candidate DNS, TLS to the returned address
+  with the real name + certificate, HTTP GET; open when a status comes back that is not
+  403/451 (`probe`, `isOpen`, `carries`). Services that already open with the phone's own DNS
+  (`opensWithout`) are shown as such and give a DNS no credit. Games: Xbox examination AND at
+  least one chosen blocked game. No ping measurement anywhere.
+- Game hosts were chosen from knowledge of the clients' APIs and only checked for DNS existence
+  from the sandbox; behaviour under sanction is unverified per service.
+- Online resolver lists: `XboxDns.LIST_SOURCES`, at most every 15 min at scan start, stored in
+  `filesDir/rx-dns-extra.txt`. Log lines start "DNS scan".
+- `PublicConfigs.SOURCES`: 48 -> 82 lists.
+- WireGuard: MTU clamped to 1280 when the config asks >1380 or nothing
+  (`CoreOutboundBuilder.wireguardMtu`), keep-alive 25 s, `ForceIPv4` when IPv6 is off.
+- Removed: `ConsoleDns` (old "DNS for Xbox" page in the DNS-mode card, speed-only check that
+  the scanner replaced) and its strings; `buildQuery` moved into `XboxDns`.
+- DNS tunnel: not built. Clients exist (anonvector/SlipNet AGPL, dnstt-xyz/dnstt_xyz_app,
+  masterking32/MasterDnsVPN) but every one needs a server address + key; no maintained list
+  of public servers was found. Needs its own Go/Rust core (~10 MB per ABI).
+
+## Firefox VPN (Mozilla's built-in VPN, unofficial client)
+
+The user asked for the reference project `ppj30088-hash/firefox-spider-vpn`
+(Flutter + Go) to be brought into the app, and accepted the risks after
+being told: Mozilla's terms forbid this use, Mozilla already cut the
+service for Iran once over exactly this pattern, accounts can be banned,
+and Fastly's anti-bot check can refuse sign-in from anything that is not
+Firefox.
+
+What is in the app:
+
+- `handler/FirefoxVpnAuth` — Firefox Accounts. The password is stretched the
+  way Firefox does it: PBKDF2-SHA256 over
+  `identity.mozilla.com/picl/v1/quickStretch:<email>` (1000 rounds), then
+  HKDF into `authPW`. Session calls are signed with Hawk: the id and key come
+  from HKDF over the session token with info
+  `identity.mozilla.com/picl/v1/sessionToken`, the mac is hex over the Hawk
+  header string, and a body is covered by
+  `sha256("hawk.1.payload\n<content-type>\n<body>\n")`. OAuth is the PKCE code
+  grant Firefox uses, with Firefox desktop's client id `5882386c6d801776`.
+  Scrypt is still in the file, only because a test vector pins it; FxA does
+  not use it.
+- `handler/FirefoxVpnGuardian` — `GET /api/v1/fpn/token` gives the ProxyPass
+  JWT; quota comes from the `X-Quota-*` headers; 403 activates the account.
+- `handler/FirefoxVpnServers` — Remote Settings `vpn-serverlist`. The address
+  to connect to is the record's `protocols[name=connect].host/port` (https),
+  not the record's `hostname`.
+- `handler/FirefoxVpnRelay` — the core's own HTTP outbound can only present a
+  username and password, so it cannot send
+  `Proxy-Authorization: Bearer <ProxyPass>`. The core therefore points at this
+  loopback proxy, which opens one TLS connection to the Fastly endpoint per
+  tunnel, sends the CONNECT with the Bearer header, and copies bytes. The
+  target name travels unopened, so the proxy resolves it rather than this
+  phone (the phone's resolver is the thing being avoided).
+- `handler/FirefoxVpnStore` — OAuth tokens in AES-256-GCM under
+  `filesDir/firefox-vpn`; the account's password is never stored.
+- `ui/firefoxvpn/FirefoxVpnActivity` — accounts, locations, connect, quota.
+- Drawer entry "Firefox VPN"; the core is started with the relay's port as an
+  ordinary HTTP config named `firefox-vpn`.
+
+Known limits, said to the user as well: no Fastly challenge solver, so a 406
+from the edge means sign-in cannot pass from the app (the reference project
+solves it with a JavaScript engine and a CAPTCHA); only https CONNECT
+endpoints are used, so a location that offers only MASQUE is refused with a
+message; QUIC/TCP auto-selection and fragment/TLS tuning are not implemented
+because the transport is Xray's, not the reference project's Go core.

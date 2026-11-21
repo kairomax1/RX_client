@@ -29,7 +29,7 @@ class NetworkMonitor(
     private val onHandover: () -> Unit,
 ) {
     private companion object {
-        const val HANDOVER_DEBOUNCE_MS = 1000L
+        const val HANDOVER_DEBOUNCE_MS = 1500L
     }
 
     private var upstream: Network? = null

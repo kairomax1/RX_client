@@ -516,7 +516,14 @@ object AngConfigManager {
                     captureUsageInfo
                 )
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.ANG_PACKAGE, "Update subscription: proxy not ready or other error", e)
+                // Falling through to a direct request is the whole point here, so a
+                // proxy that was not listening yet is expected and is said quietly.
+                // It is worth knowing that it happened, though: a refresh that
+                // always lands here is running before the core is up.
+                LogUtil.w(
+                    AppConfig.ANG_PACKAGE,
+                    "Update subscription: the tunnel was not ready (${e.javaClass.simpleName}), asking directly",
+                )
                 ""
             }
             if (configText.isEmpty()) {

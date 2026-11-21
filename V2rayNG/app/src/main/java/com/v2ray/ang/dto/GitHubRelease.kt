@@ -12,9 +12,13 @@ data class GitHubRelease(
     @SerializedName("prerelease")
     val prerelease: Boolean = false,
     @SerializedName("published_at")
-    val publishedAt: String = ""
+    val publishedAt: String = "",
+    @SerializedName("target_commitish")
+    val targetCommitish: String = ""
 ) {
     data class Asset(
+        @SerializedName("id")
+        val id: Long = 0L,
         @SerializedName("name")
         val name: String,
         @SerializedName("browser_download_url")

@@ -5,6 +5,8 @@ import android.content.Context
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.dto.AppInfo
 import com.v2ray.ang.dto.UrlContentRequest
+import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.IranApps
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SettingsManager
@@ -48,6 +50,21 @@ class PerAppProxyViewModel(application: Application) : BaseViewModel(application
     private var appsAll: List<AppInfo>? = null
     private var currentQuery = ""
     private var isAppListLoading = false
+
+    init {
+        // "Only the apps I picked" is no longer offered. A phone that still
+        // carries it is put on "everything", which is the way round that cannot
+        // send someone's traffic where they never put it.
+        if (_routingMode.value == PerAppRoutingMode.ONLY_SELECTED) {
+            runCatching {
+                PerAppRoutingMode.persist(
+                    PerAppRoutingMode.ONLY_SELECTED,
+                    PerAppRoutingMode.ALL,
+                ) { key, value -> MmkvManager.encodeSettings(key, value) }
+            }
+            _routingMode.value = PerAppRoutingMode.ALL
+        }
+    }
 
     // Blacklist operations
     fun toggle(packageName: String) {
@@ -106,6 +123,7 @@ class PerAppProxyViewModel(application: Application) : BaseViewModel(application
                 }
                 appsAll = apps
                 _displayedApps.value = applyFilter(currentQuery)
+                pickIranianApps(apps)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -144,6 +162,24 @@ class PerAppProxyViewModel(application: Application) : BaseViewModel(application
                 !p1.isSystemApp && p2.isSystemApp -> -1
                 else -> collator.compare(p1.appName, p2.appName)
             }
+        }
+    }
+
+    /**
+     * Picks the Iranian apps out on the phone's own, so that the apps that have
+     * to leave on the phone's own line do. Only a list nobody has touched is
+     * filled in, so what the owner chose once is never taken away, and the sort
+     * is turned to "everything but the ones picked" — the only sort in which
+     * picking an app means it stays on the phone's own line.
+     */
+    private fun pickIranianApps(apps: List<AppInfo>) {
+        if (_blacklist.value.isNotEmpty()) return
+        val iranian = IranApps.detect(apps)
+        if (iranian.isEmpty()) return
+        AppLog.info(AppLog.Section.Other, "App routing: ${iranian.size} Iranian apps kept on the phone's own line")
+        replaceBlacklist(iranian)
+        if (_routingMode.value == PerAppRoutingMode.ALL) {
+            setRoutingMode(PerAppRoutingMode.EXCEPT_SELECTED)
         }
     }
 

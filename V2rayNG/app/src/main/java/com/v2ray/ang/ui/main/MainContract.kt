@@ -1,5 +1,9 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.Tuning
+import com.v2ray.ang.handler.TuningRunner
+
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.GroupMapItem
 import com.v2ray.ang.dto.LocateTarget
@@ -46,6 +50,14 @@ data class MainUiState(
     val exitCountry: String? = null,
     /** A pasted subscription link waiting for the user to name it (or decline). */
     val subNameRequest: String? = null,
+    /** Set while the Aether engine is still looking for a route during a connection attempt. */
+    val aetherSearch: AetherEngine.Status? = null,
+    /**
+     * Set while the app is looking for the mux and fragment settings this line is
+     * fastest with, so the screen can say why the connection is not up yet.
+     */
+    val tuning: TuningRunner.Phase = TuningRunner.Phase.Idle,
+    val tuningMode: Tuning.Mode = Tuning.Mode.BOTH,
 )
 
 /**
@@ -57,6 +69,9 @@ sealed interface MainAction {
     data object ToggleService : MainAction
     data object TestCurrentServer : MainAction
     data object TestAllServers : MainAction
+
+    /** Pings every config of the group on screen, then sorts that list from lowest ping up. */
+    data object PingAndSortAll : MainAction
     data object TestRealAllServers : MainAction
     data object CancelTesting : MainAction
     data object RemoveAllServers : MainAction

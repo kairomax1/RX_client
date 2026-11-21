@@ -1,0 +1,243 @@
+# Game services: sign-in, store, matchmaking, telemetry and content hosts.
+#
+# One entry per line: "domain:name" matches the name and everything under it.
+# Lines starting with # are notes.
+#
+# Only the names a game's own client talks to belong here: the launcher, the
+# sign-in, the shop, the matchmaker and the content servers. The name of the
+# publisher's marketing site does not, and neither does anything a game shares
+# with every other site (a general CDN), because that would drag unrelated
+# traffic into the tunnel.
+#
+# A game's own servers are usually reached by address, not by name, so these
+# rules carry the parts that can be named; the rest of the game is covered by
+# the choice the owner makes for the whole connection in gaming mode.
+# ── Stores and launchers ───────────────────────────────────────────
+domain:steampowered.com
+domain:steamcommunity.com
+domain:steamstatic.com
+domain:steamgames.com
+domain:steamusercontent.com
+domain:steamchina.com
+domain:valvesoftware.com
+domain:epicgames.com
+domain:unrealengine.com
+domain:egdata.app
+domain:easyanticheat.net
+domain:battleye.com
+domain:beglobal.net
+# ── Riot Games ─────────────────────────────────────────────────────
+domain:riotgames.com
+domain:leagueoflegends.com
+domain:valorant.com
+domain:riotcdn.net
+domain:pvp.net
+domain:lolesports.com
+domain:wildrift.leagueoflegends.com
+domain:teamfighttactics.leagueoflegends.com
+# ── Blizzard / Activision ──────────────────────────────────────────
+domain:battle.net
+domain:blizzard.com
+domain:overwatch.com
+domain:worldofwarcraft.com
+domain:diablo.com
+domain:hearthstone.com
+domain:heroesofthestorm.com
+domain:starcraft.com
+domain:activision.com
+domain:callofduty.com
+domain:modernwarfare.com
+domain:warzone.com
+domain:blackopscoldwar.com
+domain:vanguard.com
+domain:demonware.net
+domain:cdn.registerdisney.go.com
+# ── EA ─────────────────────────────────────────────────────────────
+domain:ea.com
+domain:origin.com
+domain:electronicarts.com
+domain:easports.com
+domain:bioware.com
+domain:dice.se
+domain:respawn.com
+domain:apexlegends.com
+domain:battlefield.com
+domain:fifa.com
+domain:eafc.com
+domain:juno.ea.com
+domain:eacdn.com
+# ── Ubisoft ────────────────────────────────────────────────────────
+domain:ubi.com
+domain:ubisoft.com
+domain:ubisoftconnect.com
+domain:uplay.com
+domain:rainbow6.com
+domain:assassinscreed.com
+domain:far-cry.ubisoft.com
+# ── Rockstar / Take-Two ────────────────────────────────────────────
+domain:rockstargames.com
+domain:rockstar.com
+domain:take2games.com
+domain:socialclub.rockstargames.com
+domain:gta5.com
+domain:reddeadredemption2.com
+# ── Microsoft / Xbox ───────────────────────────────────────────────
+domain:xbox.com
+domain:xboxlive.com
+domain:xboxservices.com
+domain:live.com
+domain:microsoft.com
+domain:msn.com
+domain:gamecore.microsoft.com
+domain:xbl.com
+domain:xboxab.com
+domain:service.xboxlive.com
+# ── PlayStation ────────────────────────────────────────────────────
+domain:playstation.com
+domain:playstation.net
+domain:playstationnetwork.com
+domain:sonyentertainmentnetwork.com
+domain:psn.com
+domain:sony.com
+# ── Nintendo ───────────────────────────────────────────────────────
+domain:nintendo.com
+domain:nintendo.net
+domain:nintendowifi.net
+domain:nintendo-europe.com
+domain:nintendoswitch.com
+# ── Valve / CS2 / Dota ─────────────────────────────────────────────
+domain:counter-strike.net
+domain:dota2.com
+domain:half-life.com
+domain:portal2.com
+domain:tf2.com
+# ── Mobile games ───────────────────────────────────────────────────
+domain:supercell.com
+domain:supercellid.com
+domain:clashofclans.com
+domain:clashroyale.com
+domain:brawlstars.com
+domain:boombeach.com
+domain:haydaygame.com
+domain:squadbusters.com
+domain:mo.co
+domain:roblox.com
+domain:rbxcdn.com
+domain:robloxlabs.com
+domain:minecraft.net
+domain:mojang.com
+domain:minecraftservices.com
+domain:minecraftforge.net
+domain:realms.minecraft.net
+domain:hoyoverse.com
+domain:mihoyo.com
+domain:genshin.hoyoverse.com
+domain:hoyolab.com
+domain:starrail.hoyoverse.com
+domain:zenless.hoyoverse.com
+domain:pubg.com
+domain:battlegrounds.pubg.com
+domain:pubgmobile.com
+domain:proximabeta.com
+domain:freefiremobile.com
+domain:free-fire.com
+domain:mobilelegends.com
+domain:mobile-legends.com
+domain:moonton.com
+domain:garena.com
+domain:ff.garena.com
+domain:lolwildrift.com
+domain:arenaofvalor.com
+domain:honorofkings.com
+domain:tencentgames.com
+domain:igamecj.com
+domain:tencent.com
+# ── Other publishers and services ──────────────────────────────────
+domain:gaijin.net
+domain:gaijinent.com
+domain:warthunder.com
+domain:worldoftanks.com
+domain:wargaming.net
+domain:worldofwarships.com
+domain:worldofwarplanes.com
+domain:bungie.net
+domain:destinythegame.com
+domain:warframe.com
+domain:digitalextremes.com
+domain:pathofexile.com
+domain:grindinggear.com
+domain:albiononline.com
+domain:sandboxalbiononline.com
+domain:lostark.com
+domain:amazon.com
+domain:smilegate.com
+domain:nexon.com
+domain:nexon.net
+domain:maplestory.com
+domain:perfectworld.com
+domain:arcgames.com
+domain:crypticstudios.com
+domain:daybreakgames.com
+domain:standingstonegames.com
+domain:turbine.com
+domain:ccp.is
+domain:eveonline.com
+domain:arenanet.com
+domain:guildwars2.com
+domain:runescape.com
+domain:osrs.com
+domain:oldschool.runescape.com
+domain:bethesda.net
+domain:bethesdasoftworks.com
+domain:idsoftware.com
+domain:cdprojektred.com
+domain:cdprojekt.com
+domain:witcher.com
+domain:cyberpunk.net
+domain:larian.com
+domain:baldursgate.com
+domain:paradoxplaza.com
+domain:paradoxinteractive.com
+domain:sega.com
+domain:segasonic.com
+domain:sonicthehedgehog.com
+domain:capcom.com
+domain:capcom.co.jp
+domain:koeitecmo.com
+domain:bandainamcoent.com
+domain:bandainamcoent.co.jp
+domain:square-enix.com
+domain:squareenix.com
+domain:finalfantasy.com
+domain:konami.com
+domain:konami.net
+domain:efootball.konami.com
+domain:pessport.konami.com
+domain:fromsoftware.jp
+domain:eldenring.com
+domain:crunchyroll.com
+# ── Game chat, anti-cheat and overlays ─────────────────────────────
+domain:discord.com
+domain:discord.gg
+domain:discordapp.com
+domain:discordapp.net
+domain:discord.media
+domain:discordcdn.com
+domain:overwolf.com
+domain:curseforge.com
+domain:raidcall.com
+domain:mumble.info
+domain:teamspeak.com
+domain:teamspeak3.com
+domain:skype.com
+domain:eac-web.ea.com
+# ── Game streaming ─────────────────────────────────────────────────
+domain:nvidia.com
+domain:geforcenow.com
+domain:shadow.tech
+domain:parsec.app
+domain:parsecgaming.com
+domain:boosteroid.com
+domain:stadia.com
+domain:stadia.google.com
+domain:psnow.com

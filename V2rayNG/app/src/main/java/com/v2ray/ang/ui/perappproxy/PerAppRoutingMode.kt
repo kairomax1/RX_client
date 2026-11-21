@@ -19,7 +19,17 @@ enum class PerAppRoutingMode(val perAppEnabled: Boolean, val bypassSelected: Boo
         }
 
         fun afterBulkSelection(current: PerAppRoutingMode): PerAppRoutingMode =
-            if (current == ALL) ONLY_SELECTED else current
+            if (current == ALL) EXCEPT_SELECTED else current
+
+        /**
+         * What the screen offers: everything goes through the tunnel, or
+         * everything but the apps the owner picked. The third sort the two flags
+         * can carry — "only the apps I picked" — is no longer put in front of
+         * anyone: whichever way it is read, it is the one that sends traffic
+         * where it was not expected, and the app now picks the apps that have to
+         * stay on the phone's own line by itself.
+         */
+        fun choices(): List<PerAppRoutingMode> = listOf(ALL, EXCEPT_SELECTED)
 
         /**
          * Commit both flags, restoring changed keys if the second write fails.

@@ -1,0 +1,113 @@
+# Games that cannot be played from inside the country.
+#
+# One entry per line: "domain:name" matches the name and everything under it.
+# Lines starting with # are notes.
+#
+# Everything in rx_game_domains.txt is a game that answers on the phone's own
+# line, which is what keeps its ping at the line's own figure. Everything here
+# is the opposite: a game that is filtered in the country, or that refuses an
+# address from it, or whose shop and sign-in are shut to it. Those are played
+# from outside whatever the owner chose for the rest, because a game that does
+# not connect at all has no ping worth protecting.
+#
+# Only the names a game's own client talks to belong here: the launcher, the
+# sign-in, the shop, the matchmaker, the anti-cheat and the content servers.
+# ── Stores and launchers that refuse the country ─────────────────────
+domain:steampowered.com
+domain:steamcommunity.com
+domain:steamstatic.com
+domain:steamgames.com
+domain:steamusercontent.com
+domain:steamserver.net
+domain:valvesoftware.com
+domain:epicgames.com
+domain:epicgames.dev
+domain:egdata.app
+domain:fortnite.com
+domain:unrealengine.com
+domain:easyanticheat.net
+domain:battleye.com
+domain:beglobal.net
+domain:gog.com
+domain:humblebundle.com
+domain:itch.io
+domain:origin.com
+domain:electronicarts.com
+domain:battle.net
+domain:blizzard.com
+domain:blzstatic.cn
+domain:ubisoft.com
+domain:ubi.com
+domain:ubisoftconnect.com
+domain:rockstargames.com
+domain:playstation.com
+domain:playstation.net
+domain:sonyentertainmentnetwork.com
+domain:psn.com
+domain:xbox.com
+domain:xboxlive.com
+domain:nintendo.com
+domain:nintendowifi.net
+# ── Sanctioned or filtered game services ─────────────────────────────
+domain:riotgames.com
+domain:leagueoflegends.com
+domain:valorant.com
+domain:playvalorant.com
+domain:poro.gg
+domain:supercell.com
+domain:clashofclans.com
+domain:clashroyale.com
+domain:brawlstars.com
+domain:haydaygame.com
+domain:boombeach.com
+domain:roblox.com
+domain:rbxcdn.com
+domain:robloxlabs.com
+domain:nianticlabs.com
+domain:pokemongo.com
+domain:pubgmobile.com
+domain:proximabeta.com
+domain:igamecj.com
+domain:tencent.com
+domain:tencentgames.com
+domain:qcloudwzg.com
+domain:garena.com
+domain:ff.garena.com
+domain:mobilelegends.com
+domain:mlbb.com
+domain:moontoon.com
+domain:activision.com
+domain:callofduty.com
+domain:hoyoverse.com
+domain:mihoyo.com
+domain:genshin.com
+domain:zenlesszonezero.com
+domain:honkaiimpact3.com
+domain:starrail.com
+domain:netease.com
+domain:wargaming.net
+domain:worldoftanks.com
+domain:gaijin.net
+domain:warthunder.com
+domain:mojang.com
+domain:minecraft.net
+domain:xboxlive.cn
+domain:pixonic.com
+domain:warrobots.com
+domain:playrix.com
+domain:plarium.com
+domain:nexon.com
+domain:nexon.net
+domain:maplestory.com
+domain:lostark.com
+domain:smilegate.com
+domain:twitch.tv
+domain:ttvnw.net
+domain:jtvnw.net
+domain:oculus.com
+domain:meta.com
+domain:sidequestvr.com
+domain:steamchina.com
+domain:perfectworld.com
+domain:wemade.com
+domain:kakaogames.com

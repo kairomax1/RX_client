@@ -27,10 +27,13 @@ import com.v2ray.ang.dto.UrlContentRequest
 import com.v2ray.ang.ui.checkupdate.CheckUpdateActivity
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.LogUtil
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -90,17 +93,34 @@ object UpdateNotifier {
     suspend fun checkNow(context: Context) = withContext(Dispatchers.IO) {
         // A build that is already the newest must not keep an old dot after it was updated.
         _pending.value = readPending()
-        val now = System.currentTimeMillis()
-        val last = MmkvManager.decodeSettingsLong(PREF_LAST_CHECK_MS, 0L)
-        if (now - last in 0 until OPEN_CHECK_INTERVAL_MS) return@withContext
+        // One check at a time, and the time of the check is written before it is
+        // made rather than after. Three callers ask for one within a moment of
+        // each other — the screen opening, the tunnel coming up, and the periodic
+        // look — and each of them used to read the same old timestamp and go
+        // ahead, which is why the log shows the same answer four times inside a
+        // second and a cancelled request after it.
+        val claimed = checkGate.withLock {
+            val now = System.currentTimeMillis()
+            val last = MmkvManager.decodeSettingsLong(PREF_LAST_CHECK_MS, 0L)
+            if (now - last in 0 until OPEN_CHECK_INTERVAL_MS) return@withLock false
+            MmkvManager.encodeSettings(PREF_LAST_CHECK_MS, now)
+            true
+        }
+        if (!claimed) return@withContext
         try {
             val result = UpdateCheckerManager.checkForUpdate(includePreRelease = false)
-            MmkvManager.encodeSettings(PREF_LAST_CHECK_MS, now)
             onCheckResult(context, result)
+        } catch (e: CancellationException) {
+            // The screen went away while the answer was on its way. Nothing is
+            // wrong, and nothing should be said about it.
+            MmkvManager.encodeSettings(PREF_LAST_CHECK_MS, 0L)
         } catch (e: Exception) {
+            MmkvManager.encodeSettings(PREF_LAST_CHECK_MS, 0L)
             LogUtil.w(AppConfig.TAG, "Update check failed", e)
         }
     }
+
+    private val checkGate = Mutex()
 
     /** Stores the outcome of any official-release check and notifies when it found something. */
     fun onCheckResult(context: Context, result: CheckUpdateResult) {
@@ -123,8 +143,10 @@ object UpdateNotifier {
         url: String,
         size: Long = 0L,
         sha256: String? = null,
+        /** Sent with the download, when the release is one only this phone may read. */
+        headers: Map<String, String> = emptyMap(),
         onProgress: (UpdateDownloader.Progress) -> Unit = {},
-    ): File? = UpdateDownloader.download(context, version, url, size, sha256, onProgress)
+    ): File? = UpdateDownloader.download(context, version, url, size, sha256, headers, onProgress)
 
     /**
      * Hands a downloaded update to the user. The app deliberately does not hold the "install

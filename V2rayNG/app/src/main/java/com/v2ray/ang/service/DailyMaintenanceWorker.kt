@@ -64,8 +64,35 @@ class DailyMaintenanceWorker(
         runCatching { refreshSubscriptions() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: subscription refresh failed", it) }
 
+        runCatching {
+            if (isOnline()) com.v2ray.ang.handler.PublicConfigs.refreshSourcesDaily(applicationContext)
+            com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext)
+        }.onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
+
+        // Only when there is a line to fetch it over: offline, the request would sit
+        // on its timeout and hold up everything after it.
+        if (isOnline()) {
+            runCatching { com.v2ray.ang.handler.RemoteControl.refreshIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: remote control failed", it) }
+
+            runCatching { com.v2ray.ang.handler.FirefoxVpnServers.refreshDailyIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Mozilla server list failed", it) }
+
+            runCatching { com.v2ray.ang.handler.XboxDns.refreshDailyIfDue(applicationContext) }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: DNS scanner list failed", it) }
+
+            runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+
+            runCatching { com.v2ray.ang.handler.BackgroundSyncManager.syncAll(applicationContext) }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: background sync failed", it) }
+        }
+
         runCatching { repairCloudflareConfig() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Cloudflare repair failed", it) }
+
+        runCatching { tuneGamingExit() }
+            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: gaming exit failed", it) }
 
         runCatching { tidyLocalData() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: local tidy-up failed", it) }
@@ -114,6 +141,21 @@ class DailyMaintenanceWorker(
             SubscriptionUpdateMessage(AppConfig.MSG_SUB_UPDATE_START, true, subIds)
         )
         LogUtil.i(AppConfig.TAG, "Daily maintenance: refreshing ${subIds.size} subscription(s)")
+    }
+
+    /**
+     * Points the selected config at the exit that answers soonest, so a game is played through
+     * the fastest address the config can reach rather than whichever one it happened to keep.
+     * Only runs while gaming mode is on, and only moves the config when the new exit is clearly
+     * sooner — a daily nudge that measures the same twice changes nothing.
+     */
+    private suspend fun tuneGamingExit() {
+        if (!com.v2ray.ang.handler.GamingMode.isEnabled()) return
+        com.v2ray.ang.handler.GamingExitTuner.tune(
+            context = applicationContext,
+            groupName = applicationContext.getString(R.string.cloudflare_group_name),
+            remarksSuffix = applicationContext.getString(R.string.cloudflare_copy_suffix),
+        )
     }
 
     // -------------------------------------------------------------------------

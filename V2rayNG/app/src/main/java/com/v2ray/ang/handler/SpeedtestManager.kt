@@ -57,17 +57,16 @@ object SpeedtestManager {
         val url = MmkvManager.decodeSettingsString(AppConfig.PREF_IP_API_URL)
             .takeIf { !it.isNullOrBlank() } ?: AppConfig.IP_API_URL
 
-        val proxyUsername = SettingsManager.getSocksUsername()
-        val proxyPassword = SettingsManager.getSocksPassword()
-        val httpPort = SettingsManager.getHttpPort()
-        if (httpPort == 0) return null
+        // The core's own door, so the answer names the tunnel's exit and not the
+        // phone's own line. Pointing an HTTP proxy at it (as this once did) is
+        // answered by nobody, which is how the address shown came to be a lie.
+        val socksPort = SettingsManager.getSocksPort()
+        if (socksPort == 0) return null
         val content = HttpUtil.getUrlContent(
             UrlContentRequest(
                 url = url,
                 timeout = 5000,
-                httpPort = httpPort,
-                proxyUsername = proxyUsername,
-                proxyPassword = proxyPassword
+                socksPort = socksPort,
             )
         ) ?: return null
         val ipInfo = JsonUtil.fromJsonSafe(content, IPAPIInfo::class.java) ?: return null
