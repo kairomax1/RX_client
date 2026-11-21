@@ -449,4 +449,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "startup-test-$GITHUB_RUN_ID" --draft --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'RX VPN 1.2 — startup performance test' --notes 'Install the universal APK over the previous draft.' *_universal.apk
+          gh release create "startup-test-$GITHUB_RUN_ID" --draft --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'RX VPN 1.2 — idle-only background downloads test' --notes 'Install the universal APK over the previous draft.' *_universal.apk

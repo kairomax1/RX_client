@@ -1139,9 +1139,10 @@ object PublicConfigs {
     /** Looks at the lists every fifteen minutes, also while the app is closed. */
     fun schedule(context: Context) {
         val request = PeriodicWorkRequestBuilder<PublicConfigsWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setInitialDelay(1, TimeUnit.HOURS)
+            .setConstraints(backgroundTransferConstraints)
             .build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork("rx_public_configs", ExistingPeriodicWorkPolicy.KEEP, request)
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork("rx_public_configs", ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
     /** True when the public group holds configs, so there is something to renew. */

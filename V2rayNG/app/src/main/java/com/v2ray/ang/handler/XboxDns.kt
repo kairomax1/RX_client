@@ -317,11 +317,12 @@ object XboxDns {
     /** Schedules the daily DNS scanner source update. */
     fun scheduleDaily(context: Context) {
         val request = PeriodicWorkRequestBuilder<XboxDnsDailyWorker>(1, TimeUnit.DAYS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setInitialDelay(1, TimeUnit.HOURS)
+            .setConstraints(backgroundTransferConstraints)
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             "rx_xbox_dns_daily",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }

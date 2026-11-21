@@ -30,6 +30,8 @@ object DailyMaintenance {
 
     fun schedule(context: Context = AngApplication.application) {
         val request = PeriodicWorkRequestBuilder<DailyMaintenanceWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(1, TimeUnit.HOURS)
+            .setConstraints(backgroundTransferConstraints)
             .addTag(AppConfig.DAILY_MAINTENANCE_WORK_NAME)
             .build()
 
