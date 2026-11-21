@@ -16,7 +16,11 @@ class FragmentVpnTest {
             listOf(FragmentVpn.Preset.BALANCED, FragmentVpn.Preset.STRICT_ISP, FragmentVpn.Preset.LOW_SPLIT),
             FragmentVpn.Preset.measurablePresets,
         )
-        assertTrue(FragmentVpn.Preset.measurablePresets.all { it.maxSplit == "0" })
+        assertTrue(
+            FragmentVpn.Preset.measurablePresets.all {
+                it.maxSplit.toIntOrNull()?.let { m -> m in 16..64 } == true
+            }
+        )
         assertTrue(MainDestination.FragmentVpn in quickSheetItems)
         assertTrue(FragmentVpn.isFragmentProfile(FragmentVpn.PROFILE_GUID))
         assertTrue(PublicConfigs.isInternalGroup(FragmentVpn.GROUP_ID))
@@ -47,12 +51,14 @@ class FragmentVpnTest {
         // Must include tun inbound support when hev-socks5-tunnel is disabled.
         assertTrue(fragSrc.contains("v2ray_config_with_tun.json"))
 
-        // Must route domestic DNS cleanly and avoid plain UDP 1.1.1.1 / 8.8.8.8 fallbacks.
+        // Must route domestic DNS cleanly, use only Xray-supported https:// DoH servers, and share dns.tag for parallelQuery.
         assertTrue(fragSrc.contains("TAG_DOMESTIC_DNS"))
         assertTrue(fragSrc.contains("enableParallelQuery = true"))
         val dohSection = fragSrc.substringAfter("val dohList").substringBefore(".distinct()")
         assertFalse(Regex("\"1\\.1\\.1\\.1\"(?![/:])").containsMatchIn(dohSection))
         assertFalse(Regex("\"8\\.8\\.8\\.8\"(?![/:])").containsMatchIn(dohSection))
+        assertFalse(dohSection.contains("tls://"))
+        assertFalse(fragSrc.contains("remote-dns"))
 
         // Activity must verify via CoreServiceManager / OkHttp SOCKS5 remote DNS rather than Proxy.Type.SOCKS URLConnection.
         assertTrue(actSrc.contains("measureDelayDirect"))

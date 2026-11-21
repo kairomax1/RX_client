@@ -308,6 +308,24 @@ class FragmentVpnViewModel(application: Application) : AndroidViewModel(applicat
             "https://cp.cloudflare.com/generate_204",
             "https://www.gstatic.com/generate_204",
         ).distinct()
+        val socksPort = SettingsManager.getSocksPort()
+        if (socksPort > 0) {
+            for (url in urls) {
+                val t0 = System.currentTimeMillis()
+                val res = runCatching {
+                    HttpUtil.getUrlContent(
+                        UrlContentRequest(
+                            url = url,
+                            timeout = 5000,
+                            socksPort = socksPort,
+                        )
+                    )
+                }.getOrNull()
+                if (res != null) {
+                    return (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+                }
+            }
+        }
         for (url in urls) {
             val ms = CoreServiceManager.measureDelayDirect(url)
             if (ms > 0L) return ms

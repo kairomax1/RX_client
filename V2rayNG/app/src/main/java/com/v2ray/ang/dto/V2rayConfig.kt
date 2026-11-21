@@ -358,6 +358,7 @@ data class V2rayConfig(
             val clientIp: String? = null,
             val skipFallback: Boolean? = null,
             val tag: String? = null,
+            val timeoutMs: Long? = null,
         )
     }
 

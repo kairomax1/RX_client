@@ -42,11 +42,11 @@ object FragmentVpn {
         val delay: String,
         val maxSplit: String,
     ) {
-        AUTO("auto", "tlshello", "20-40", "2-5", "0"),
-        BALANCED("balanced", "tlshello", "20-40", "2-5", "0"),
-        STRICT_ISP("strict", "1-3", "10-25", "2-6", "0"),
-        LOW_SPLIT("fine", "1-2", "5-15", "3-8", "0"),
-        CUSTOM("custom", "tlshello", "20-40", "2-5", "0");
+        AUTO("auto", "tlshello", "50-100", "1-3", "32"),
+        BALANCED("balanced", "tlshello", "50-100", "1-3", "32"),
+        STRICT_ISP("strict", "tlshello", "30-60", "1-3", "48"),
+        LOW_SPLIT("fine", "1-3", "40-80", "1-3", "32"),
+        CUSTOM("custom", "tlshello", "50-100", "1-3", "32");
 
         companion object {
             fun fromKey(key: String?): Preset = entries.firstOrNull { it.key == key } ?: AUTO
@@ -96,17 +96,17 @@ object FragmentVpn {
             resolved.packets
         }
         val length = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_LENGTH)?.trim().takeUnless { it.isNullOrEmpty() } ?: "20-40"
+            MmkvManager.decodeSettingsString(PREF_LENGTH)?.trim().takeUnless { it.isNullOrEmpty() } ?: "50-100"
         } else {
             resolved.length
         }
         val delay = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_DELAY)?.trim().takeUnless { it.isNullOrEmpty() } ?: "2-5"
+            MmkvManager.decodeSettingsString(PREF_DELAY)?.trim().takeUnless { it.isNullOrEmpty() } ?: "1-3"
         } else {
             resolved.delay
         }
         val maxSplit = if (selected == Preset.CUSTOM) {
-            MmkvManager.decodeSettingsString(PREF_MAXSPLIT)?.trim().takeUnless { it.isNullOrEmpty() } ?: "0"
+            MmkvManager.decodeSettingsString(PREF_MAXSPLIT)?.trim().takeUnless { it.isNullOrEmpty() } ?: "32"
         } else {
             resolved.maxSplit
         }
@@ -134,9 +134,9 @@ object FragmentVpn {
 
     fun saveCustomParams(packets: String, length: String, delay: String, maxSplit: String) {
         MmkvManager.encodeSettings(PREF_PACKETS, packets.trim().ifEmpty { "tlshello" })
-        MmkvManager.encodeSettings(PREF_LENGTH, length.trim().ifEmpty { "20-40" })
-        MmkvManager.encodeSettings(PREF_DELAY, delay.trim().ifEmpty { "2-5" })
-        MmkvManager.encodeSettings(PREF_MAXSPLIT, maxSplit.trim().ifEmpty { "0" })
+        MmkvManager.encodeSettings(PREF_LENGTH, length.trim().ifEmpty { "50-100" })
+        MmkvManager.encodeSettings(PREF_DELAY, delay.trim().ifEmpty { "1-3" })
+        MmkvManager.encodeSettings(PREF_MAXSPLIT, maxSplit.trim().ifEmpty { "32" })
     }
 
     fun saveDropQuic(enabled: Boolean) {
@@ -199,18 +199,10 @@ object FragmentVpn {
             "https://www.gstatic.com/generate_204",
         ).distinct()
         val results = linkedMapOf<Preset, Long>()
-        val serviceRunning = ServiceRuntimeState.isRunning(context) || CoreServiceManager.isRunning()
         for (preset in Preset.measurablePresets) {
-            val ping = if (!serviceRunning) {
-                measurePresetWithFullDns(context, preset, delayTestUrls)
-            } else {
-                val json = buildXrayConfigJson(context, presetOverride = preset, forSpeedtest = true)
-                delayTestUrls.firstNotNullOfOrNull { url ->
-                    runCatching { CoreNativeManager.measureOutboundDelay(json, url) }
-                        .getOrDefault(-1L)
-                        .takeIf { it > 0L }
-                } ?: -1L
-            }
+            // Even when VPN is active, CoreVpnService disallows selfPackageName so a temporary
+            // CoreController on a random free port probes directly with full DoH + DNS routing.
+            val ping = measurePresetWithFullDns(context, preset, delayTestUrls)
             results[preset] = ping
         }
         val winner = results.entries
@@ -287,7 +279,7 @@ object FragmentVpn {
         val inbounds = arrayListOf<V2rayConfig.InboundBean>()
         if (!forSpeedtest) {
             val sniffingDest = arrayListOf("http", "tls")
-            if (cfg.dropQuic) sniffingDest.add("quic")
+            if (!cfg.dropQuic) sniffingDest.add("quic")
             val sniffing = V2rayConfig.InboundBean.SniffingBean(
                 enabled = true,
                 destOverride = sniffingDest,
@@ -323,9 +315,7 @@ object FragmentVpn {
         val proxyOutbound = V2rayConfig.OutboundBean(
             tag = AppConfig.TAG_PROXY,
             protocol = AppConfig.PROTOCOL_FREEDOM,
-            settings = V2rayConfig.OutboundBean.OutSettingsBean(
-                domainStrategy = domainStrategy,
-            ),
+            settings = null,
             streamSettings = V2rayConfig.OutboundBean.StreamSettingsBean(
                 network = null,
                 sockopt = V2rayConfig.OutboundBean.StreamSettingsBean.SockoptBean(
@@ -359,9 +349,7 @@ object FragmentVpn {
         val directOutbound = V2rayConfig.OutboundBean(
             tag = AppConfig.TAG_DIRECT,
             protocol = AppConfig.PROTOCOL_FREEDOM,
-            settings = V2rayConfig.OutboundBean.OutSettingsBean(
-                domainStrategy = domainStrategy,
-            ),
+            settings = null,
             streamSettings = V2rayConfig.OutboundBean.StreamSettingsBean(
                 network = null,
                 sockopt = V2rayConfig.OutboundBean.StreamSettingsBean.SockoptBean(
@@ -454,30 +442,38 @@ object FragmentVpn {
                 V2rayConfig.DnsBean.ServersBean(
                     address = domesticDns,
                     domains = listOf("domain:ir"),
-                    skipFallback = false,
+                    skipFallback = true,
                     tag = AppConfig.TAG_DOMESTIC_DNS,
                 )
             )
         }
-        // Only encrypted DoH / DoT resolvers so ISP UDP:53 hijacking (10.10.34.x) cannot poison DNS.
+        // Only encrypted DoH (https://) resolvers supported by Xray-core (`app/dns/nameserver.go`).
+        // Leave `tag` unset so every remote DoH server inherits `dns.tag` (AppConfig.TAG_DNS),
+        // matches the TAG_DNS -> TAG_PROXY routing rule, and shares one PolicyID so
+        // `enableParallelQuery = true` races all resolvers simultaneously instead of sequentially.
         val dohList = listOf(
             cfg.doh.url,
-            "https://8.8.8.8/dns-query",
+            "https://94.140.14.14/dns-query",
+            "https://94.140.15.15/dns-query",
+            "https://208.67.222.222/dns-query",
+            "https://149.112.112.112/dns-query",
+            "https://185.222.222.222/dns-query",
             "https://1.1.1.1/dns-query",
             "https://1.0.0.1/dns-query",
+            "https://8.8.8.8/dns-query",
             "https://9.9.9.9/dns-query",
-            "https://dns.google/dns-query",
-            "https://dns.quad9.net/dns-query",
             "https://dns.adguard-dns.com/dns-query",
             "https://doh.opendns.com/dns-query",
-            "tls://8.8.8.8",
-            "tls://9.9.9.9",
+            "https://dns.quad9.net/dns-query",
+            "https://dns.google/dns-query",
+            "https://cloudflare-dns.com/dns-query",
+            "https://dns.sb/dns-query",
         ).distinct()
-        dohList.forEachIndexed { idx, url ->
+        dohList.forEach { url ->
             dnsServers.add(
                 V2rayConfig.DnsBean.ServersBean(
                     address = url,
-                    tag = if (idx == 0) "remote-dns" else "remote-dns-$idx",
+                    timeoutMs = 2500L,
                 )
             )
         }
@@ -490,6 +486,7 @@ object FragmentVpn {
             "dns.quad9.net" to listOf("9.9.9.9", "149.112.112.112"),
             "dns.adguard-dns.com" to listOf("94.140.14.14", "94.140.15.15"),
             "doh.opendns.com" to listOf("208.67.222.222", "208.67.220.220"),
+            "dns.sb" to listOf("185.222.222.222", "45.11.45.11"),
         )
 
         val statsEnabled = !forSpeedtest && !forceDisableTun &&
