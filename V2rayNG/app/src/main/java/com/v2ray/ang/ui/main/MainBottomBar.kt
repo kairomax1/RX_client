@@ -445,23 +445,26 @@ private fun ConnectButton(
     // button is idle: an infinite transition redraws the layer every frame. Stripes only
     // while connecting, the sheen only while connected; idle and failed stay static.
     // Kept as States and read only inside drawWithContent, so they never recompose.
-    val loops = if (animate && (connecting || connected)) {
-        rememberInfiniteTransition(label = "connect")
+    val stripeShift: State<Float>?
+    val sheen: State<Float>?
+    if (animate && (connecting || connected)) {
+        val infinite = rememberInfiniteTransition(label = "connect")
+        stripeShift = infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
+            label = "stripes",
+        )
+        sheen = infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
+            label = "sheen",
+        )
     } else {
-        null
+        stripeShift = null
+        sheen = null
     }
-    val stripeShift = loops?.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
-        label = "stripes",
-    )
-    val sheen = loops?.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
-        label = "sheen",
-    )
     val glow by animateFloatAsState(if (connected) 1f else 0f, tween(600), label = "glow")
     val red by animateFloatAsState(if (failed) 1f else 0f, tween(260), label = "red")
 
