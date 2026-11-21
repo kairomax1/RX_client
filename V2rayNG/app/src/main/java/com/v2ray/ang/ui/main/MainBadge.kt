@@ -2,10 +2,8 @@ package com.v2ray.ang.ui.main
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -49,11 +47,13 @@ internal fun ConfigBadgeChip(badge: ConfigBadge, modifier: Modifier = Modifier) 
     LaunchedEffect(badge) {
         if (pop.value < 1f) pop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow))
     }
+    // One glide after the pop-in, not a loop: chips sit in list rows, and an infinite
+    // sheen would redraw every visible chip for most of each cycle.
     val sheen: State<Float>? = if (animate) {
         rememberInfiniteTransition(label = "badge").animateFloat(
             initialValue = -0.6f,
             targetValue = 1.6f,
-            animationSpec = infiniteRepeatable(tween(2600, delayMillis = 1400, easing = LinearEasing), RepeatMode.Restart),
+            animationSpec = tween(2600, delayMillis = 1400, easing = LinearEasing),
             label = "badgeSheen",
         )
     } else null

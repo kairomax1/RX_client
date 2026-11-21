@@ -602,6 +602,26 @@ object CoreOutboundBuilder {
      * @param streamSettings The streamSettings object to be modified
      * @return true if fragment configuration was successful, false otherwise
      */
+    /**
+     * Whether the fragment/noise masks may be applied to an outbound with this network.
+     *
+     * The masks wrap the raw connection the core dials, so they only exist where that
+     * connection is a TCP stream carrying the TLS handshake. On UDP-dialing transports
+     * (kcp/quic/hysteria) the TCP fragment mask never applies and the UDP noise mask
+     * corrupts the QUIC handshake — the VPN shows connected but passes zero traffic.
+     * XHTTP already hides the handshake, and fragmenting under it breaks the stream on
+     * mobile networks (v2rayNG #4934), so the masks are skipped there as well.
+     */
+    internal fun fragmentAppliesToNetwork(network: String?): Boolean {
+        val n = network?.lowercase()?.ifBlank { NetworkType.TCP.type } ?: NetworkType.TCP.type
+        return n == NetworkType.TCP.type
+            || n == NetworkType.WS.type
+            || n == NetworkType.HTTP_UPGRADE.type
+            || n == NetworkType.HTTP.type
+            || n == NetworkType.H2.type
+            || n == NetworkType.GRPC.type
+    }
+
     private fun updateOutboundFragment(streamSettings: OutboundBean.StreamSettingsBean): Boolean {
         try {
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false) == false) {
@@ -613,6 +633,12 @@ object CoreOutboundBuilder {
                 return true
             }
             if (streamSettings.sockopt?.dialerProxy.isNotNullEmpty()) {
+                return true
+            }
+            // The masks wrap the raw connection the core dials, so they only exist where
+            // that connection is a TCP stream carrying the TLS handshake; on other
+            // transports they either never apply or break the handshake outright.
+            if (!fragmentAppliesToNetwork(streamSettings.network)) {
                 return true
             }
 
