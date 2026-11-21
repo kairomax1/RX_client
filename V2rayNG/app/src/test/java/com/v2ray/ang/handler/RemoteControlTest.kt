@@ -15,14 +15,16 @@ class RemoteControlTest {
         val parsed = RemoteControl.parse(manifest)
         assertNotNull(parsed)
         assertEquals(1, parsed!!.schemaVersion)
-        assertTrue(parsed.features.publicConfigs)
-        assertTrue(parsed.features.mozillaVpn)
+        // Background list syncs are opt-in: the bundled manifest keeps them off so the
+        // app never downloads on its own (lag/freeze/self-download fix).
+        assertFalse(parsed.features.publicConfigs)
+        assertFalse(parsed.features.mozillaVpn)
         assertTrue(parsed.features.gamingMode)
-        assertTrue(parsed.features.dnsScanner)
+        assertFalse(parsed.features.dnsScanner)
         assertTrue(parsed.features.aether)
         assertTrue("youtubei.googleapis.com" in parsed.routing.unblockDomains)
         assertEquals(true, parsed.routing.blockUdp443)
-        assertTrue(parsed.core.silentGeoUpdate)
+        assertFalse(parsed.core.silentGeoUpdate)
     }
 
     @Test

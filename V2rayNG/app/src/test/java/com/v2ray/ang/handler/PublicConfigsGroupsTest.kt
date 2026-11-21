@@ -128,28 +128,38 @@ class PublicConfigsGroupsTest {
     }
 
     @Test
-    fun publicConfigsRefreshesEvery15MinutesWhenDeadAndDailyForSources() {
+    fun noListAutoSyncIsScheduledAtStartupAndDailyPassIsFlagGated() {
         val publicSrc = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
         val appSrc = java.io.File("src/main/java/com/v2ray/ang/AngApplication.kt").readText()
         val dailySrc = java.io.File("src/main/java/com/v2ray/ang/service/DailyMaintenanceWorker.kt").readText()
+        val repoSrc = java.io.File("src/main/java/com/v2ray/ang/ui/main/MainRepository.kt").readText()
         val dnsSrc = java.io.File("src/main/java/com/v2ray/ang/handler/XboxDns.kt").readText()
 
+        // The refresh machinery still exists for manual use from the screens.
         assertTrue(publicSrc.contains("REFRESH_MILLIS = 15 * 60 * 1000L"))
         assertTrue(publicSrc.contains("DAILY_MILLIS = 24 * 60 * 60 * 1000L"))
         assertTrue(publicSrc.contains("areGroupConfigsDead()"))
         assertTrue(publicSrc.contains("fun refreshSourcesDaily"))
-        assertTrue(publicSrc.contains("PublicConfigs.refreshSourcesDaily(applicationContext)"))
         assertTrue(publicSrc.contains("SettingsChangeManager.makeSetupGroupTab()"))
-
-        assertTrue(appSrc.contains("PublicConfigs.schedule(this)"))
-        assertTrue(appSrc.contains("XboxDns.scheduleDaily(this)"))
-
-        assertTrue(dailySrc.contains("PublicConfigs.refreshSourcesDaily(applicationContext)"))
-        assertTrue(dailySrc.contains("XboxDns.refreshDailyIfDue(applicationContext)"))
-
         assertTrue(dnsSrc.contains("fun refreshDailyIfDue"))
         assertTrue(dnsSrc.contains("fun scheduleDaily"))
         assertTrue(dnsSrc.contains("DAILY_LIST_MILLIS = 24 * 60 * 60 * 1000L"))
+
+        // But nothing is auto-scheduled at app start: no 15-minute public-configs worker,
+        // no 6-hourly background sync, no app-start kick, no daily DNS-list worker.
+        assertFalse(appSrc.contains("PublicConfigs.schedule(this)"))
+        assertFalse(appSrc.contains("XboxDns.scheduleDaily(this)"))
+        assertFalse(appSrc.contains("BackgroundSyncManager.schedule(this)"))
+        assertFalse(appSrc.contains("BackgroundSyncManager.kickIfDue(this)"))
+
+        // The daily maintenance pass only refreshes lists behind their feature flags
+        // (which default to off), and the main screen does not re-arm the worker or
+        // probe configs unless the publicConfigs flag is on.
+        assertTrue(dailySrc.contains("isFeatureEnabled { it.publicConfigs }"))
+        assertTrue(dailySrc.contains("isFeatureEnabled { it.dnsScanner }"))
+        assertTrue(dailySrc.contains("isFeatureEnabled { it.adBlock }"))
+        assertFalse(dailySrc.contains("BackgroundSyncManager.syncAll(applicationContext)"))
+        assertTrue(repoSrc.contains("isFeatureEnabled { it.publicConfigs }"))
     }
 
     @Test
