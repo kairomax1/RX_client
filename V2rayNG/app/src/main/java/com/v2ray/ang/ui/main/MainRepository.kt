@@ -280,6 +280,12 @@ class MainRepository(
     }
 
     override fun renewPublicConfigs(connected: Boolean): Int {
+        // Background auto-renewal is opt-in through the remote-control flag (off by
+        // default): without this check the app re-arms a 15-minute download worker and
+        // probes public configs every time the main screen opens, which is the
+        // "lag + freeze + downloads by itself" users see. Manual refresh from the
+        // Public Configs screen is unaffected.
+        if (!com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.publicConfigs }) return 0
         PublicConfigs.schedule(app)
         // refreshIfDue renews the group itself when due (including daily 24h updates and
         // initial population when the group is empty).

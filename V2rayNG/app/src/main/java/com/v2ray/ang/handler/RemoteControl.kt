@@ -31,10 +31,13 @@ object RemoteControl {
     private var cached: Config? = null
 
     data class Features(
-        val publicConfigs: Boolean = true,
-        val mozillaVpn: Boolean = true,
+        // Background list syncs default to OFF: they download without the user asking and
+        // were the source of "lag + freeze + downloads by itself" on weak phones. The UI
+        // screens (public configs, Mozilla VPN, DNS scanner) do not read these flags.
+        val publicConfigs: Boolean = false,
+        val mozillaVpn: Boolean = false,
         val gamingMode: Boolean = true,
-        val dnsScanner: Boolean = true,
+        val dnsScanner: Boolean = false,
         val aether: Boolean = true,
         val adBlock: Boolean = true,
         val autoUpdate: Boolean = true,
@@ -86,7 +89,9 @@ object RemoteControl {
         val geoipUrl: String? = null,
         val geoipCnPrivateUrl: String? = null,
         val coreCheckUrl: String? = null,
-        val silentGeoUpdate: Boolean = true,
+        // Off by default: geoip/geosite are multi-MB downloads. The APK ships with the
+        // databases in assets, so a silent refresh is never required for correctness.
+        val silentGeoUpdate: Boolean = false,
         val minSupportedVersionCode: Int = 0,
     )
 

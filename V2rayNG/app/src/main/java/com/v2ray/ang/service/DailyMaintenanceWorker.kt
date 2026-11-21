@@ -64,28 +64,36 @@ class DailyMaintenanceWorker(
         runCatching { refreshSubscriptions() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: subscription refresh failed", it) }
 
-        runCatching {
-            if (isOnline()) com.v2ray.ang.handler.PublicConfigs.refreshSourcesDaily(applicationContext)
-            com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext)
-        }.onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
-
         // Only when there is a line to fetch it over: offline, the request would sit
-        // on its timeout and hold up everything after it.
+        // on its timeout and hold up everything after it. Every list refresh below is
+        // additionally gated by its RemoteControl feature flag, and those flags default
+        // to off, so the daily pass never downloads anything unless the owner explicitly
+        // re-enables a feature in rx-control.json.
         if (isOnline()) {
             runCatching { com.v2ray.ang.handler.RemoteControl.refreshIfDue() }
                 .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: remote control failed", it) }
 
-            runCatching { com.v2ray.ang.handler.FirefoxVpnServers.refreshDailyIfDue() }
-                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Mozilla server list failed", it) }
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.publicConfigs }) {
+                runCatching {
+                    com.v2ray.ang.handler.PublicConfigs.refreshSourcesDaily(applicationContext)
+                    com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext)
+                }.onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
+            }
 
-            runCatching { com.v2ray.ang.handler.XboxDns.refreshDailyIfDue(applicationContext) }
-                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: DNS scanner list failed", it) }
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.mozillaVpn }) {
+                runCatching { com.v2ray.ang.handler.FirefoxVpnServers.refreshDailyIfDue() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Mozilla server list failed", it) }
+            }
 
-            runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
-                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.dnsScanner }) {
+                runCatching { com.v2ray.ang.handler.XboxDns.refreshDailyIfDue(applicationContext) }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: DNS scanner list failed", it) }
+            }
 
-            runCatching { com.v2ray.ang.handler.BackgroundSyncManager.syncAll(applicationContext) }
-                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: background sync failed", it) }
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.adBlock }) {
+                runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+            }
         }
 
         runCatching { repairCloudflareConfig() }

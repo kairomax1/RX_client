@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "revision": 1,
-  "updatedAt": "2026-11-20T12:00:00Z",
+  "revision": 2,
+  "updatedAt": "2026-11-21T16:00:00Z",
   "features": {
-    "publicConfigs": true,
-    "mozillaVpn": true,
+    "publicConfigs": false,
+    "mozillaVpn": false,
     "gamingMode": true,
-    "dnsScanner": true,
+    "dnsScanner": false,
     "aether": true,
     "adBlock": true,
     "autoUpdate": true,
@@ -58,7 +58,7 @@
     "geoipUrl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
     "geoipCnPrivateUrl": "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/geoip-only-cn-private.dat",
     "coreCheckUrl": "https://api.github.com/repos/2dust/AndroidLibXrayLite/releases/latest",
-    "silentGeoUpdate": true,
+    "silentGeoUpdate": false,
     "minSupportedVersionCode": 0
   },
   "directives": {
