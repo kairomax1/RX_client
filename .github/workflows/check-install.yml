@@ -38,3 +38,25 @@ jobs:
             adb uninstall com.mobix.vpn
             adb install previous/*_x86_64.apk
             adb install -r apk/*_x86_64.apk
+  stage-draft:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RXVPN-apk
+          path: apk
+          run-id: 44823591545
+          github-token: ${{ github.token }}
+      - name: Attach verified APKs to test draft only
+        working-directory: apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run view 44828108696 -R "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion | grep -Fx success
+          sha256sum -c SHA256SUMS.txt
+          gh release view v1.2-install-test -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -Fx true
+          gh release upload v1.2-install-test -R "$GITHUB_REPOSITORY" RXVPN_1.2_{universal,arm64-v8a}.apk SHA256SUMS.txt --clobber
