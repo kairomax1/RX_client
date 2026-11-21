@@ -3,6 +3,7 @@ package com.v2ray.ang.handler
 import com.v2ray.ang.ui.main.MainDestination
 import com.v2ray.ang.ui.main.quickSheetItems
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -15,6 +16,7 @@ class FragmentVpnTest {
             listOf(FragmentVpn.Preset.BALANCED, FragmentVpn.Preset.STRICT_ISP, FragmentVpn.Preset.LOW_SPLIT),
             FragmentVpn.Preset.measurablePresets,
         )
+        assertTrue(FragmentVpn.Preset.measurablePresets.all { it.maxSplit == "0" })
         assertTrue(MainDestination.FragmentVpn in quickSheetItems)
         assertTrue(FragmentVpn.isFragmentProfile(FragmentVpn.PROFILE_GUID))
         assertTrue(PublicConfigs.isInternalGroup(FragmentVpn.GROUP_ID))
@@ -27,19 +29,33 @@ class FragmentVpnTest {
     }
 
     @Test
-    fun fragmentVpnSupportsTunnelAndDoesNotCorruptUdpWithNoise() {
+    fun fragmentVpnUsesDirectUserIpWithoutAetherOrUdpNoise() {
         val fragSrc = File("src/main/java/com/v2ray/ang/handler/FragmentVpn.kt").readText()
         val coreSvcSrc = File("src/main/java/com/v2ray/ang/core/CoreServiceManager.kt").readText()
         val actSrc = File("src/main/java/com/v2ray/ang/ui/fragmentvpn/FragmentVpnActivity.kt").readText()
 
+        // Must never attach Aether / Cloudflare tunnel to Fragment VPN.
+        assertFalse(fragSrc.contains("AetherEngine"))
+        assertFalse(fragSrc.contains("shouldUseAetherTunnel"))
+        assertFalse(coreSvcSrc.contains("FragmentVpn.shouldUseAetherTunnel"))
+        assertFalse(actSrc.contains("AetherEngine"))
+
         // Direct freedom mode must not inject UDP noise (which breaks games/WhatsApp/STUN).
-        assertTrue(!fragSrc.contains("type = \"noise\""))
-        assertTrue(!fragSrc.contains("NoiseMaskBean"))
+        assertFalse(fragSrc.contains("type = \"noise\""))
+        assertFalse(fragSrc.contains("NoiseMaskBean"))
+
         // Must include tun inbound support when hev-socks5-tunnel is disabled.
         assertTrue(fragSrc.contains("v2ray_config_with_tun.json"))
-        // Must support Aether server-less tunnel outbound and start AetherEngine in CoreServiceManager.
-        assertTrue(fragSrc.contains("shouldUseAetherTunnel"))
-        assertTrue(coreSvcSrc.contains("FragmentVpn.shouldUseAetherTunnel"))
-        assertTrue(actSrc.contains("probeSocks204"))
+
+        // Must route domestic DNS cleanly and avoid plain UDP 1.1.1.1 / 8.8.8.8 fallbacks.
+        assertTrue(fragSrc.contains("TAG_DOMESTIC_DNS"))
+        assertTrue(fragSrc.contains("enableParallelQuery = true"))
+        assertFalse(fragSrc.contains("\"1.1.1.1\","))
+        assertFalse(fragSrc.contains("\"8.8.8.8\","))
+
+        // Activity must verify via CoreServiceManager / OkHttp SOCKS5 remote DNS rather than Proxy.Type.SOCKS URLConnection.
+        assertTrue(actSrc.contains("measureDelayDirect"))
+        assertTrue(actSrc.contains("HttpUtil.getUrlContent"))
+        assertFalse(actSrc.contains("Proxy.Type.SOCKS"))
     }
 }
