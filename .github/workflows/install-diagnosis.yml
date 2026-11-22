@@ -64,17 +64,4 @@ jobs:
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb install -r apks/new/RXVPN_1.2_universal.apk
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-            ABI_LIST=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
-            case ",$ABI_LIST," in
-            *,arm64-v8a,*)
-              echo 'Testing ARM64 APK with the emulator native bridge'
-              adb uninstall com.mobix.vpn
-              adb install apks/new/RXVPN_1.2_arm64-v8a.apk
-              adb uninstall com.mobix.vpn
-              adb install apks/old/RXVPN_1.0.1_arm64-v8a.apk
-              adb install -r apks/new/RXVPN_1.2_arm64-v8a.apk
-              ;;
-            *)
-              echo '::warning::This emulator does not advertise ARM64; ARM64 installation was not tested.'
-              ;;
-            esac
+            if adb shell getprop ro.product.cpu.abilist | grep -q arm64-v8a; then adb uninstall com.mobix.vpn && adb install apks/new/RXVPN_1.2_arm64-v8a.apk && adb uninstall com.mobix.vpn && adb install apks/old/RXVPN_1.0.1_arm64-v8a.apk && adb install -r apks/new/RXVPN_1.2_arm64-v8a.apk; else echo '::warning::This emulator does not advertise ARM64; ARM64 installation was not tested.'; fi
