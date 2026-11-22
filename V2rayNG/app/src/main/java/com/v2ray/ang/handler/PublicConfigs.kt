@@ -69,13 +69,13 @@ object PublicConfigs {
      * anybody chooses by accident, so it is honoured here.
      */
     const val MAX_COUNT = 2500
-    private const val ASSET = "rx_public_configs.txt"
     private const val KEY_KINDS = "rx_public_kinds"
     private const val KEY_COUNT = "rx_public_count"
     private const val KEY_FRESH = "rx_public_fresh"
     private const val KEY_CHECKED = "rx_public_checked"
     private const val KEY_REBUILT = "rx_public_rebuilt"
     private const val KEY_DAILY_SOURCES = "rx_public_daily_sources"
+    private const val KEY_SELECTED_SOURCES_MIGRATED = "rx_public_selected_sources_v1"
     private const val KEY_TAG = "rx_public_tag_"
     /** How often the lists are looked at. Fifteen minutes, as the owner asked. */
     private const val REFRESH_MILLIS = 15 * 60 * 1000L
@@ -90,7 +90,8 @@ object PublicConfigs {
      */
     private const val REBUILD_MILLIS = 6 * 60 * 60 * 1000L
     private const val CONNECT_MILLIS = 1200
-    private const val TESTING_AT_ONCE = 48
+    // Network probes do not need dozens of threads competing with the UI and VPN core.
+    private const val TESTING_AT_ONCE = 16
 
     /** Where the presence of a line is checked, and how long that is waited for. */
     private val LINE_PROBE_ENDPOINTS = listOf(
@@ -101,8 +102,10 @@ object PublicConfigs {
     private const val LINE_PROBE_MILLIS = 2200
 
     /** Fast download budget so fetching lists never stalls before testing begins. */
-    private const val DOWNLOAD_THREADS = 24
+    private const val DOWNLOAD_THREADS = 12
     private const val DOWNLOAD_BUDGET_MILLIS = 12_000L
+    // Background daily refresh can afford more time to reach the larger source catalog.
+    private const val DAILY_DOWNLOAD_BUDGET_MILLIS = 90_000L
     private const val FETCH_CONNECT_MILLIS = 2500
     private const val FETCH_READ_MILLIS = 4500
 
@@ -146,14 +149,11 @@ object PublicConfigs {
     }
 
     /**
-     * How many candidates are probed through Xray in parallel.
-     *
-     * `measureOutboundDelay` runs isolated Xray checks concurrently, so dead or
-     * blocked configs fail and move straight to the next candidate in parallel,
-     * while the single-engine `CoreController` byte-transfer confirmation runs
-     * only on candidates that already answered on the user's real internet.
+     * How many candidates are probed through Xray in parallel. Keeping this bounded leaves
+     * CPU and memory available to the UI and to any active connection. Byte-transfer
+     * confirmation still runs only on candidates that answered on the user's line.
      */
-    private const val VERIFY_AT_ONCE = 16
+    private const val VERIFY_AT_ONCE = 4
 
     /** How long a bare TCP connection to a candidate's address is waited for. */
     private const val QUICK_CONNECT_MILLIS = 1200
@@ -167,6 +167,7 @@ object PublicConfigs {
 
     private val pendingGroupLock = Any()
     private val groupWriteLock = Any()
+    private val dailySourcesInFlight = AtomicBoolean(false)
 
     enum class Kind(val schemes: List<String>, val udp: Boolean) {
         Vless(listOf("vless"), false),
@@ -233,350 +234,73 @@ object PublicConfigs {
         val isTelegram get() = directUrl?.contains("t.me/s/") == true
     }
 
+    // Only the public feeds and channels explicitly selected by the owner.
     internal val SOURCES = listOf(
-        // Tier 1: High-signal Iran-tested & anti-censorship GitHub collectors (actively updated).
-        Source("ZendanTeam/SS44-sub", "main", "SS44-gold.txt"),
-        Source("ZendanTeam/SS44-sub", "main", "SS44-udp.txt"),
-        Source("ZendanTeam/SS44-sub", "main", "SS44.txt"),
-        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/vless.txt"),
-        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/hy2.txt"),
-        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/trojan.txt"),
-        Source("MustafaBaqer/VestraNet-Nodes", "main", "protocols/wireguard.txt"),
-        Source("MustafaBaqer/VestraNet-Nodes", "main", "subscriptions/mix-normal.txt"),
+        Source("Alirewa/V2ray-Configs", "main", "sub1.txt"),
+        Source("Alirewa/V2ray-Configs", "main", "sub2.txt"),
+        Source("Alirewa/V2ray-Configs", "main", "sub3.txt"),
+        Source("barry-far/V2ray-Config", "main", "All_Configs_Sub.txt"),
+        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/v2ray/super-sub.txt"),
+        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/v2ray/all_sub.txt"),
         Source("morpheusadam/v2ray-config", "main", "subs/bundles/best.txt"),
         Source("morpheusadam/v2ray-config", "main", "subs/bundles/iran.txt"),
-        Source("morpheusadam/v2ray-config", "main", "subs/bundles/reality.txt"),
         Source("morpheusadam/v2ray-config", "main", "subs/bundles/hysteria2.txt"),
-        Source("morpheusadam/v2ray-config", "main", "subs/bundles/wireguard.txt"),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "fast/configs.txt"),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "light/configs.txt"),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "google/configs.txt"),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "protocols/hysteria2.txt"),
-        Source("nimazolfaghari66-sketch/iran-vpn-radar", "main", "subscriptions/iran-priority/all"),
-        Source("nimazolfaghari66-sketch/iran-vpn-radar", "main", "subscriptions/candidates/all"),
-        Source("sakha1370/OpenRay", "main", "output_iran/iran_top100_checked.txt"),
-        Source("sakha1370/OpenRay", "main", "output/all_valid_proxies.txt"),
-        Source("shabane/kamaji", "master", "hub/tested/merged.txt"),
-        Source("shabane/kamaji", "master", "hub/best.txt"),
-        Source("4n0nymou3/multi-proxy-config-fetcher", "main", "configs/proxy_configs_tested.txt"),
-        Source("4n0nymou3/multi-proxy-config-fetcher", "main", "configs/proxy_configs.txt"),
-        Source("F0rc3Run/F0rc3Run", "main", "Best-Results/proxies.txt"),
-        Source("F0rc3Run/F0rc3Run", "main", "Special/Telegram.txt"),
-        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/v2ray/super-sub.txt"),
-        Source("mahsanet/MahsaFreeConfig", "main", "mci/sub_1.txt"),
-        Source("mahsanet/MahsaFreeConfig", "main", "mci/sub_2.txt"),
-        Source("mahsanet/MahsaFreeConfig", "main", "mtn/sub_1.txt"),
-        Source("mahsanet/MahsaFreeConfig", "main", "mtn/sub_2.txt"),
-        Source("imegabiz/mahsa-subscription-exporter", "main", "configs.txt"),
-        Source("patterniha/Free-Configs", "main", "configs.txt"),
-        Source("zieng2/wl", "main", "vless_universal.txt"),
-        Source("Ashkan-m/v2ray", "main", "Sub.txt"),
-        Source("Ashkan-m/v2ray", "main", "Sub2.txt"),
-        Source("arshiacomplus/v2rayExtractor", "main", "mix/sub.html"),
-        Source("Hidashimora/free-vpn-anti-rkn", "main", "configs/32.1.txt"),
-        Source("iampedii/whitedns-sub", "main", "base64.txt"),
-        Source("v2FreeHub/v2hub-configs", "main", "Sub-AutoUpdate"),
-        Source("Mahdi0024/ProxyCollector", "master", "sub/proxies.txt"),
-        Source("MahanKenway/Freedom-V2Ray", "main", "configs/reality.txt"),
-        Source("MahanKenway/Freedom-V2Ray", "main", "configs/mix.txt"),
-        Source("nikita29a/FreeProxyList", "main", "mirror/1.txt"),
-        Source("nikita29a/FreeProxyList", "main", "mirror/2.txt"),
-        Source("FLAT447/v2ray-lists", "main", "WHITE_LITE.txt"),
-        Source("FLAT447/v2ray-lists", "main", "BLACK_FULL.txt"),
-        Source("10ium/V2rayCollector", "main", "mixed_iran.txt"),
-        Source("10ium/V2rayCollector", "main", "vless_iran.txt"),
-        Source("HoomanParsaei/V2rayCollector", "main", "mixed_iran.txt"),
-        Source("Use4Free/V2rayCollector", "main", "mixed_iran.txt"),
-        Source("kaveh-ahangar/V2rayCollector", "main", "mixed_iran.txt"),
-        // Hysteria2 and WireGuard, the sorts that carry UDP natively.
-        Source("sakha1370/OpenRay", "main", "output/kind/hysteria2.txt"),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/Hysteria2.txt"),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/WireGuard.txt"),
-        Source("MohammadBahemmat/V2ray-Collector", "main", "servers/hysteria2_servers.txt"),
-        Source("Surfboardv2ray/TGParse", "main", "python/hysteria2"),
-        // Tier 2: Active Iranian & anti-censorship GitHub aggregators.
-        Source("itsyebekhe/PSG", "main", "subscriptions/xray/mix"),
-        Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/mix"),
-        Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/reality"),
-        Source("sinavm/SVM", "main", "config.txt"),
-        Source("sinavm/SVM", "main", "subscriptions/xray/normal/mix"),
-        Source("sinavm/SVM", "main", "subscriptions/xray/normal/reality"),
-        Source("MohammadBahemmat/V2ray-Collector", "main", "Tested.txt"),
-        Source("Surfboardv2ray/TGParse", "main", "configtg.txt"),
-        Source("Surfboardv2ray/Proxy-sorter", "main", "submerge/converted.txt"),
-        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/all.txt"),
-        Source("lagzian/SS-Collector", "main", "configs/psg/mix.txt"),
-        Source("lagzian/SS-Collector", "main", "configs/psg/reality.txt"),
-        Source("miladtahanian/V2RayCFGDumper", "main", "sub.txt"),
-        Source("miladtahanian/Config-Collector", "main", "mixed_iran.txt"),
-        Source("liketolivefree/kobabi", "main", "sub.txt"),
-        Source("V2RayRoot/V2RayConfig", "main", "Config/vless.txt"),
-        Source("igareck/vpn-configs-for-russia", "main", "BLACK_VLESS_RUS.txt"),
-        Source("Delta-Kronecker/V2ray-Config", "main", "config/new.txt"),
-        Source("Delta-Kronecker/V2ray-Config", "main", "config/tcp-pass/reality.txt"),
-        Source("MhdiTaheri/V2rayCollector_Py", "main", "sub/Mix/mix.txt"),
-        Source("MhdiTaheri/V2rayCollector_Py", "main", "sub/Reality/reality.txt"),
-        Source("barry-far/V2ray-Config", "main", "Sub1.txt"),
-        Source("barry-far/V2ray-Config", "main", "Sub2.txt"),
-        Source("barry-far/V2ray-Config", "main", "Sub10.txt"),
-        Source("barry-far/V2ray-Config", "main", "Sub11.txt"),
-        Source("R3ZARAHIMI/tg-v2ray-configs-every2h", "main", "Config_no_cf.txt"),
-        Source("R3ZARAHIMI/tg-v2ray-configs-every2h", "main", "Original-Configs.txt"),
-        Source("DukeMehdi/FreeList-V2ray-Configs", "main", "Configs/Lite-DukeMehdi-Configs.txt"),
-        Source("mohamadfg-dev/telegram-v2ray-configs-collector", "main", "category/vless.txt"),
-        Source("mohamadfg-dev/telegram-v2ray-configs-collector", "main", "category/tcp.txt"),
-        Source("ALIILAPRO/v2rayNG-Config", "main", "server.txt"),
-        Source("iboxz/free-v2ray-collector", "main", "main/mix.txt"),
-        Source("Mosifree/-FREE2CONFIG", "main", "Reality"),
-        Source("therealaleph/Iran-configs", "main", "ir_configs.txt"),
-        Source("SoliSpirit/v2ray-configs", "main", "Protocols/vless.txt"),
-        Source("SoliSpirit/v2ray-configs", "main", "Protocols/trojan.txt"),
-        Source("SoliSpirit/v2ray-configs", "main", "Protocols/ss.txt"),
-        // Tier 3: Active public Telegram channels scraped directly via t.me/s/ (REALITY, XHTTP, HY2, WireGuard).
-        Source("t.me", "s", "V2rayConfigList", directUrl = "https://t.me/s/V2rayConfigList"),
-        Source("t.me", "s", "FilterShekanPRO", directUrl = "https://t.me/s/FilterShekanPRO"),
-        Source("t.me", "s", "outlineOpenKey", directUrl = "https://t.me/s/outlineOpenKey"),
-        Source("t.me", "s", "allproconf", directUrl = "https://t.me/s/allproconf"),
-        Source("t.me", "s", "oneclickvpnkeys", directUrl = "https://t.me/s/oneclickvpnkeys"),
-        Source("t.me", "s", "exclaveVPN", directUrl = "https://t.me/s/exclaveVPN"),
-        Source("t.me", "s", "v2ray_extractor", directUrl = "https://t.me/s/v2ray_extractor"),
-        Source("t.me", "s", "ConfigWireguard", directUrl = "https://t.me/s/ConfigWireguard"),
-        Source("t.me", "s", "tube_vpn", directUrl = "https://t.me/s/tube_vpn"),
-        Source("t.me", "s", "V2raysCollector", directUrl = "https://t.me/s/V2raysCollector"),
-        Source("t.me", "s", "free_vpn95", directUrl = "https://t.me/s/free_vpn95"),
-        Source("t.me", "s", "sharecentrepro", directUrl = "https://t.me/s/sharecentrepro"),
-        Source("t.me", "s", "AstracatUI", directUrl = "https://t.me/s/AstracatUI"),
-        Source("t.me", "s", "persianvpnhub", directUrl = "https://t.me/s/persianvpnhub"),
-        Source("t.me", "s", "raydikalx", directUrl = "https://t.me/s/raydikalx"),
-        Source("t.me", "s", "proconf1", directUrl = "https://t.me/s/proconf1"),
-        Source("t.me", "s", "outline_open_keys", directUrl = "https://t.me/s/outline_open_keys"),
-        Source("t.me", "s", "v2rayfreeserver", directUrl = "https://t.me/s/v2rayfreeserver"),
-        Source("t.me", "s", "dalton_ping", directUrl = "https://t.me/s/dalton_ping"),
-        Source("t.me", "s", "narcod_ping", directUrl = "https://t.me/s/narcod_ping"),
-        Source("t.me", "s", "easy_free_vpn", directUrl = "https://t.me/s/easy_free_vpn"),
-        Source("t.me", "s", "free_nettm", directUrl = "https://t.me/s/free_nettm"),
-        Source("t.me", "s", "halonetvpn", directUrl = "https://t.me/s/halonetvpn"),
-        Source("t.me", "s", "kian_vpn", directUrl = "https://t.me/s/kian_vpn"),
-        Source("t.me", "s", "overvpn", directUrl = "https://t.me/s/overvpn"),
-        Source("t.me", "s", "netiva_ir", directUrl = "https://t.me/s/netiva_ir"),
-        Source("t.me", "s", "v_2rey", directUrl = "https://t.me/s/v_2rey"),
-        Source("t.me", "s", "awlix_ir", directUrl = "https://t.me/s/awlix_ir"),
-        Source("t.me", "s", "azaranv2ray", directUrl = "https://t.me/s/azaranv2ray"),
-        Source("t.me", "s", "reality_daily", directUrl = "https://t.me/s/reality_daily"),
-        Source("t.me", "s", "iSeqaro", directUrl = "https://t.me/s/iSeqaro"),
-        Source("t.me", "s", "God_CONFIG", directUrl = "https://t.me/s/God_CONFIG"),
-        Source("t.me", "s", "AliAlma_GSM", directUrl = "https://t.me/s/AliAlma_GSM"),
-        Source("t.me", "s", "vpnmasi", directUrl = "https://t.me/s/vpnmasi"),
-        Source("t.me", "s", "v2ray_ar", directUrl = "https://t.me/s/v2ray_ar"),
-        Source("t.me", "s", "v2_vmess", directUrl = "https://t.me/s/v2_vmess"),
-        Source("t.me", "s", "FreeVlessVpn", directUrl = "https://t.me/s/FreeVlessVpn"),
-        Source("t.me", "s", "freeland8", directUrl = "https://t.me/s/freeland8"),
-        Source("t.me", "s", "vmess_vless_v2rayng", directUrl = "https://t.me/s/vmess_vless_v2rayng"),
-        Source("t.me", "s", "ShadowsocksM", directUrl = "https://t.me/s/ShadowsocksM"),
-        Source("t.me", "s", "safeNet4All", directUrl = "https://t.me/s/safeNet4All"),
-        Source("t.me", "s", "v2raying", directUrl = "https://t.me/s/v2raying"),
-        Source("t.me", "s", "shadowproxy66", directUrl = "https://t.me/s/shadowproxy66"),
-        Source("t.me", "s", "ViProxys", directUrl = "https://t.me/s/ViProxys"),
-        Source("t.me", "s", "v2ray_free_conf", directUrl = "https://t.me/s/v2ray_free_conf"),
-        Source("t.me", "s", "meli_proxyy", directUrl = "https://t.me/s/meli_proxyy"),
-        Source("t.me", "s", "heyatserver", directUrl = "https://t.me/s/heyatserver"),
-        Source("t.me", "s", "DailyV2RY", directUrl = "https://t.me/s/DailyV2RY"),
-        Source("t.me", "s", "orange_vpns", directUrl = "https://t.me/s/orange_vpns"),
-        Source("t.me", "s", "VmessProtocol", directUrl = "https://t.me/s/VmessProtocol"),
-        Source("t.me", "s", "prrofile_purple", directUrl = "https://t.me/s/prrofile_purple"),
-        Source("t.me", "s", "vpnfail_vless", directUrl = "https://t.me/s/vpnfail_vless"),
-        Source("t.me", "s", "IP_CF_Config", directUrl = "https://t.me/s/IP_CF_Config"),
-        Source("t.me", "s", "configfa", directUrl = "https://t.me/s/configfa"),
-        Source("t.me", "s", "golestan_vpn", directUrl = "https://t.me/s/golestan_vpn"),
-        Source("t.me", "s", "redfree8", directUrl = "https://t.me/s/redfree8"),
-        Source("t.me", "s", "v2ray_fark", directUrl = "https://t.me/s/v2ray_fark"),
-        Source("t.me", "s", "azadinett", directUrl = "https://t.me/s/azadinett"),
-        Source("t.me", "s", "dnet_vpn", directUrl = "https://t.me/s/dnet_vpn"),
-        Source("t.me", "s", "mainv2ray", directUrl = "https://t.me/s/mainv2ray"),
-        Source("t.me", "s", "shadownet021", directUrl = "https://t.me/s/shadownet021"),
-        Source("t.me", "s", "spdnet", directUrl = "https://t.me/s/spdnet"),
-        Source("t.me", "s", "freemelinet", directUrl = "https://t.me/s/freemelinet"),
-        Source("t.me", "s", "v2rayng_account_free", directUrl = "https://t.me/s/v2rayng_account_free"),
-        Source("t.me", "s", "ConfigsHub", directUrl = "https://t.me/s/ConfigsHub"),
-        Source("t.me", "s", "v2ray_configs_pools", directUrl = "https://t.me/s/v2ray_configs_pools"),
-        Source("t.me", "s", "SOSkeyNET", directUrl = "https://t.me/s/SOSkeyNET"),
-        Source("t.me", "s", "SubGift", directUrl = "https://t.me/s/SubGift"),
-        Source("t.me", "s", "bigAVPN", directUrl = "https://t.me/s/bigAVPN"),
-        Source("t.me", "s", "ConfigFori", directUrl = "https://t.me/s/ConfigFori"),
-        Source("t.me", "s", "ex_proxies", directUrl = "https://t.me/s/ex_proxies"),
-        Source("t.me", "s", "LonUp_M", directUrl = "https://t.me/s/LonUp_M"),
-        Source("t.me", "s", "mtmvpn", directUrl = "https://t.me/s/mtmvpn"),
-        Source("t.me", "s", "ALIILAPRO", directUrl = "https://t.me/s/ALIILAPRO"),
-        Source("t.me", "s", "Alpha_V2ray_Iran", directUrl = "https://t.me/s/Alpha_V2ray_Iran"),
-        Source("t.me", "s", "arv2ray", directUrl = "https://t.me/s/arv2ray"),
-        Source("t.me", "s", "beta_v2ray", directUrl = "https://t.me/s/beta_v2ray"),
-        Source("t.me", "s", "ConfigV2RayNG", directUrl = "https://t.me/s/ConfigV2RayNG"),
-        Source("t.me", "s", "customv2ray", directUrl = "https://t.me/s/customv2ray"),
-        Source("t.me", "s", "DigiV2ray", directUrl = "https://t.me/s/DigiV2ray"),
-        Source("t.me", "s", "DirectVPN", directUrl = "https://t.me/s/DirectVPN"),
-        Source("t.me", "s", "EliV2ray", directUrl = "https://t.me/s/EliV2ray"),
-        Source("t.me", "s", "FreakConfig", directUrl = "https://t.me/s/FreakConfig"),
+        Source("morpheusadam/v2ray-config", "main", "subs/bundles/lite.txt"),
+        Source("RezFlare/Vault", "main", "data/sub/all_configs.txt"),
+        Source("mrvcoder/V2rayCollector", "main", "vless_iran.txt"),
+        Source("mfuu/FreeProxies", "master", "sub"),
+        Source("hamedcode/port-based-v2ray-configs", "main", "sub/top100.txt"),
+        Source("hamedcode/port-based-v2ray-configs", "main", "sub/port_443.txt"),
+        Source("hamedcode/port-based-v2ray-configs", "main", "sub/vless.txt"),
+        Source("hamedcode/port-based-v2ray-configs", "main", "sub/vmess.txt"),
+        Source("ByeWhiteLists/ByeWhiteLists2", "main", "ByeWhiteLists2.txt"),
+        Source("yitong2333/proxy-minging", "main", "v2ray.txt"),
+        Source("wuqb2i4f/xray-config-toolkit", "main", "output/base64/mix-uri"),
+        Source("acymz/AutoVPN", "main", "data/V2.txt"),
+        Source("CidVpn/cid-vpn-config", "main", "general.txt"),
+
+        Source("t.me", "s", "V2rayNGn", directUrl = "https://t.me/s/V2rayNGn"),
         Source("t.me", "s", "free4allVPN", directUrl = "https://t.me/s/free4allVPN"),
-        Source("t.me", "s", "FreeV2rays", directUrl = "https://t.me/s/FreeV2rays"),
-        Source("t.me", "s", "frev2ray", directUrl = "https://t.me/s/frev2ray"),
-        Source("t.me", "s", "getconfigir", directUrl = "https://t.me/s/getconfigir"),
-        Source("t.me", "s", "hope_net", directUrl = "https://t.me/s/hope_net"),
-        Source("t.me", "s", "Inconigto_Mode", directUrl = "https://t.me/s/Inconigto_Mode"),
-        Source("t.me", "s", "iranvpnet", directUrl = "https://t.me/s/iranvpnet"),
-        Source("t.me", "s", "melov2ray", directUrl = "https://t.me/s/melov2ray"),
-        Source("t.me", "s", "MsV2ray", directUrl = "https://t.me/s/MsV2ray"),
-        Source("t.me", "s", "Network_442", directUrl = "https://t.me/s/Network_442"),
-        Source("t.me", "s", "new_proxy_channel", directUrl = "https://t.me/s/new_proxy_channel"),
-        Source("t.me", "s", "nim_vpn_ir", directUrl = "https://t.me/s/nim_vpn_ir"),
-        Source("t.me", "s", "OutlineVpnOfficial", directUrl = "https://t.me/s/OutlineVpnOfficial"),
         Source("t.me", "s", "PrivateVPNs", directUrl = "https://t.me/s/PrivateVPNs"),
-        Source("t.me", "s", "proxy_hiddfy", directUrl = "https://t.me/s/proxy_hiddfy"),
+        Source("t.me", "s", "MsV2ray", directUrl = "https://t.me/s/MsV2ray"),
         Source("t.me", "s", "ShadowSocks_s", directUrl = "https://t.me/s/ShadowSocks_s"),
-        Source("t.me", "s", "sinavm", directUrl = "https://t.me/s/sinavm"),
-        Source("t.me", "s", "srcvpn", directUrl = "https://t.me/s/srcvpn"),
-        Source("t.me", "s", "v2Line", directUrl = "https://t.me/s/v2Line"),
-        Source("t.me", "s", "v2pedia", directUrl = "https://t.me/s/v2pedia"),
+        Source("t.me", "s", "VmessProtocol", directUrl = "https://t.me/s/VmessProtocol"),
+        Source("t.me", "s", "DirectVPN", directUrl = "https://t.me/s/DirectVPN"),
+        Source("t.me", "s", "ServerNett", directUrl = "https://t.me/s/ServerNett"),
+        Source("t.me", "s", "VlessConfig", directUrl = "https://t.me/s/VlessConfig"),
+        Source("t.me", "s", "NIM_VPN_ir", directUrl = "https://t.me/s/NIM_VPN_ir"),
+        Source("t.me", "s", "FreeIranT", directUrl = "https://t.me/s/FreeIranT"),
+        Source("t.me", "s", "ShadowProxy66", directUrl = "https://t.me/s/ShadowProxy66"),
+        Source("t.me", "s", "v2rayNG_VPNN", directUrl = "https://t.me/s/v2rayNG_VPNN"),
+        Source("t.me", "s", "vmess_vless_v2rayng", directUrl = "https://t.me/s/vmess_vless_v2rayng"),
+        Source("t.me", "s", "V2RayTz", directUrl = "https://t.me/s/V2RayTz"),
+        Source("t.me", "s", "CloudCityy", directUrl = "https://t.me/s/CloudCityy"),
+        Source("t.me", "s", "IRN_VPN", directUrl = "https://t.me/s/IRN_VPN"),
+        Source("t.me", "s", "Awlix_ir", directUrl = "https://t.me/s/Awlix_ir"),
+        Source("t.me", "s", "Configforvpn01", directUrl = "https://t.me/s/Configforvpn01"),
+        Source("t.me", "s", "FOX_VPN66", directUrl = "https://t.me/s/FOX_VPN66"),
+        Source("t.me", "s", "DailyV2RY", directUrl = "https://t.me/s/DailyV2RY"),
+        Source("t.me", "s", "lightning6", directUrl = "https://t.me/s/lightning6"),
+        Source("t.me", "s", "SafeNet_Server", directUrl = "https://t.me/s/SafeNet_Server"),
+        Source("t.me", "s", "VPNCUSTOMIZE", directUrl = "https://t.me/s/VPNCUSTOMIZE"),
+        Source("t.me", "s", "v2rayngvpn", directUrl = "https://t.me/s/v2rayngvpn"),
+        Source("t.me", "s", "DigiV2ray", directUrl = "https://t.me/s/DigiV2ray"),
+        Source("t.me", "s", "FreeV2rays", directUrl = "https://t.me/s/FreeV2rays"),
+        Source("t.me", "s", "FreeNet1500", directUrl = "https://t.me/s/FreeNet1500"),
+        Source("t.me", "s", "OutlineVpnOfficial", directUrl = "https://t.me/s/OutlineVpnOfficial"),
+        Source("t.me", "s", "v2ray_outlineir", directUrl = "https://t.me/s/v2ray_outlineir"),
         Source("t.me", "s", "v2ray_for_free", directUrl = "https://t.me/s/v2ray_for_free"),
         Source("t.me", "s", "V2Ray_FreedomIran", directUrl = "https://t.me/s/V2Ray_FreedomIran"),
-        Source("t.me", "s", "v2rayng_org", directUrl = "https://t.me/s/v2rayng_org"),
-        Source("t.me", "s", "v2rayngvpn", directUrl = "https://t.me/s/v2rayngvpn"),
-        Source("t.me", "s", "vless_config", directUrl = "https://t.me/s/vless_config"),
-        Source("t.me", "s", "vmess_iran", directUrl = "https://t.me/s/vmess_iran"),
-        Source("t.me", "s", "vmessorg", directUrl = "https://t.me/s/vmessorg"),
-        Source("t.me", "s", "VPNCUSTOMIZE", directUrl = "https://t.me/s/VPNCUSTOMIZE"),
-        Source("t.me", "s", "yebekhe", directUrl = "https://t.me/s/yebekhe"),
-        Source("t.me", "s", "abiidar_server", directUrl = "https://t.me/s/abiidar_server"),
-        Source("t.me", "s", "AchaVPN", directUrl = "https://t.me/s/AchaVPN"),
-        Source("t.me", "s", "armodvpn", directUrl = "https://t.me/s/armodvpn"),
-        Source("t.me", "s", "configms", directUrl = "https://t.me/s/configms"),
-        Source("t.me", "s", "configscenter", directUrl = "https://t.me/s/configscenter"),
-        Source("t.me", "s", "ConfigsDuke", directUrl = "https://t.me/s/ConfigsDuke"),
-        Source("t.me", "s", "dailyv2rayCF", directUrl = "https://t.me/s/dailyv2rayCF"),
-        Source("t.me", "s", "darkfiilter", directUrl = "https://t.me/s/darkfiilter"),
-        Source("t.me", "s", "entryNET", directUrl = "https://t.me/s/entryNET"),
-        Source("t.me", "s", "miladtahanian", directUrl = "https://t.me/s/miladtahanian"),
-        Source("t.me", "s", "nufilter", directUrl = "https://t.me/s/nufilter"),
-        Source("t.me", "s", "parsashonam", directUrl = "https://t.me/s/parsashonam"),
-        Source("t.me", "s", "v2ray_outlineir", directUrl = "https://t.me/s/v2ray_outlineir"),
-        Source("t.me", "s", "vpn_ocean", directUrl = "https://t.me/s/vpn_ocean"),
-        Source("t.me", "s", "WetConfig", directUrl = "https://t.me/s/WetConfig"),
-        // Tier 4: Large & global pools, read when the short/verified sources above are not enough.
-        Source("ermaozi/get_subscribe", "main", "subscribe/reachable/v2ray.txt", small = false),
-        Source("ermaozi/get_subscribe", "main", "subscribe/v2ray.txt", small = false),
-        Source("roosterkid/openproxylist", "main", "V2RAY_RAW.txt", small = false),
-        Source("Leon406/SubCrawler", "main", "sub/share/a11", small = false),
-        Source("peasoft/NoMoreWalls", "master", "list_raw.txt", small = false),
-        Source("snakem982/proxypool", "main", "source/v2ray-2.txt", small = false),
-        Source("mahdibland/ShadowsocksAggregator", "master", "Eternity.txt", small = false),
-        Source("mahdibland/ShadowsocksAggregator", "master", "EternityAir.txt", small = false),
-        Source("mfuu/v2ray", "master", "sub", small = false),
-        Source("aiboboxx/v2rayfree", "main", "sub", small = false),
-        Source("ripaojiedian/freenode", "main", "sub", small = false),
-        Source("Pawdroid/Free-servers", "main", "sub", small = false),
-        Source("Ruk1ng001/freeSub", "main", "v2ray", small = false),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "all/configs.txt", small = false),
-        Source("0xRadikal/Free-v2ray-Configs", "main", "heavy/configs.txt", small = false),
-        Source("itsyebekhe/PSG", "main", "lite/subscriptions/xray/cdn", small = false),
-        Source("mahdibland/ShadowsocksAggregator", "master", "sub/sub_merge_base64.txt", small = false),
-        Source("mahdibland/ShadowsocksAggregator", "master", "sub/airport_sub_merge.txt", small = false),
-        Source("mahdibland/ShadowsocksAggregator", "master", "EternityBase", small = false),
-        Source("sakha1370/OpenRay", "main", "output/site_access/all_sites.txt", small = false),
-        Source("shabane/kamaji", "master", "hub/self/tested/merged.txt", small = false),
-        Source("Delta-Kronecker/V2ray-Config", "main", "config/all_configs.txt", small = false),
-        Source("mahdibland/V2RayAggregator", "master", "sub/sub_merge.txt", small = false),
-        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/v2ray/all_sub.txt", small = false),
-        Source("Barabama/FreeNodes", "main", "nodes/merged.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "all_configs.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub10.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub11.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub12.txt", small = false),
-        Source("hamedcode/port-based-v2ray-configs", "main", "sub/port_443.txt", small = false),
-        Source("hamedcode/port-based-v2ray-configs", "main", "sub/trojan.txt", small = false),
-        Source("hamedcode/port-based-v2ray-configs", "main", "sub/ss.txt", small = false),
-        Source("mheidari98/.proxy", "main", "trojan", small = false),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/Germany.txt", small = false),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/Netherlands.txt", small = false),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/France.txt", small = false),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/Canada.txt", small = false),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/Singapore.txt", small = false),
-        Source("Argh94/V2RayAutoConfig", "main", "configs/Trojan.txt", small = false),
-        Source("Surfboardv2ray/TGParse", "main", "python/vless", small = false),
-        Source("Surfboardv2ray/TGParse", "main", "python/trojan", small = false),
-        Source("Surfboardv2ray/TGParse", "main", "python/ss", small = false),
-        Source("Surfboardv2ray/TGParse", "main", "python/vmess", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub13.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub14.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub15.txt", small = false),
-        Source("SoliSpirit/v2ray-configs", "main", "Subscriptions/Sub16.txt", small = false),
-        Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/vless.txt", small = false),
-        Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/trojan.txt", small = false),
-        Source("Delta-Kronecker/V2ray-Config", "main", "config/protocols/ss.txt", small = false),
-        Source("hamedcode/port-based-v2ray-configs", "main", "sub/vmess.txt", small = false),
-        Source("hamedcode/port-based-v2ray-configs", "main", "sub/port_8443.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub3.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub4.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub5.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub6.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub7.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub8.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub9.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub12.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub13.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub14.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub15.txt", small = false),
-        Source("barry-far/V2ray-Config", "main", "Sub16.txt", small = false),
-        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/lt/all.txt", small = false),
-        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/kr/all.txt", small = false),
-        Source("ShatakVPN/ConfigForge-V2Ray", "main", "configs/cz/all.txt", small = false),
-        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/filtered/subs/vless.txt", small = false),
-        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/filtered/subs/trojan.txt", small = false),
-        Source("MatinGhanbari/v2ray-configs", "main", "subscriptions/filtered/subs/ss.txt", small = false),
-        Source("Leon406/SubCrawler", "main", "sub/share/v2", small = false),
-        Source("Leon406/SubCrawler", "main", "sub/share/ss", small = false),
-        Source("sakha1370/OpenRay", "main", "output/kind/vless.txt", small = false),
-        Source("shabane/kamaji", "master", "hub/trojan.txt", small = false),
-        Source("shabane/kamaji", "master", "hub/vmess.txt", small = false),
-        Source("Ashkan-m/v2ray", "main", "Sub3.txt", small = false),
-        Source("Ashkan-m/v2ray", "main", "VIP.txt", small = false),
-        Source("MhdiTaheri/V2rayCollector_Py", "main", "sub/Vless/vless.txt", small = false),
-        Source("MhdiTaheri/V2rayCollector_Py", "main", "sub/Trojan/trojan.txt", small = false),
-        Source("R3ZARAHIMI/tg-v2ray-configs-every2h", "main", "conf-week.txt", small = false),
-        Source("MahanKenway/Freedom-V2Ray", "main", "configs/vless.txt", small = false),
-        Source("MahanKenway/Freedom-V2Ray", "main", "configs/trojan.txt", small = false),
-        Source("V2RayRoot/V2RayConfig", "main", "Config/trojan.txt", small = false),
-        Source("V2RayRoot/V2RayConfig", "main", "Config/shadowsocks.txt", small = false),
+        Source("t.me", "s", "v2rayn_server", directUrl = "https://t.me/s/v2rayn_server"),
+        Source("t.me", "s", "VpnProSec", directUrl = "https://t.me/s/VpnProSec"),
+        Source("t.me", "s", "WebShecan", directUrl = "https://t.me/s/WebShecan"),
+        Source("t.me", "s", "XsV2ray", directUrl = "https://t.me/s/XsV2ray"),
+        Source("t.me", "s", "yaney_01", directUrl = "https://t.me/s/yaney_01"),
+        Source("t.me", "s", "zen_cloud", directUrl = "https://t.me/s/zen_cloud"),
     )
 
     private fun effectiveSources(small: Boolean): List<Source> {
-        val policy = RemoteControl.current().publicConfigs
-        val disabled = policy.disabledSources.map { it.trim().lowercase() }.filter { it.isNotEmpty() }
-        val extraGh = if (small) policy.extraGithubSources.mapNotNull { spec ->
-            // Format: "owner/repo@branch:path"
-            val atIdx = spec.indexOf('@')
-            val colonIdx = spec.indexOf(':', atIdx + 1)
-            if (atIdx > 0 && colonIdx > atIdx + 1) {
-                Source(
-                    repository = spec.substring(0, atIdx).trim(),
-                    branch = spec.substring(atIdx + 1, colonIdx).trim(),
-                    path = spec.substring(colonIdx + 1).trim(),
-                    small = true,
-                )
-            } else null
-        } else emptyList()
-        val extraUrls = if (small) policy.extraUrlSources.mapNotNull { raw ->
-            val u = raw.trim()
-            if (u.startsWith("http://") || u.startsWith("https://")) {
-                Source("remote", "url", u, small = true, directUrl = u)
-            } else null
-        } else emptyList()
-
-        val base = (extraGh + extraUrls + SOURCES)
-            .filter { it.small == small }
-            .filterNot { src ->
-                val addr = src.address.lowercase()
-                disabled.any { addr.contains(it) }
-            }
-            .distinctBy { it.address }
+        val base = SOURCES.filter { it.small == small }.distinctBy { it.address }
         if (!small) return base
         // Interleave Tier 1/2 GitHub sources with shuffled Telegram channels so t.me/s/
         // channels always run in the first concurrent batch instead of waiting behind 100+ repos.
@@ -812,7 +536,7 @@ object PublicConfigs {
 
     // ---------- Getting the list ----------
 
-    private fun cacheDir(context: Context) = File(context.filesDir, "rx-public").apply { mkdirs() }
+    private fun cacheDir(context: Context) = File(context.filesDir, "rx-public-selected-v1").apply { mkdirs() }
 
     private fun cacheFile(context: Context, source: Source) =
         File(cacheDir(context), source.address.hashCode().toUInt().toString(16) + ".txt")
@@ -832,25 +556,16 @@ object PublicConfigs {
     }
 
     private fun loadOfflinePool(context: Context): Pair<List<String>, Boolean> {
-        val emergency = RemoteControl.current().publicConfigs.emergencyConfigs
-            .map { it.trim() }
-            .filter { "://" in it }
         val verified = runCatching {
             val f = verifiedCacheFile(context)
             if (f.exists()) f.readLines().filter { "://" in it } else emptyList()
         }.getOrDefault(emptyList())
-        val cachedSources = runCatching {
-            cacheDir(context).listFiles()
-                ?.filter { it.isFile && it.name.endsWith(".txt") && it.name != "verified_cache.txt" }
-                ?.sortedByDescending { it.lastModified() }
-                ?.flatMap { f -> runCatching { f.readLines() }.getOrDefault(emptyList()) }
-                .orEmpty()
-        }.getOrDefault(emptyList())
-        val bundled = runCatching {
-            context.assets.open(ASSET).bufferedReader().use { it.readLines() }
-        }.getOrDefault(emptyList())
-        val hadSaved = verified.isNotEmpty() || cachedSources.isNotEmpty() || emergency.isNotEmpty()
-        return (emergency + verified + cachedSources + bundled).distinct() to hadSaved
+        val cachedSources = SOURCES.asSequence().map { cacheFile(context, it) }
+            .filter { it.isFile }
+            .flatMap { file -> runCatching { file.readLines() }.getOrDefault(emptyList()).asSequence() }
+            .toList()
+        val saved = (verified + cachedSources).distinct()
+        return saved to saved.isNotEmpty()
     }
 
     internal class Answer(val code: Int, val body: String?, val tag: String?)
@@ -908,6 +623,7 @@ object PublicConfigs {
         cancelled: AtomicBoolean? = null,
         minLinksDesired: Int = Int.MAX_VALUE,
         ignoreTags: Boolean = false,
+        budgetMillis: Long = DOWNLOAD_BUDGET_MILLIS,
     ): Listing {
         if (cancelled?.get() == true) return Listing(emptyList(), 0, false)
         val sources = effectiveSources(small)
@@ -982,7 +698,7 @@ object PublicConfigs {
                     completedTasks.incrementAndGet()
                 }
             }
-            val deadline = startedAt + DOWNLOAD_BUDGET_MILLIS
+            val deadline = startedAt + budgetMillis
             while (completedTasks.get() < sources.size && System.currentTimeMillis() < deadline) {
                 if (cancelled?.get() == true) break
                 val elapsed = System.currentTimeMillis() - startedAt
@@ -1060,27 +776,49 @@ object PublicConfigs {
         return !anyAlive
     }
 
+    /** Remove the previous public group once it is safe to replace, without touching user groups. */
+    private fun migrateSelectedSources(context: Context): Boolean = synchronized(groupWriteLock) {
+        if (MmkvManager.decodeSettingsBool(KEY_SELECTED_SOURCES_MIGRATED, false)) return@synchronized true
+        // Do not remove the selected profile while it is carrying an active connection.
+        if (ServiceRuntimeState.isRunning(context)) return@synchronized false
+        MmkvManager.clearServerList(GROUP_ID)
+        // The old directory belongs only to the retired public-source catalog.
+        val retiredCache = File(context.filesDir, "rx-public")
+        if (retiredCache.exists() && !retiredCache.deleteRecursively()) return@synchronized false
+        MmkvManager.encodeSettings(KEY_CHECKED, 0L)
+        MmkvManager.encodeSettings(KEY_REBUILT, 0L)
+        MmkvManager.encodeSettings(KEY_DAILY_SOURCES, 0L)
+        MmkvManager.encodeSettings(KEY_SELECTED_SOURCES_MIGRATED, true)
+        setFresh(true)
+        notifyGroupUpdated()
+        true
+    }
+
     /**
      * Refreshes all Public Configs source lists (both short and large) once per day so the
      * source caches on disk stay up to date even when the user hasn't opened the screen.
      */
     fun refreshSourcesDaily(context: Context, force: Boolean = false): Boolean {
-        if (!isNetworkAvailable(context)) return false
-        val now = System.currentTimeMillis()
-        if (!force && now - MmkvManager.decodeSettingsLong(KEY_DAILY_SOURCES, 0L) < DAILY_MILLIS) return false
-        val smallListing = download(context, small = true, ignoreTags = true)
-        val largeListing = download(context, small = false, ignoreTags = true)
-        if (smallListing.answered + largeListing.answered > 0) {
-            MmkvManager.encodeSettings(KEY_DAILY_SOURCES, now)
+        if (!isNetworkAvailable(context) || !dailySourcesInFlight.compareAndSet(false, true)) return false
+        try {
+            val now = System.currentTimeMillis()
+            if (!force && now - MmkvManager.decodeSettingsLong(KEY_DAILY_SOURCES, 0L) < DAILY_MILLIS) return false
+            val smallListing = download(context, small = true, ignoreTags = true, budgetMillis = DAILY_DOWNLOAD_BUDGET_MILLIS)
+            val largeListing = download(context, small = false, ignoreTags = true, budgetMillis = DAILY_DOWNLOAD_BUDGET_MILLIS)
+            if (smallListing.answered + largeListing.answered > 0) {
+                MmkvManager.encodeSettings(KEY_DAILY_SOURCES, now)
+            }
+            if (smallListing.changed || largeListing.changed) {
+                setFresh(true)
+            }
+            AppLog.info(
+                AppLog.Section.Other,
+                "Public configs: daily source update finished (${smallListing.answered + largeListing.answered} sources answered)",
+            )
+            return smallListing.changed || largeListing.changed
+        } finally {
+            dailySourcesInFlight.set(false)
         }
-        if (smallListing.changed || largeListing.changed) {
-            setFresh(true)
-        }
-        AppLog.info(
-            AppLog.Section.Other,
-            "Public configs: daily source update finished (${smallListing.answered + largeListing.answered} sources answered)",
-        )
-        return smallListing.changed || largeListing.changed
     }
 
     /**
@@ -1089,6 +827,7 @@ object PublicConfigs {
      * True when the group was renewed.
      */
     fun refreshIfDue(context: Context): Boolean {
+        val migrated = migrateSelectedSources(context)
         val now = System.currentTimeMillis()
         val lastRebuilt = MmkvManager.decodeSettingsLong(KEY_REBUILT, 0L)
         val dailyDue = !hasGroup() || (now - lastRebuilt >= DAILY_MILLIS)
@@ -1110,7 +849,10 @@ object PublicConfigs {
         }
         val old = now - lastRebuilt >= REBUILD_MILLIS
         if (listing.changed || dead || dailyDue) setFresh(true)
-        if (!dailyDue && !listing.changed && !old && !dead) return false
+        // Downloading can continue during a connection, but removing its old profile cannot.
+        if (!migrated) return false
+        val pending = MmkvManager.decodeSettingsBool(KEY_FRESH, false)
+        if (!dailyDue && !listing.changed && !old && !dead && !pending) return false
         if (ServiceRuntimeState.isRunning(context)) {
             MmkvManager.encodeSettings(KEY_CHECKED, now - REFRESH_MILLIS)
             AppLog.info(AppLog.Section.Other, "Public configs: a tunnel is up; the group is renewed at the next idle check")
@@ -1134,6 +876,18 @@ object PublicConfigs {
             return true
         }
         return false
+    }
+
+    /** Check for new posts at Android's minimum periodic interval; a full refresh runs daily. */
+    fun scheduleDaily(context: Context) {
+        val request = PeriodicWorkRequestBuilder<PublicConfigsWorker>(15, TimeUnit.MINUTES)
+            // Give the first screen time to settle before the initial source scan.
+            .setInitialDelay(30, TimeUnit.SECONDS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "rx_public_configs_daily", ExistingPeriodicWorkPolicy.UPDATE, request,
+        )
     }
 
     /** Looks at the lists every fifteen minutes, also while the app is closed. */
@@ -1295,7 +1049,7 @@ object PublicConfigs {
      * Fills the public group with the number of configs its owner asked for, each
      * one tested on the user's real internet connection before it is kept.
      *
-     * Uses pipelined chunks: fast parallel TCP pre-filtering feeds 16-way parallel
+     * Uses pipelined chunks: parallel TCP pre-filtering feeds bounded parallel
      * Xray round-trip checks (`measureOutboundDelay`), and only configs that answer
      * through Xray undergo real-byte download confirmation. Stops immediately if
      * the user's internet disconnects.
@@ -1308,6 +1062,7 @@ object PublicConfigs {
         onProgress: (Progress) -> Unit,
     ): Outcome {
         onProgress(Progress(null, 0, 0, 0))
+        if (!migrateSelectedSources(context)) return Outcome(0, Origin.Saved)
         val wanted = acceptedCount(options.count)
         MmkvManager.encodeSettings(KEY_KINDS, options.kinds.joinToString(",") { it.name })
         MmkvManager.encodeSettings(KEY_COUNT, wanted)
@@ -1326,13 +1081,13 @@ object PublicConfigs {
 
         if (!hasLine(context)) {
             disconnected.set(true)
-            val (offlineLines, hadSaved) = loadOfflinePool(context)
+            val (offlineLines, _) = loadOfflinePool(context)
             val offlineLinks = select(offlineLines.asSequence(), options.kinds, options.game).take(wanted)
-            val originOffline = if (hadSaved) Origin.Saved else Origin.Bundled
+            val originOffline = Origin.Saved
             if (offlineLinks.isEmpty()) {
                 AppLog.error(
                     AppLog.Section.Other,
-                    "Public configs: offline and no matching configs in cache/bundle",
+                    "Public configs: offline and no matching configs in the selected-source cache",
                 )
                 return Outcome(0, originOffline, disconnected = true)
             }
@@ -1359,16 +1114,15 @@ object PublicConfigs {
         )
         if (disconnected.get() || (cancelled.get() && !hasLine(context))) {
             disconnected.set(true)
-            return Outcome(0, Origin.Bundled, disconnected = true)
+            return Outcome(0, Origin.Saved, disconnected = true)
         }
         if (cancelled.get()) {
-            return Outcome(0, Origin.Bundled, disconnected = false)
+            return Outcome(0, Origin.Saved, disconnected = false)
         }
 
         var origin = when {
             first.answered > 0 -> Origin.Fresh
-            first.lines.size >= 50 -> Origin.Saved
-            else -> Origin.Bundled
+            else -> Origin.Saved
         }
         if (origin == Origin.Fresh) MmkvManager.encodeSettings(KEY_CHECKED, System.currentTimeMillis())
 
@@ -1389,23 +1143,15 @@ object PublicConfigs {
             onProgress(Progress(origin, found, tried, kept.size, wanted, measured, carried, rounds, poolSize))
         }
 
-        val emergencyLines = RemoteControl.current().publicConfigs.emergencyConfigs
-            .map { it.trim() }
-            .filter { "://" in it }
-        val initialLines = if (origin == Origin.Bundled) {
-            emergencyLines + context.assets.open(ASSET).bufferedReader().use { it.readLines() }
-        } else {
-            emergencyLines + first.lines
-        }
-        val queue = ArrayDeque(select(initialLines.asSequence(), options.kinds, options.game, seen))
+        val queue = ArrayDeque(select(first.lines.asSequence(), options.kinds, options.game, seen))
         poolSize = queue.size
         var triedLarge = false
-        var triedBundled = origin == Origin.Bundled
         val chunkSize = (wanted * 4).coerceIn(CHUNK_MIN, CHUNK_MAX)
         val remoteMaxSec = RemoteControl.current().publicConfigs.maxDurationSec
         val durationMillis = if (remoteMaxSec != null && remoteMaxSec > 0L) remoteMaxSec * 1000L else MAX_DURATION_MILLIS
         val deadline = System.currentTimeMillis() + durationMillis
         var imported = 0
+        var lastGroupNoticeNanos = 0L
 
         while (!cancelled.get() && !disconnected.get() && carried < wanted && System.currentTimeMillis() < deadline) {
             if (!isNetworkAvailable(context)) {
@@ -1424,15 +1170,6 @@ object PublicConfigs {
                     )
                     if (large.answered > 0) origin = Origin.Fresh
                     val extra = select(large.lines.asSequence(), options.kinds, options.game, seen)
-                    queue.addAll(extra)
-                    poolSize += extra.size
-                }
-                if (queue.isEmpty() && !triedBundled) {
-                    triedBundled = true
-                    val bundledLines = runCatching {
-                        context.assets.open(ASSET).bufferedReader().use { it.readLines() }
-                    }.getOrDefault(emptyList())
-                    val extra = select(bundledLines.asSequence(), options.kinds, options.game, seen)
                     queue.addAll(extra)
                     poolSize += extra.size
                 }
@@ -1483,7 +1220,14 @@ object PublicConfigs {
                                 if (added > 0) carried += added
                                 if (added > 0) {
                                     recordVerifiedLink(context, link.raw)
-                                    notifyGroupUpdated()
+                                    // Rebuilding every tab for every imported profile causes repeated
+                                    // work on large lists. Show the first result immediately and
+                                    // coalesce subsequent updates; completion always sends a final one.
+                                    val now = System.nanoTime()
+                                    if (lastGroupNoticeNanos == 0L || now - lastGroupNoticeNanos >= 1_000_000_000L) {
+                                        lastGroupNoticeNanos = now
+                                        notifyGroupUpdated()
+                                    }
                                 }
                             }
                             report()
@@ -1778,7 +1522,8 @@ object PublicConfigs {
         val all = MmkvManager.decodeServerList(GROUP_ID)
         if (all.isEmpty()) return 0
         val answered = all.filter { (MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L) > 0L }
-        val silent = all.filterNot { it in answered }
+        val answeredIds = answered.toHashSet()
+        val silent = all.filterNot { it in answeredIds }
         // The silent ones go first; then whichever answered are beyond the number asked for.
         val overflow = (answered.size - keep).coerceAtLeast(0)
         val drop = silent + answered.sortedByDescending { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }.take(overflow)

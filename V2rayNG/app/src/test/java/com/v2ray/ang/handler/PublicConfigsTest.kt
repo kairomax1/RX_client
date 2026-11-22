@@ -143,6 +143,24 @@ class PublicConfigsTest {
     }
 
     @Test
+    fun suppliedPublicFeedsAndChannelsAreIncludedWithoutDuplicates() {
+        val urls = PublicConfigs.SOURCES.map { it.address }
+        listOf(
+            "https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/sub1.txt",
+            "https://raw.githubusercontent.com/mfuu/FreeProxies/master/sub",
+            "https://raw.githubusercontent.com/RezFlare/Vault/main/data/sub/all_configs.txt",
+            "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",
+            "https://raw.githubusercontent.com/hamedcode/port-based-v2ray-configs/main/sub/top100.txt",
+            "https://raw.githubusercontent.com/wuqb2i4f/xray-config-toolkit/main/output/base64/mix-uri",
+            "https://t.me/s/V2rayNGn",
+            "https://t.me/s/free4allVPN",
+        ).forEach { assertEquals(1, urls.count { address -> address.equals(it, ignoreCase = true) }, it) }
+        assertEquals(38, PublicConfigs.SOURCES.count { it.isTelegram })
+        assertEquals(false, urls.any { it.contains("0xRadikal", ignoreCase = true) })
+        assertEquals(false, urls.any { it.contains("mlmvpn", ignoreCase = true) })
+    }
+
+    @Test
     fun telegramHtmlChannelsAreParsedCleanly() {
         val html = """
             <div class="tgme_widget_message_text js-message_text" dir="auto">

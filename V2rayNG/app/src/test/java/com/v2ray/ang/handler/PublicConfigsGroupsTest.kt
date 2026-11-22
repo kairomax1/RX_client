@@ -128,7 +128,7 @@ class PublicConfigsGroupsTest {
     }
 
     @Test
-    fun noListAutoSyncIsScheduledAtStartupAndDailyPassIsFlagGated() {
+    fun publicSourcesAreScheduledAtStartupButOtherListSyncRemainsFlagGated() {
         val publicSrc = java.io.File("src/main/java/com/v2ray/ang/handler/PublicConfigs.kt").readText()
         val appSrc = java.io.File("src/main/java/com/v2ray/ang/AngApplication.kt").readText()
         val dailySrc = java.io.File("src/main/java/com/v2ray/ang/service/DailyMaintenanceWorker.kt").readText()
@@ -145,8 +145,9 @@ class PublicConfigsGroupsTest {
         assertTrue(dnsSrc.contains("fun scheduleDaily"))
         assertTrue(dnsSrc.contains("DAILY_LIST_MILLIS = 24 * 60 * 60 * 1000L"))
 
-        // But nothing is auto-scheduled at app start: no 15-minute public-configs worker,
-        // no 6-hourly background sync, no app-start kick, no daily DNS-list worker.
+        // The owner requested periodic public-source checks, but not the other background jobs.
+        assertTrue(appSrc.contains("PublicConfigs.scheduleDaily(this)"))
+        assertTrue(publicSrc.contains("PeriodicWorkRequestBuilder<PublicConfigsWorker>(15, TimeUnit.MINUTES)"))
         assertFalse(appSrc.contains("PublicConfigs.schedule(this)"))
         assertFalse(appSrc.contains("XboxDns.scheduleDaily(this)"))
         assertFalse(appSrc.contains("BackgroundSyncManager.schedule(this)"))
