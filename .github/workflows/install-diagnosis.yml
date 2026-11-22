@@ -1,0 +1,62 @@
+name: Diagnose Android 16 APK installation
+
+on:
+  push:
+    branches:
+      - "arena/**"
+    paths:
+      - ".github/workflows/install-diagnosis.yml"
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful build run containing the universal APK
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  android16:
+    name: Install and update on Android 16 emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: RXVPN_1.2_universal.apk
+          path: apks/new
+          run-id: ${{ inputs.artifact_run_id || '45061325114' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download previously published RX VPN
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" --pattern RXVPN_1.0.1_universal.apk --dir apks/old
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install fresh and upgrade existing app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -euo pipefail
+            adb shell getprop ro.build.version.release
+            adb shell getprop ro.product.cpu.abilist
+            echo 'Testing fresh install of new universal APK'
+            adb install apks/new/RXVPN_1.2_universal.apk
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb uninstall com.mobix.vpn
+            echo 'Testing upgrade from published 1.0.1 (without uninstalling it)'
+            adb install apks/old/RXVPN_1.0.1_universal.apk
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb install -r apks/new/RXVPN_1.2_universal.apk
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
