@@ -30,6 +30,14 @@ jobs:
           path: apks/new
           run-id: ${{ inputs.artifact_run_id || '45061325114' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check published APK matches the tested build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.2-public-sources --repo "$GITHUB_REPOSITORY" --pattern RXVPN_1.2_arm64-v8a.apk --dir apks/published
+          cmp apks/new/RXVPN_1.2_arm64-v8a.apk apks/published/RXVPN_1.2_arm64-v8a.apk
+          HASH=$(sha256sum apks/published/RXVPN_1.2_arm64-v8a.apk | cut -d ' ' -f 1)
+          echo "::notice title=Published APK SHA-256::$HASH"
       - name: Download previously published RX VPN
         env:
           GH_TOKEN: ${{ github.token }}
