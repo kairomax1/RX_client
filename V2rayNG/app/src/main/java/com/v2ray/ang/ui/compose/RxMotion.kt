@@ -1,7 +1,6 @@
 package com.v2ray.ang.ui.compose
 
 import androidx.compose.runtime.LongState
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -49,7 +48,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
@@ -127,9 +125,9 @@ private class DustField {
         height = size.height
         val widthDp = width / density
         val heightDp = height / density
-        // Denser and a little larger than the web mock, where a phone screen got about two dozen
-        // specks that vanished behind the list.
-        count = min(110f, widthDp * heightDp / 3600f).toInt().coerceAtLeast(0)
+        // Enough to read as dust behind the list, few enough that a weak phone does not spend
+        // its frame budget on decoration. The list and the bars always come first.
+        count = min(44f, widthDp * heightDp / 9000f).toInt().coerceAtLeast(0)
         x = FloatArray(count) { Random.nextFloat() * width }
         y = FloatArray(count) { Random.nextFloat() * height }
         radius = FloatArray(count) { (0.5f + Random.nextFloat() * 1.5f) * density }
@@ -158,9 +156,9 @@ private class DustField {
 }
 
 /**
- * The live wallpaper: dust drifting upward and twinkling, over two soft lights that wander
- * slowly. Drawn in the draw phase only, so it never recomposes the screen above it. Silver dust on
- * the dark theme, graphite dust on the light one, so the screen is alive in both.
+ * The live wallpaper: dust drifting upward and twinkling. Drawn in the draw phase only, so it
+ * never recomposes the screen above it. Silver dust on the dark theme, graphite dust on the light
+ * one, so the screen is alive in both.
  */
 @Composable
 fun RxDustBackground(modifier: Modifier = Modifier) {
@@ -168,30 +166,14 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
     val animate = rememberAnimationsEnabled()
     val field = remember { DustField() }
     val frameNanos by rememberFrameClock(animate, DUST_FRAME_NANOS)
-    val lights = remember(dark) { DustLights() }
     val speck = if (dark) Color(0xFFD7E1F5) else Color(0xFF39465A)
     val speckGain = if (dark) 1f else 0.62f
-    val firstLight = if (dark) Color(0x2E8A9CC8) else Color(0x3D9DB2D6)
-    val secondLight = if (dark) Color(0x1FB8C4DC) else Color(0x66FFFFFF)
     // Its own layer: a new wallpaper frame repaints the wallpaper alone, instead of making the
     // whole screen above it (list, bars, text) be recorded again on every frame.
     Canvas(modifier.fillMaxSize().graphicsLayer()) {
         field.ensure(size, density)
         field.step(frameNanos)
         val t = field.seconds
-        // Two wide, faint lights on slow, different orbits. Each gradient is built once per
-        // size and moved into place, instead of a new shader on every frame.
-        lights.ensure(size, firstLight, secondLight)
-        val firstX = size.width * (0.5f + 0.32f * sin(t * 0.11f))
-        val firstY = size.height * (0.36f + 0.10f * cos(t * 0.09f))
-        translate(firstX, firstY) {
-            drawRect(lights.first!!, topLeft = Offset(-firstX, -firstY), size = size)
-        }
-        val secondX = size.width * (0.5f - 0.36f * sin(t * 0.07f + 1.3f))
-        val secondY = size.height * (0.78f + 0.08f * sin(t * 0.13f))
-        translate(secondX, secondY) {
-            drawRect(lights.second!!, topLeft = Offset(-secondX, -secondY), size = size)
-        }
         for (i in 0 until field.count) {
             val twinkle = 0.65f + 0.35f * sin(t * 1.4f + field.phase[i])
             drawCircle(
@@ -270,24 +252,6 @@ private class FogBanks {
     }
 }
 
-/** The two wallpaper lights, rebuilt only when the screen size or the colours change. */
-private class DustLights {
-    var first: Brush? = null
-    var second: Brush? = null
-    private var size = Size.Unspecified
-    private var firstColor = Color.Unspecified
-    private var secondColor = Color.Unspecified
-
-    fun ensure(canvas: Size, a: Color, b: Color) {
-        if (canvas == size && a == firstColor && b == secondColor && first != null) return
-        size = canvas
-        firstColor = a
-        secondColor = b
-        first = Brush.radialGradient(listOf(a, Color.Transparent), Offset.Zero, (canvas.height * 0.55f).coerceAtLeast(1f))
-        second = Brush.radialGradient(listOf(b, Color.Transparent), Offset.Zero, (canvas.height * 0.42f).coerceAtLeast(1f))
-    }
-}
-
 /**
  * Frame time for the decorative layers. It only ticks while [active] and while the screen is
  * actually on show: in the background, or with the display off, no frame is requested at all.
@@ -308,11 +272,13 @@ private fun rememberFrameClock(active: Boolean, minFrameNanos: Long = 0L): LongS
     return state
 }
 
-private const val FOG_BANKS = 5
+private const val FOG_BANKS = 3
 
-// Just under the nominal frame time, so a display running at exactly that rate skips nothing.
-private const val DUST_FRAME_NANOS = 15_000_000L // at most ~60 frames a second
-private const val FOG_FRAME_NANOS = 30_000_000L // at most ~30: fog drifts far too slowly to show it
+// Decoration runs well below the display rate: dust at ~24 frames a second and fog at ~20.
+// The list, the bars and the text are what the user actually reads, and on a weak phone every
+// frame spent on a background is a frame taken from them.
+private const val DUST_FRAME_NANOS = 42_000_000L // at most ~24 frames a second
+private const val FOG_FRAME_NANOS = 50_000_000L // at most ~20: fog drifts far too slowly to show it
 
 /** Dropdown with the app's floating surface: own background, thin border, round corners, shadow. */
 @Composable

@@ -46,6 +46,22 @@ object SettingsManager {
         initRoutingRulesets(context)
         migrateServerListToSubscriptions()
         migrateHysteria2PinSHA256()
+        removeRetiredFragmentVpn()
+    }
+
+    /**
+     * The separate "Fragment" screen is gone from the app. Its internal profile and group must
+     * go with it, otherwise a phone that used the screen keeps a dead config in its list and a
+     * tab that leads nowhere. The per-config fragment setting in Settings is unrelated and stays.
+     */
+    private fun removeRetiredFragmentVpn() {
+        val groupId = "rx_fragment_vpn"
+        val profileGuid = "rx-fragment-vpn"
+        if (MmkvManager.decodeSubscription(groupId) != null) {
+            MmkvManager.removeSubscription(groupId)
+        } else if (MmkvManager.decodeServerConfig(profileGuid) != null) {
+            MmkvManager.removeServer(profileGuid)
+        }
     }
 
     /**

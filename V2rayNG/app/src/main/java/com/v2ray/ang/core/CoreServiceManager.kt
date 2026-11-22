@@ -24,7 +24,6 @@ import com.v2ray.ang.enums.BrowserDialerMode
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
-import com.v2ray.ang.handler.FragmentVpn
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.NotificationManager
@@ -286,7 +285,6 @@ object CoreServiceManager {
         // away from one of them would change what the phone is doing, not only
         // where it does it.
         if (guid == FIREFOX_VPN_GUID ||
-            FragmentVpn.isFragmentProfile(guid) ||
             AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))
         ) return
         // Asked for, this is; imposed, it is not. The switch in the settings is
@@ -404,7 +402,6 @@ object CoreServiceManager {
         val guids = (if (group.isEmpty()) MmkvManager.decodeAllServerList() else MmkvManager.decodeServerList(group))
             .filter {
                 it != FIREFOX_VPN_GUID &&
-                    !FragmentVpn.isFragmentProfile(it) &&
                     !AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(it))
             }
         return Failover.next(guid, guids) { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }

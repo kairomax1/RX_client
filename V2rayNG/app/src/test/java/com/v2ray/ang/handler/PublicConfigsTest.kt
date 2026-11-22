@@ -176,8 +176,7 @@ class PublicConfigsTest {
     }
 
     @Test
-    fun fragmentGroupIsHiddenAsInternalGroup() {
-        assertEquals(true, PublicConfigs.isInternalGroup(FragmentVpn.GROUP_ID))
-        assertEquals(true, FragmentVpn.isFragmentProfile(FragmentVpn.PROFILE_GUID))
+    fun internalScratchGroupsAreHiddenAsInternalGroup() {
+        assertEquals(true, PublicConfigs.isInternalGroup(PublicConfigs.PENDING_GROUP))
     }
 }

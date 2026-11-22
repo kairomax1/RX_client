@@ -381,18 +381,49 @@ object GamingMode {
         return rules
     }
 
-    /** The owner's own rules, with adverts blocked in front of them and nothing else added. */
-    private fun withAdverts(base: List<RulesetItem>): MutableList<RulesetItem> {
+    /**
+     * The services that can only be answered from outside, as one rule. The same names as
+     * in the Gaming mode, so a service is never opened there and closed outside it. It stands
+     * in front of the owner's own rules, because a rule that sends a name out directly before
+     * this one is reached is the whole reason a blocked site stays closed.
+     */
+    internal val tunnelledServices: List<String> by lazy {
+        ((FILTERED + SANCTIONED + VPN_SERVICES + WHOLE_ENDINGS).map { "domain:$it" }).distinct()
+    }
+
+    /** The rule that sends those services through the config. */
+    internal fun tunnelledServicesRule(): RulesetItem = RulesetItem(
+        remarks = TUNNELLED_RULE,
+        outboundTag = AppConfig.TAG_PROXY,
+        domain = tunnelledServices,
+    )
+
+    /**
+     * The owner's own rules, in the one order that keeps a blocked site open: adverts are
+     * blocked in front, the services that can only be answered from outside go through the
+     * config before anything could send them out directly, and what the remote policy names
+     * follows in its own order.
+     *
+     * Pure, so the order can be read and tested without a store behind it.
+     */
+    internal fun aroundOwnerRules(
+        base: List<RulesetItem>,
+        adverts: List<String>,
+        remoteProxy: List<String>,
+        remoteDirect: List<String>,
+    ): MutableList<RulesetItem> {
         val rules = mutableListOf<RulesetItem>()
-        if (adDomains.isNotEmpty()) {
+        if (adverts.isNotEmpty()) {
             rules += RulesetItem(
                 remarks = "Adverts and trackers",
                 outboundTag = AppConfig.TAG_BLOCKED,
-                domain = adDomains,
+                domain = adverts,
             )
         }
-        val remoteRouting = RemoteControl.current().routing
-        val remoteProxy = remoteRouting.proxyDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
+        // YouTube and the rest must never depend on which preset the owner chose, on a rule
+        // of theirs that sends a whole TLD out directly, or on a geo list being downloaded:
+        // the names are written here, in front.
+        rules += tunnelledServicesRule()
         if (remoteProxy.isNotEmpty()) {
             rules += RulesetItem(
                 remarks = "RemoteControl: proxy domains",
@@ -400,7 +431,6 @@ object GamingMode {
                 domain = remoteProxy,
             )
         }
-        val remoteDirect = remoteRouting.directDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } }
         if (remoteDirect.isNotEmpty()) {
             rules += RulesetItem(
                 remarks = "RemoteControl: direct domains",
@@ -410,6 +440,17 @@ object GamingMode {
         }
         rules += base
         return rules
+    }
+
+    /** The owner's own rules, wrapped as above with what is in force right now. */
+    private fun withAdverts(base: List<RulesetItem>): MutableList<RulesetItem> {
+        val remoteRouting = RemoteControl.current().routing
+        return aroundOwnerRules(
+            base = base,
+            adverts = adDomains,
+            remoteProxy = remoteRouting.proxyDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } },
+            remoteDirect = remoteRouting.directDomains.mapNotNull { normalizeDomain(it)?.let { d -> "domain:$d" } },
+        )
     }
 
     /**

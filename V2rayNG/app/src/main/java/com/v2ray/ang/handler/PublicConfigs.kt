@@ -130,7 +130,7 @@ object PublicConfigs {
 
     /** True for a group the app keeps for itself: measured in, never shown. */
     fun isInternalGroup(guid: String?): Boolean =
-        guid == PENDING_GROUP || guid == GROUP_ID_SWEEP || guid == FragmentVpn.GROUP_ID
+        guid == PENDING_GROUP || guid == GROUP_ID_SWEEP
 
     /** A second scratch group, so a measurement of a public config and a sweep cannot collide. */
     private const val GROUP_ID_SWEEP = "rx_public_sweep"

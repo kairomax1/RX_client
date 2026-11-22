@@ -18,7 +18,6 @@ import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.RemoteControl
 import com.v2ray.ang.handler.AppLog
-import com.v2ray.ang.handler.FragmentVpn
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.util.HttpUtil
@@ -38,9 +37,6 @@ object CoreConfigManager {
      * Build the runtime configuration for normal startup.
      */
     fun getV2rayConfig(context: Context, guid: String): ConfigResult = synchronized(tuningBuildLock) {
-        if (FragmentVpn.isFragmentProfile(guid)) {
-            return FragmentVpn.buildXrayConfigResult(context, forSpeedtest = false)
-        }
         // Mux and fragment are one set of settings that the core reads while it
         // builds an outbound, so they have to be the ones this config was
         // measured with. Setting them here means a config change can never be
@@ -79,9 +75,6 @@ object CoreConfigManager {
         tuningOverride: Tuning.Choice? = null,
         wgModeOverride: CoreOutboundBuilder.WireguardMode? = null,
     ): ConfigResult = synchronized(tuningBuildLock) {
-        if (FragmentVpn.isFragmentProfile(guid)) {
-            return FragmentVpn.buildXrayConfigResult(context, forSpeedtest = true)
-        }
         if (tuningOverride != null) {
             Tuning.apply(tuningOverride)
         } else {
