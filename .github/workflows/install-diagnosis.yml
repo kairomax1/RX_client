@@ -38,6 +38,13 @@ jobs:
           cmp apks/new/RXVPN_1.2_arm64-v8a.apk apks/published/RXVPN_1.2_arm64-v8a.apk
           HASH=$(sha256sum apks/published/RXVPN_1.2_arm64-v8a.apk | cut -d ' ' -f 1)
           echo "::notice title=Published APK SHA-256::$HASH"
+          TOOL=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
+          for apk in apks/new/RXVPN_1.2_arm64-v8a.apk apks/new/RXVPN_1.2_armeabi-v7a.apk apks/new/RXVPN_1.2_universal.apk; do
+            "$TOOL" verify --verbose --print-certs "$apk" > /tmp/signature-info.txt
+            grep -qi '845b7323f50757566efeda24c07a6c4f732821d1ee473fbc1ec27998acf39ab8' /tmp/signature-info.txt
+            SIG=$(grep -E 'Verified using v[123] scheme|Signer #1 certificate SHA-256 digest' /tmp/signature-info.txt | tr '\n' ';')
+            echo "::notice title=APK signature $apk::$SIG"
+          done
       - name: Download previously published RX VPN
         env:
           GH_TOKEN: ${{ github.token }}
@@ -62,7 +69,7 @@ jobs:
           script: |
             set -euo pipefail
             adb shell getprop ro.build.version.release
-            adb shell getprop ro.product.cpu.abilist
+            echo "::notice title=Emulator ABIs::$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')"
             echo 'Testing fresh install of new universal APK'
             adb install apks/new/RXVPN_1.2_universal.apk
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
@@ -72,4 +79,4 @@ jobs:
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb install -r apks/new/RXVPN_1.2_universal.apk
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-            if adb shell getprop ro.product.cpu.abilist | grep -q arm64-v8a; then adb uninstall com.mobix.vpn && adb install apks/new/RXVPN_1.2_arm64-v8a.apk && adb uninstall com.mobix.vpn && adb install apks/old/RXVPN_1.0.1_arm64-v8a.apk && adb install -r apks/new/RXVPN_1.2_arm64-v8a.apk; else echo '::warning::This emulator does not advertise ARM64; ARM64 installation was not tested.'; fi
+            if adb shell getprop ro.product.cpu.abilist | grep -q arm64-v8a; then adb uninstall com.mobix.vpn && adb install apks/new/RXVPN_1.2_arm64-v8a.apk && adb uninstall com.mobix.vpn && adb install apks/old/RXVPN_1.0.1_arm64-v8a.apk && adb install -r apks/new/RXVPN_1.2_arm64-v8a.apk && echo '::notice title=ARM64 install::Fresh installation and upgrade passed on API 36 with ARM64 native bridge'; else echo '::warning::This emulator does not advertise ARM64; ARM64 installation was not tested.'; fi
