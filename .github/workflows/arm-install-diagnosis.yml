@@ -1,0 +1,56 @@
+name: Diagnose Android 16 ARM64 installation
+
+on:
+  push:
+    branches:
+      - "arena/**"
+    paths:
+      - ".github/workflows/arm-install-diagnosis.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  android16-arm:
+    name: Install and update ARM64 on Android 16
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: RXVPN-apk
+          path: apks/new
+          run-id: '45061325114'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download previously published ARM64 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" --pattern RXVPN_1.0.1_arm64-v8a.apk --dir apks/old
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test fresh install and upgrade
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: arm64-v8a
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -euo pipefail
+            adb shell getprop ro.build.version.release
+            adb shell getprop ro.product.cpu.abilist
+            echo 'Testing fresh install of new arm64 APK'
+            adb install apks/new/RXVPN_1.2_arm64-v8a.apk
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb uninstall com.mobix.vpn
+            echo 'Testing upgrade from published 1.0.1 without uninstalling it'
+            adb install apks/old/RXVPN_1.0.1_arm64-v8a.apk
+            adb install -r apks/new/RXVPN_1.2_arm64-v8a.apk
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
