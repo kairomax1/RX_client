@@ -89,14 +89,4 @@ We hope **RX client** is useful for you. To support the project, give it a **sta
 
 ---
 
-## دربارهٔ RX client / About
-
-**RX client** یک کلاینت اندرویدی رایگان و متن‌باز برای هسته‌های V2Ray/Xray است، بر پایهٔ
-[v2rayNG](https://github.com/2dust/v2rayNG). پروتکل‌های VLESS، VMess، Trojan، Shadowsocks،
-WireGuard، Hysteria2، TUIC، SOCKS و HTTP را پشتیبانی می‌کند و هیچ تبلیغ، آنالیتیکس یا SDK
-گزارش خطا ندارد. کانفیگ سرور را خودتان اضافه می‌کنید؛ برنامه سرویس VPN نمی‌فروشد.
-
-**RX client** is a free, open-source Android client for the V2Ray/Xray cores, based on
-[v2rayNG](https://github.com/2dust/v2rayNG). It supports VLESS, VMess, Trojan, Shadowsocks,
-WireGuard, Hysteria2, TUIC, SOCKS and HTTP, ships no ads, no analytics and no crash-reporting
-SDK, and does not sell VPN service — you bring your own server configuration.
+## 
