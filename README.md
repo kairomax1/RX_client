@@ -76,25 +76,6 @@ We hope **RX client** is useful for you. To support the project, give it a **sta
 - روی نسخهٔ قبلی نصب می‌شود، بدون نیاز به حذف / installs over the previous version — no uninstall needed
 - اگر از بیلد F-Droid می‌آیید، اول حذف کنید (امضای متفاوت) / coming from an F-Droid build requires an uninstall (different signature)
 
-## 🔐 راستی‌آزمایی / Verify
-
-```sh
-sha256sum RXVPN_1.2_arm64-v8a.apk   # سپس با مقدار زیر مقایسه کنید / compare with the value below
-```
-
-```
-a90870e6337d4362e701a79e24ed141c41816d6d3abf0c041c849fae0d694341  RXVPN_1.2_arm64-v8a.apk
-37388a49dd16884cfee46c5f0464869684eff331a8df6b4a79fae88cbced3b23  RXVPN_1.2_armeabi-v7a.apk
-be869efdfaf892ec2faa7ddeb9fbc67e27a2209da86277c3fab56e70561d12ae  RXVPN_1.2_universal.apk
-cf8e3057e424708d8e6e854d65186f8cea7d4ec8ec10f630c5c8205b51ae76fb  RXVPN_1.2_x86.apk
-b825f8809b497b1c75b26c02b16cb73ab62db6ff5c7d024c08ddcdc5a9916cfa  RXVPN_1.2_x86_64.apk
-```
-
-اثر انگشت سرتیفیکیت امضاکننده / signing certificate SHA-256:
-
-```
-52:86:4C:67:AF:63:07:4A:B2:A6:13:64:3A:4B:09:43:4E:3D:32:0B:87:DC:9C:1D:6B:EF:51:4D:88:1A:5C:83
-```
 
 ## 🔗 لینک‌ها / Links
 
