@@ -169,6 +169,35 @@ jobs:
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
+      - name: Re-sign APKs (v1+v2+v3, defensive)
+        env:
+          STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: rxvpn
+          KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
+        run: |
+          # AGP signs the APKs, but we re-sign explicitly with apksigner to guarantee
+          # v1 (JAR) + v2 + v3 schemes are all present. Some installers reject packages
+          # with missing/incomplete signing as "package appears to be invalid".
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
+                     V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
+            echo "== re-sign $apk"
+            # apksigner sign works in-place; ensure alignment is intact first.
+            "$ZIPALIGN" -c -v 4 "$apk" > /dev/null
+            "$APKSIGNER" sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-pass "env:STORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "env:KEY_PASSWORD" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              "$apk"
+            "$APKSIGNER" verify --verbose --print-certs "$apk" | head -30
+          done
+
       - name: Verify signing certificate
         env:
           EXPECTED_SHA256: "845b7323f50757566efeda24c07a6c4f732821d1ee473fbc1ec27998acf39ab8"
@@ -204,9 +233,9 @@ jobs:
             "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
               | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
               | while read -r line; do echo "::notice title=$apk::$line"; done
-            "$BUILD_TOOLS/apksigner" verify --print-certs "$apk" 2>&1 \
-              | grep -E "Verified using|Signer #1 certificate SHA-256" \
-              | while read -r line; do echo "::notice title=signature::$line"; done
+            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$apk" 2>&1 \
+              | grep -E "Verified using|v1 scheme|v2 scheme|v3 scheme|v4 scheme|Signer #1|ERROR|WARNING" \
+              | while read -r line; do echo "::notice title=signature::$apk: $line"; done
           done
 
       - name: Verify APK structure and write checksums
@@ -250,6 +279,9 @@ jobs:
             echo '```'
           } > APK-FACTS.txt 2>&1
           cat APK-FACTS.txt
+          while IFS= read -r line; do
+            [ -n "$line" ] && echo "::notice title=apk-facts::$line"
+          done < APK-FACTS.txt
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
@@ -313,11 +345,13 @@ jobs:
             DRAFT_FLAG=""
             LATEST_FLAG="--latest"
           fi
+          ASSETS=(apk/*.apk apk/SHA256SUMS.txt)
+          [ -f apk/APK-FACTS.txt ] && ASSETS+=(apk/APK-FACTS.txt)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" apk/*.apk apk/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md" $DRAFT_FLAG
           else
-            gh release create "$TAG" apk/*.apk apk/SHA256SUMS.txt \
+            gh release create "$TAG" "${ASSETS[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "RX VPN $TAG" \
