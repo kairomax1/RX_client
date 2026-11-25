@@ -78,8 +78,8 @@ object CoreOutboundBuilder {
                 if (sockopt.tcpKeepAliveIdle == null) {
                     sockopt.tcpKeepAliveIdle = 100
                 }
-                if (sockopt.tcpNoDelay == null) {
-                    sockopt.tcpNoDelay = true
+                if (sockopt.TcpNoDelay == null) {
+                    sockopt.TcpNoDelay = true
                 }
                 if (sockopt.happyEyeballs == null) {
                     sockopt.happyEyeballs = OutboundBean.StreamSettingsBean.HappyEyeballsBean(
