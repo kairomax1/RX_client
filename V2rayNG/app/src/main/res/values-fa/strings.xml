@@ -751,4 +751,8 @@
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
     <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>
+
+    <!-- Gaming mode -->
+    <string name="title_gaming_mode">حالت گیمینگ</string>
+    <string name="summary_gaming_mode">همه ترافیک را مستقیم عبور می‌دهد و IP ایران شما استفاده می‌شود؛ برای عبور از VPN/پروکسی خاموش کنید.</string>
 </resources>

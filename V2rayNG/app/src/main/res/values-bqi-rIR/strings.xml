@@ -671,4 +671,8 @@
     <string name="update_notes_title">توضیحات</string>
     <string name="update_notes_empty">برای این نسخه توضیحی نوشته نشده.</string>
     <string name="update_in_downloads">فایل آپدیت توی پوشهٔ Download گوشیته؛ بزن روش تا نصب بشه</string>
+
+    <!-- Gaming mode -->
+    <string name="title_gaming_mode">هالت گیمینگ</string>
+    <string name="summary_gaming_mode">پوی ترافیک ن راستاگردی اکونه وو IP ایران ایسا و کار گرؽڌه ابۊ؛ سی رۊت VPN/پروکسی خاموشس بکیت.</string>
 </resources>

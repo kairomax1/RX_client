@@ -48,7 +48,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.ui.compose.rememberAnimationsEnabled
 import com.v2ray.ang.ui.compose.rxFloatingBorder
 import com.v2ray.ang.ui.compose.rxFloatingColor
@@ -74,6 +76,9 @@ fun MainQuickSheet(
     val scope = rememberCoroutineScope()
     val open = remember { Animatable(if (animate) 0f else 1f) }
     var closing by remember { mutableStateOf(false) }
+    val gamingModeEnabled = remember {
+        mutableStateOf(MmkvManager.decodeSettingsBool(AppConfig.PREF_GAMING_MODE_ENABLED, false))
+    }
 
     LaunchedEffect(Unit) {
         if (animate) {
@@ -133,10 +138,12 @@ fun MainQuickSheet(
             quickSheetItems.chunked(2).forEachIndexed { rowIndex, rowItems ->
                 Row(horizontalArrangement = Arrangement.spacedBy(TILE_GAP)) {
                     rowItems.forEachIndexed { columnIndex, item ->
+                        val isActive = item == MainDestination.GamingMode && gamingModeEnabled.value
                         QuickTile(
                             item = item,
                             order = rowIndex * 2 + columnIndex,
                             animate = animate,
+                            isActive = isActive,
                             onClick = { close { onNavigate(item) } },
                             modifier = Modifier.weight(1f).height(TILE_HEIGHT),
                         )
@@ -152,6 +159,7 @@ private fun QuickTile(
     item: MainDestination,
     order: Int,
     animate: Boolean,
+    isActive: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -162,6 +170,11 @@ private fun QuickTile(
         delay(70L + order * 55L)
         appear.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium))
     }
+    val activeTop = if (isActive) colors.primary.copy(alpha = 0.22f) else colors.onSurface.copy(alpha = 0.09f)
+    val activeBottom = if (isActive) colors.primary.copy(alpha = 0.10f) else colors.onSurface.copy(alpha = 0.03f)
+    val borderColor = if (isActive) colors.primary.copy(alpha = 0.45f) else colors.onSurface.copy(alpha = 0.10f)
+    val iconTint = if (isActive) colors.primary else colors.primary
+    val iconBg = if (isActive) colors.primary.copy(alpha = 0.18f) else colors.onSurface.copy(alpha = 0.08f)
     Column(
         modifier = modifier
             .graphicsLayer {
@@ -172,12 +185,8 @@ private fun QuickTile(
                 scaleY = 0.9f + 0.1f * value
             }
             .clip(TILE_SHAPE)
-            .background(
-                Brush.verticalGradient(
-                    listOf(colors.onSurface.copy(alpha = 0.09f), colors.onSurface.copy(alpha = 0.03f))
-                )
-            )
-            .border(1.dp, colors.onSurface.copy(alpha = 0.10f), TILE_SHAPE)
+            .background(Brush.verticalGradient(listOf(activeTop, activeBottom)))
+            .border(1.dp, borderColor, TILE_SHAPE)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -187,13 +196,13 @@ private fun QuickTile(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(colors.onSurface.copy(alpha = 0.08f)),
+                .background(iconBg),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 painter = painterResource(item.iconRes),
                 contentDescription = null,
-                tint = colors.primary,
+                tint = iconTint,
                 modifier = Modifier.size(22.dp),
             )
         }
@@ -201,11 +210,19 @@ private fun QuickTile(
             text = stringResource(item.labelRes),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Medium,
-            color = colors.onSurface,
+            color = if (isActive) colors.primary else colors.onSurface,
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 8.dp),
         )
+        if (isActive) {
+            Text(
+                text = "ON",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.primary,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }

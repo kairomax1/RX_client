@@ -72,6 +72,25 @@ object CoreOutboundBuilder {
                 outbound.mux?.concurrency = -1
             }
 
+            outbound.streamSettings?.let { streamSettings ->
+                val sockopt = streamSettings.sockopt
+                    ?: OutboundBean.StreamSettingsBean.SockoptBean().also { streamSettings.sockopt = it }
+                if (sockopt.tcpKeepAliveIdle == null) {
+                    sockopt.tcpKeepAliveIdle = 100
+                }
+                if (sockopt.tcpNoDelay == null) {
+                    sockopt.tcpNoDelay = true
+                }
+                if (sockopt.happyEyeballs == null) {
+                    sockopt.happyEyeballs = OutboundBean.StreamSettingsBean.HappyEyeballsBean(
+                        prioritizeIPv6 = false,
+                        maxConcurrentTry = 4,
+                        tryDelayMs = 250,
+                        interleave = 1
+                    )
+                }
+            }
+
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to update outbound with global settings", e)
             return false

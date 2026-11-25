@@ -671,4 +671,8 @@
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
+
+    <!-- Gaming mode -->
+    <string name="title_gaming_mode">গেমিং মোড</string>
+    <string name="summary_gaming_mode">সব ট্রাফিক সরাসরি রুট করে। আপনার লোকাল IP ব্যবহার হয়; VPN/প্রক্সি রুটিংয়ের জন্য বন্ধ করুন।</string>
 </resources>

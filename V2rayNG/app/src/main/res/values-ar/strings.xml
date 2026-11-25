@@ -679,4 +679,8 @@
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
+
+    <!-- Gaming mode -->
+    <string name="title_gaming_mode">وضع الألعاب</string>
+    <string name="summary_gaming_mode">يوجّه كل حركة المرور مباشرة. يستخدم عنوان IP المحلي الخاص بك؛ قم بإيقافه لاستخدام توجيه VPN/الوكيل.</string>
 </resources>

@@ -162,7 +162,150 @@ object CoreConfigManager {
             }
         }
 
+        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_GAMING_MODE_ENABLED, false)) {
+            injectGamingModeIntoCustomConfig(json)
+        } else {
+            injectCustomConfigKeepAlive(json)
+            injectCustomConfigGlobalOptimizations(json)
+        }
+
         return JsonUtil.toJsonPretty(json)?.let { ConfigResult(true, configContext.guid, it) } ?: result
+    }
+
+    /**
+     * Inject conservative keepalive defaults into custom proxy outbounds to
+     * improve stability on restrictive or flaky networks. Existing explicit
+     * values are preserved.
+     */
+    private fun injectCustomConfigKeepAlive(json: JsonObject) {
+        val outbounds = json.getAsJsonArray("outbounds") ?: return
+        val nonProxyProtocols = setOf("freedom", "blackhole", "dns", "loopback")
+        outbounds.forEach { elem ->
+            val outbound = elem.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+            val protocol = outbound.get("protocol")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase().orEmpty()
+            if (protocol in nonProxyProtocols) return@forEach
+
+            val streamSettings = outbound.getAsJsonObject("streamSettings")
+                ?: JsonObject().also { outbound.add("streamSettings", it) }
+            val sockopt = streamSettings.getAsJsonObject("sockopt")
+                ?: JsonObject().also { streamSettings.add("sockopt", it) }
+            if (!sockopt.has("tcpKeepAliveIdle")) {
+                sockopt.addProperty("tcpKeepAliveIdle", 100)
+            }
+            if (!sockopt.has("TcpNoDelay")) {
+                sockopt.addProperty("TcpNoDelay", true)
+            }
+        }
+    }
+
+    /**
+     * Inject global fragment/mux settings into custom proxy outbounds when the
+     * user has enabled them. Existing explicit outbound values are preserved.
+     */
+    private fun injectCustomConfigGlobalOptimizations(json: JsonObject) {
+        val outbounds = json.getAsJsonArray("outbounds") ?: return
+        val nonProxyProtocols = setOf("freedom", "blackhole", "dns", "loopback")
+        val muxEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false)
+        val fragmentEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false)
+
+        outbounds.forEach { elem ->
+            val outbound = elem.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+            val protocol = outbound.get("protocol")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase().orEmpty()
+            if (protocol in nonProxyProtocols) return@forEach
+
+            if (muxEnabled) {
+                injectMuxIntoCustomOutbound(outbound, protocol)
+            }
+            if (fragmentEnabled) {
+                injectFragmentIntoCustomOutbound(outbound)
+            }
+        }
+    }
+
+    private fun injectMuxIntoCustomOutbound(outbound: JsonObject, protocol: String) {
+        if (protocol in setOf("shadowsocks", "socks", "http", "trojan", "wireguard", "hysteria2", "hysteria")) return
+        val streamSettings = outbound.getAsJsonObject("streamSettings")
+        val network = streamSettings?.get("network")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        if (network.equals(NetworkType.XHTTP.type, true)) return
+
+        val mux = outbound.getAsJsonObject("mux") ?: JsonObject().also { outbound.add("mux", it) }
+        if (mux.has("enabled")) return
+        mux.addProperty("enabled", true)
+        mux.addProperty("concurrency", MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_CONCURRENCY, "8").orEmpty().toIntOrNull() ?: 8)
+        mux.addProperty("xudpConcurrency", MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_XUDP_CONCURRENCY, AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY).orEmpty().toIntOrNull() ?: 16)
+        mux.addProperty("xudpProxyUDP443", MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_XUDP_QUIC, "reject"))
+        val flow = outbound.getAsJsonObject("settings")?.get("flow")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        if (protocol.equals(EConfigType.VLESS.name, true) && flow.isNotEmpty()) {
+            mux.addProperty("concurrency", -1)
+        }
+    }
+
+    private fun injectFragmentIntoCustomOutbound(outbound: JsonObject) {
+        val streamSettings = outbound.getAsJsonObject("streamSettings") ?: return
+        val security = streamSettings.get("security")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        if (security != AppConfig.TLS && security != AppConfig.REALITY) return
+        if (streamSettings.getAsJsonObject("sockopt")?.get("dialerProxy")?.takeIf { it.isJsonPrimitive }?.asString.isNotNullEmpty()) return
+
+        val finalMaskObj = streamSettings.getAsJsonObject("finalmask") ?: JsonObject()
+        val tcpMask = finalMaskObj.getAsJsonArray("tcp")
+        if (tcpMask != null && tcpMask.size() > 0) return
+
+        var packets = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_PACKETS) ?: "tlshello"
+        if (security == AppConfig.REALITY && packets == "tlshello") {
+            packets = "1-3"
+        }
+        val length = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_LENGTH) ?: "50-100"
+        val interval = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_INTERVAL) ?: "10-20"
+        val maxSplit = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_MAXSPLIT) ?: "10"
+
+        val fragmentMask = JsonObject().apply {
+            addProperty("type", "fragment")
+            add("settings", JsonObject().apply {
+                addProperty("packets", packets)
+                addProperty("length", length)
+                addProperty("delay", interval)
+                addProperty("maxSplit", maxSplit)
+            })
+        }
+        val noiseMask = JsonObject().apply {
+            addProperty("type", "noise")
+            add("settings", JsonObject().apply {
+                val noiseArr = JsonArray()
+                noiseArr.add(JsonObject().apply {
+                    addProperty("rand", "10-20")
+                    addProperty("delay", "10-16")
+                })
+                add("noise", noiseArr)
+            })
+        }
+
+        finalMaskObj.add("tcp", JsonArray().apply { add(fragmentMask) })
+        if (!finalMaskObj.has("udp") || !finalMaskObj.get("udp").isJsonArray || finalMaskObj.getAsJsonArray("udp").size() == 0) {
+            finalMaskObj.add("udp", JsonArray().apply { add(noiseMask) })
+        }
+        streamSettings.add("finalmask", finalMaskObj)
+    }
+
+    private fun injectGamingModeIntoCustomConfig(json: JsonObject) {
+        val routing = json.getAsJsonObject("routing") ?: JsonObject().also { json.add("routing", it) }
+        val rules = JsonArray()
+        rules.add(JsonObject().apply {
+            addProperty("type", "field")
+            addProperty("network", "tcp,udp")
+            addProperty("outboundTag", AppConfig.TAG_DIRECT)
+        })
+        routing.add("rules", rules)
+        routing.addProperty("domainStrategy", "AsIs")
+
+        json.remove("fakedns")
+        val dns = JsonObject()
+        val servers = JsonArray()
+        servers.add("localhost")
+        servers.add("223.5.5.5")
+        servers.add("1.1.1.1")
+        dns.add("servers", servers)
+        dns.addProperty("queryStrategy", "UseIP")
+        json.add("dns", dns)
     }
 
     /**
@@ -203,14 +346,19 @@ object CoreConfigManager {
 
         // User routing rules (policyGroupBalancerTags rewrites TAG_PROXY→balancer when main is POLICYGROUP).
         configureRouting(configContext, v2rayConfig, policyGroupBalancerTags)
-        configureFakeDns(v2rayConfig)
-        configureDns(configContext, v2rayConfig, policyGroupBalancerTags)
-        configureLocalDns(configContext, v2rayConfig)
-        configureRootModeDns(v2rayConfig)
+        val gamingModeEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_GAMING_MODE_ENABLED, false)
+        if (gamingModeEnabled) {
+            configureGamingModeDns(v2rayConfig)
+        } else {
+            configureFakeDns(v2rayConfig)
+            configureDns(configContext, v2rayConfig, policyGroupBalancerTags)
+            configureLocalDns(configContext, v2rayConfig)
+            configureRootModeDns(v2rayConfig)
+        }
 
         // (added by getDns / getCustomLocalDns) to use the balancer, then add
         // the catch-all balancer rule.
-        if (primaryResolvedOutbound.resolvedType == CoreResolvedType.POLICYGROUP) {
+        if (!gamingModeEnabled && primaryResolvedOutbound.resolvedType == CoreResolvedType.POLICYGROUP) {
             if (v2rayConfig.routing.domainStrategy == "IPIfNonMatch") {
                 v2rayConfig.routing.rules.add(
                     V2rayConfig.RoutingBean.RulesBean(
@@ -589,6 +737,23 @@ object CoreConfigManager {
         ) {
             v2rayConfig.fakedns = listOf(V2rayConfig.FakednsBean())
         }
+    }
+
+    /**
+     * Gaming mode: route everything direct and keep DNS on local/direct resolvers
+     * to avoid foreign proxy IP leaks.
+     */
+    private fun configureGamingModeDns(v2rayConfig: V2rayConfig) {
+        v2rayConfig.fakedns = null
+        val directDns = V2rayConfig.DnsBean(
+            servers = arrayListOf(
+                V2rayConfig.DnsBean.ServersBean(address = "localhost"),
+                V2rayConfig.DnsBean.ServersBean(address = "223.5.5.5"),
+                V2rayConfig.DnsBean.ServersBean(address = "1.1.1.1")
+            ),
+            queryStrategy = "UseIP"
+        )
+        v2rayConfig.dns = directDns
     }
 
     /**
@@ -1173,6 +1338,16 @@ object CoreConfigManager {
         v2rayConfig.routing.domainStrategy =
             MmkvManager.decodeSettingsString(AppConfig.PREF_ROUTING_DOMAIN_STRATEGY)
                 ?: "AsIs"
+
+        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_GAMING_MODE_ENABLED, false)) {
+            v2rayConfig.routing.rules.add(
+                V2rayConfig.RoutingBean.RulesBean(
+                    network = "tcp,udp",
+                    outboundTag = AppConfig.TAG_DIRECT
+                )
+            )
+            return
+        }
 
         val rulesetItems = MmkvManager.decodeRoutingRulesets()
         rulesetItems?.forEach { key ->

@@ -669,4 +669,8 @@
     <string name="update_notes_title">What is new</string>
     <string name="update_notes_empty">No description was written for this version.</string>
     <string name="update_in_downloads">The update is in your Download folder; tap it there to install</string>
+
+    <!-- Gaming mode -->
+    <string name="title_gaming_mode">游戏模式</string>
+    <string name="summary_gaming_mode">将所有流量直接路由。使用您的本地 IP；关闭后恢复 VPN/代理路由。</string>
 </resources>

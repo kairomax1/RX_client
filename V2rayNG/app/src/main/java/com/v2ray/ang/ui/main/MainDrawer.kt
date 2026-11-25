@@ -43,6 +43,7 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     Subscriptions(R.drawable.ic_subscriptions_24dp, R.string.title_sub_setting),
     PerAppProxy(R.drawable.ic_per_apps_24dp, R.string.per_app_proxy_settings),
     Routing(R.drawable.ic_routing_24dp, R.string.routing_settings_title),
+    GamingMode(R.drawable.ic_gaming_24dp, R.string.title_gaming_mode),
     Cloudflare(R.drawable.ic_cloud_download_24dp, R.string.cloudflare_title),
     SpeedTest(R.drawable.ic_flash_on_24dp, R.string.speedtest_title),
     Settings(R.drawable.ic_settings_24dp, R.string.title_settings),
@@ -51,15 +52,16 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
 
-/** Subscriptions, per-app, routing and settings live in the quick card beside the connect button. */
+/** Subscriptions, per-app, routing and gaming mode live in the quick card beside the connect button. */
 internal val quickSheetItems = listOf(
     MainDestination.Subscriptions,
     MainDestination.PerAppProxy,
     MainDestination.Routing,
-    MainDestination.Settings,
+    MainDestination.GamingMode,
 )
 
 private val drawerItems = listOf(
+    MainDestination.Settings,
     MainDestination.CheckUpdate,
     MainDestination.BackupRestore,
     MainDestination.About,

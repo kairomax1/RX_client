@@ -227,10 +227,19 @@ class MainActivity : HelperBaseComponentActivity() {
     }
 
     private fun navigateTo(destination: MainDestination) {
+        if (destination == MainDestination.GamingMode) {
+            val enabled = !MmkvManager.decodeSettingsBool(AppConfig.PREF_GAMING_MODE_ENABLED, false)
+            MmkvManager.encodeSettings(AppConfig.PREF_GAMING_MODE_ENABLED, enabled)
+            toast(if (enabled) R.string.title_gaming_mode else R.string.summary_gaming_mode)
+            // Rebuild the active core config so routing takes effect immediately.
+            SettingsChangeManager.makeRestartService()
+            return
+        }
         val intent = when (destination) {
             MainDestination.Subscriptions -> Intent(this, SubSettingActivity::class.java)
             MainDestination.PerAppProxy -> Intent(this, PerAppProxyActivity::class.java)
             MainDestination.Routing -> Intent(this, RoutingSettingActivity::class.java)
+            MainDestination.GamingMode -> return
             MainDestination.Cloudflare -> Intent(this, CloudflareActivity::class.java)
             MainDestination.SpeedTest -> Intent(this, SpeedTestActivity::class.java)
             MainDestination.Settings -> Intent(this, SettingsActivity::class.java)
