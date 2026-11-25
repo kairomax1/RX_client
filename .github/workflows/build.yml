@@ -177,7 +177,8 @@ jobs:
         run: |
           # AGP signs the APKs, but we re-sign explicitly to guarantee v1 (JAR) + v2 + v3.
           # Some installers reject packages missing v1 as "package appears to be invalid".
-          # apksigner skips v1 by default when minSdk>=24; --min-sdk-version 1 forces it on.
+          # apksigner skips v1 by default when minSdk>=24; --min-sdk-version 23 forces it on.
+          set -euo pipefail
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APKSIGNER="$BUILD_TOOLS/apksigner"
           ZIPALIGN="$BUILD_TOOLS/zipalign"
@@ -185,24 +186,28 @@ jobs:
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
             echo "== re-sign $apk"
             "$ZIPALIGN" -c -v 4 "$apk" > /dev/null
-            "$APKSIGNER" sign \
+            SIGN_OUT=$("$APKSIGNER" sign \
               --ks "$KEYSTORE_PATH" \
               --ks-pass "env:STORE_PASSWORD" \
               --ks-key-alias "$KEY_ALIAS" \
               --key-pass "env:KEY_PASSWORD" \
-              --min-sdk-version 1 \
+              --min-sdk-version 23 \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
-              "$apk"
-            VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1)
-            echo "$VERIFY" | head -30
+              "$apk" 2>&1) || {
+              echo "$SIGN_OUT"
+              echo "::error::apksigner sign failed for $apk: ${SIGN_OUT//$'\n'/ }"
+              exit 1
+            }
+            VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
+            echo "$VERIFY" | head -40
             echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
-              echo "::error::$apk is missing v1 (JAR) signature"
+              echo "::error::$apk missing v1: $(echo "$VERIFY" | grep 'v1 scheme' | head -1)"
               exit 1
             }
             echo "$VERIFY" | grep -q "v2 scheme (APK Signature Scheme v2): true" || {
-              echo "::error::$apk is missing v2 signature"
+              echo "::error::$apk missing v2: $(echo "$VERIFY" | grep 'v2 scheme' | head -1)"
               exit 1
             }
           done
