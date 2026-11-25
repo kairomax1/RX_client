@@ -125,12 +125,17 @@ jobs:
         if: failure()
         run: |
           python3 - <<'PYEOF'
-          import os, re
+          import os
           path = os.path.join(os.environ["RUNNER_TEMP"], "rx-validation.log")
           if os.path.exists(path):
-              for line in open(path, encoding="utf-8", errors="replace"):
-                  if line.startswith("e:") or "FAILED" in line or line.startswith("Caused by:"):
-                      print("::error::" + line.strip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
+              lines = open(path, encoding="utf-8", errors="replace").readlines()
+              keys = ("e:", "FAILED", "Caused by:", "Manifest merger failed", "uses-sdk", "minSdkVersion", "AGPBI:", "What went wrong", "Execution failed")
+              for i, line in enumerate(lines):
+                  if any(k in line for k in keys):
+                      for j in range(max(0, i-1), min(len(lines), i+3)):
+                          msg = lines[j].rstrip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                          if msg.strip():
+                              print("::error::" + msg)
           PYEOF
 
       - name: Load signing key
@@ -186,7 +191,12 @@ jobs:
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
             echo "== re-sign $apk"
-            "$ZIPALIGN" -c -v 4 "$apk" > /dev/null
+            # Patch manifest minSdkVersion 24->23 in the APK so apksigner emits v1 (JAR) signing.
+            # apksigner refuses v1 when manifest minSdk>=24; v1 absence causes "package appears
+            # to be invalid" on some installers. We patch before signing, then sign.
+            python3 "$GITHUB_WORKSPACE/.github/scripts/patch_apk_minsdk.py" "$apk" 23
+            "$ZIPALIGN" -f -p 4 "$apk" "$apk.aligned"
+            mv "$apk.aligned" "$apk"
             SIGN_OUT=$("$APKSIGNER" sign \
               --ks "$KEYSTORE_PATH" \
               --ks-pass "env:STORE_PASSWORD" \
