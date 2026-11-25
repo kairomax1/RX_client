@@ -52,7 +52,7 @@ jobs:
         with:
           log-accepted-android-sdk-licenses: false
           cmdline-tools-version: '14742923'
-          packages: "platforms;android-37.0 build-tools;37.0.0 platform-tools"
+          packages: "platforms;android-37.0 build-tools;37.0.0 build-tools;35.0.0 platform-tools"
 
       - name: Accept licenses and install NDK
         run: |
@@ -179,7 +179,8 @@ jobs:
           # Some installers reject packages missing v1 as "package appears to be invalid".
           # apksigner skips v1 by default when minSdk>=24; --min-sdk-version 23 forces it on.
           set -euo pipefail
-          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APKSIGNER="$BUILD_TOOLS/apksigner"
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
@@ -220,7 +221,8 @@ jobs:
           # have to uninstall before installing this build.
           APK=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*arm64-v8a.apk | head -1)
           echo "Checking $APK"
-          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
           grep -qi "$EXPECTED_SHA256" "$RUNNER_TEMP/certs.txt" || {
             echo "::error::APK is not signed with the RX VPN release key; in-place updates would fail"
@@ -242,7 +244,8 @@ jobs:
         run: |
           # Every fact that decides whether a phone accepts the package is printed as an
           # annotation, so a failed install can be diagnosed without downloading the APK.
-          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           for apk in *.apk; do
             "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
               | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
@@ -257,7 +260,8 @@ jobs:
         run: |
           # apksigner proves the signature; these prove the file is a readable, aligned APK and
           # give the tester a hash to compare against what actually landed on the phone.
-          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           for apk in *.apk; do
             echo "== $apk"
             "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
@@ -275,7 +279,8 @@ jobs:
           # These lines are copied into the release notes so the exact packaging of the shipped file
           # can be inspected later without downloading anything.
           set +e
-          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
           {
             echo '```'
