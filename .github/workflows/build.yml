@@ -175,27 +175,36 @@ jobs:
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # AGP signs the APKs, but we re-sign explicitly with apksigner to guarantee
-          # v1 (JAR) + v2 + v3 schemes are all present. Some installers reject packages
-          # with missing/incomplete signing as "package appears to be invalid".
+          # AGP signs the APKs, but we re-sign explicitly to guarantee v1 (JAR) + v2 + v3.
+          # Some installers reject packages missing v1 as "package appears to be invalid".
+          # apksigner skips v1 by default when minSdk>=24; --min-sdk-version 1 forces it on.
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APKSIGNER="$BUILD_TOOLS/apksigner"
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
             echo "== re-sign $apk"
-            # apksigner sign works in-place; ensure alignment is intact first.
             "$ZIPALIGN" -c -v 4 "$apk" > /dev/null
             "$APKSIGNER" sign \
               --ks "$KEYSTORE_PATH" \
               --ks-pass "env:STORE_PASSWORD" \
               --ks-key-alias "$KEY_ALIAS" \
               --key-pass "env:KEY_PASSWORD" \
+              --min-sdk-version 1 \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
               "$apk"
-            "$APKSIGNER" verify --verbose --print-certs "$apk" | head -30
+            VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1)
+            echo "$VERIFY" | head -30
+            echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
+              echo "::error::$apk is missing v1 (JAR) signature"
+              exit 1
+            }
+            echo "$VERIFY" | grep -q "v2 scheme (APK Signature Scheme v2): true" || {
+              echo "::error::$apk is missing v2 signature"
+              exit 1
+            }
           done
 
       - name: Verify signing certificate
