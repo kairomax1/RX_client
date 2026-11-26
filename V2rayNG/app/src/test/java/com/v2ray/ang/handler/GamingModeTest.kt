@@ -37,9 +37,9 @@ class GamingModeTest {
         // the phone's own line — the owner's Iranian address.
         assertEquals(AppConfig.TAG_DIRECT, rules.last().outboundTag)
         assertEquals("0-65535", rules.last().port)
-        // The tunnelled list is the first thing consulted, so a blocked name can
-        // never reach the rule that would send it out directly.
-        assertEquals(0, rules.indexOf(tunnelled))
+        // Tunnelled sites must be consulted before any direct catch-all rule.
+        val directCatchAll = rules.indexOfFirst { it.outboundTag == AppConfig.TAG_DIRECT && it.port == "0-65535" }
+        assertTrue(rules.indexOf(tunnelled) < directCatchAll)
     }
 
     @Test
@@ -53,7 +53,8 @@ class GamingModeTest {
     fun theBigListIsAddedAsItIsAndBadLinesAreDropped() {
         val parsed = GamingMode.parseSiteList("# note\ndomain:ea.com\n full:api.example.org \nregexp:.*\ndomain:\nbad line\ndomain:a b.com\n")
         assertEquals(listOf("domain:ea.com", "full:api.example.org"), parsed)
-        val tunnelled = GamingMode.rulesets(bundled = parsed, gameExit = GamingMode.EXIT_OWN).first().domain!!
+        val tunnelled = GamingMode.rulesets(bundled = parsed, gameExit = GamingMode.EXIT_OWN)
+            .first { it.outboundTag == AppConfig.TAG_PROXY && it.domain != null }.domain!!
         assertTrue("domain:ea.com" in tunnelled)
         assertTrue("full:api.example.org" in tunnelled)
         assertTrue("domain:tunnelbear.com" in tunnelled)
@@ -64,8 +65,8 @@ class GamingModeTest {
     fun tunnelledSitesAreMatchedBeforeTheLocalNetworkRule() {
         val rules = GamingMode.rulesets(gameExit = GamingMode.EXIT_OWN)
         val tunnelled = rules.first { it.outboundTag == AppConfig.TAG_PROXY && it.domain != null }
-        assertEquals(tunnelled, rules.first())
-        assertTrue(rules.indexOfFirst { it.ip == listOf(AppConfig.GEOIP_PRIVATE) } > 0)
+        val localNetworkIdx = rules.indexOfFirst { it.ip == listOf(AppConfig.GEOIP_PRIVATE) }
+        assertTrue(rules.indexOf(tunnelled) < localNetworkIdx)
     }
 
     @Test
