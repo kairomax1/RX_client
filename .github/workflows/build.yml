@@ -246,14 +246,16 @@ jobs:
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
-      - name: Sign APKs (v1 JAR signing)
+      - name: Sign APKs (v1+v2+v3)
         env:
           STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # v1-only JAR signing. targetSdk is 29 so v1-only is accepted.
-          # No manifest binary patching.
+          # Broad compatibility: jarsigner provides v1 (JAR) for devices/installers
+          # that require it; apksigner adds v2+v3. targetSdk is 29 so v1-only was
+          # previously accepted, but some devices reject install/update without v2+.
+          # Order: jarsigner (v1) -> zipalign -> apksigner add v2/v3.
           set -euo pipefail
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
@@ -274,13 +276,24 @@ jobs:
               exit 1
             }
             mv "$apk.aligned" "$apk"
+            "$APKSIGNER" sign \
+              --v1-signing-enabled false \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --ks "$KEYSTORE_PATH" \
+              --ks-pass "pass:$STORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "pass:$KEY_PASSWORD" \
+              "$apk"
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
             echo "$VERIFY" | head -20
-            echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
-              DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
-              echo "::error::$apk missing v1: $DETAIL"
-              exit 1
-            }
+            for scheme in "v1 scheme (JAR signing): true" "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
+              echo "$VERIFY" | grep -q "$scheme" || {
+                DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
+                echo "::error::$apk missing $scheme: $DETAIL"
+                exit 1
+              }
+            done
           done
 
       - name: Verify signing certificate
@@ -361,12 +374,14 @@ jobs:
           SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
-          # v1-only signing is used for broad install compatibility (targetSdk 29).
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
-            | grep -qE "Verified using v1 scheme \(JAR signing\).*: true" || {
-              echo "::error::$SAMPLE missing v1 signature"
+          # v1+v2+v3 for broad install/update compatibility across Android versions.
+          VERIFY_ALL=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1)
+          for scheme in "v1 scheme (JAR signing): true" "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
+            echo "$VERIFY_ALL" | grep -q "$scheme" || {
+              echo "::error::$SAMPLE missing $scheme"
               exit 1
             }
+          done
           # Compare against released v1.0.1 to confirm identical signing key and packaging shape.
           if curl -fsSL "https://github.com/kairomax1/RX_client/releases/download/v1.0.1/RXVPN_1.0.1_arm64-v8a.apk" -o "$RUNNER_TEMP/v101.apk"; then
             V101_SIG=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/v101.apk" 2>&1 \
