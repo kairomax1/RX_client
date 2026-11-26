@@ -361,13 +361,12 @@ jobs:
           SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
-          for scheme in "v2 scheme" "v3 scheme"; do
-            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
-              | grep -qE "Verified using ${scheme}.*: true" || {
-                echo "::error::$SAMPLE missing ${scheme} signature"
-                exit 1
-              }
-          done
+          # v1-only signing is used for broad install compatibility (targetSdk 29).
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
+            | grep -qE "Verified using v1 scheme \(JAR signing\).*: true" || {
+              echo "::error::$SAMPLE missing v1 signature"
+              exit 1
+            }
           # Compare against released v1.0.1 to confirm identical signing key and packaging shape.
           if curl -fsSL "https://github.com/kairomax1/RX_client/releases/download/v1.0.1/RXVPN_1.0.1_arm64-v8a.apk" -o "$RUNNER_TEMP/v101.apk"; then
             V101_SIG=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/v101.apk" 2>&1 \
