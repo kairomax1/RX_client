@@ -199,6 +199,7 @@ data class V2rayConfig(
             data class SockoptBean(
                 var TcpNoDelay: Boolean? = null,
                 var tcpKeepAliveIdle: Int? = null,
+                var tcpKeepAliveInterval: Int? = null,
                 var tcpFastOpen: Boolean? = null,
                 var tproxy: String? = null,
                 var mark: Int? = null,

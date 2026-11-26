@@ -224,8 +224,8 @@ object CoreConfigManager {
                 ?: JsonObject().also { outbound.add("streamSettings", it) }
             val sockopt = streamSettings.get("sockopt")?.takeIf { it.isJsonObject }?.asJsonObject
                 ?: JsonObject().also { streamSettings.add("sockopt", it) }
-            if (!sockopt.has("tcpKeepAliveIdle")) sockopt.addProperty("tcpKeepAliveIdle", 100)
-            if (!sockopt.has("tcpKeepAliveInterval")) sockopt.addProperty("tcpKeepAliveInterval", 30)
+            if (!sockopt.has("tcpKeepAliveIdle")) sockopt.addProperty("tcpKeepAliveIdle", 30)
+            if (!sockopt.has("tcpKeepAliveInterval")) sockopt.addProperty("tcpKeepAliveInterval", 15)
             if (!sockopt.has("TcpNoDelay")) sockopt.addProperty("TcpNoDelay", true)
 
             // Mux for supported protocols

@@ -36,9 +36,9 @@ import kotlin.concurrent.thread
  */
 object FirefoxVpnRelay {
 
-    private const val CONNECT_TIMEOUT_MILLIS = 15_000
-    private const val PROBE_TIMEOUT_MILLIS = 6_000
-    private const val PROBE_BUDGET_MILLIS = 9_000
+    private const val CONNECT_TIMEOUT_MILLIS = 20_000
+    private const val PROBE_TIMEOUT_MILLIS = 8_000
+    private const val PROBE_BUDGET_MILLIS = 12_000
     private const val PROBE_TARGET = "www.gstatic.com:443"
     private const val FIREFOX_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
@@ -547,6 +547,7 @@ object FirefoxVpnRelay {
             // windows, so the phone side is never what the tunnel waits for.
             runCatching {
                 client.tcpNoDelay = true
+                client.keepAlive = true
                 client.receiveBufferSize = SOCKET_BUFFER_BYTES
                 client.sendBufferSize = SOCKET_BUFFER_BYTES
             }
@@ -799,6 +800,7 @@ object FirefoxVpnRelay {
             val address = InetSocketAddress(host, port)
             val raw = Socket()
             raw.tcpNoDelay = true
+            raw.keepAlive = true
             raw.receiveBufferSize = SOCKET_BUFFER_BYTES
             raw.sendBufferSize = SOCKET_BUFFER_BYTES
             raw.connect(address, timeoutMillis)

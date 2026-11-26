@@ -53,20 +53,22 @@ import java.net.InetSocketAddress
 object CoreServiceManager {
 
     /** How often the tunnel is asked, quietly, whether it still carries anything. */
-    private const val WATCH_EVERY_MILLIS = 45_000L
+    private const val WATCH_EVERY_MILLIS = 60_000L
 
     /**
      * How many empty answers in a row are answered by taking another config.
      *
-     * Three, not two: a phone that loses its signal for a moment, or a network
-     * that is merely slow, must not be answered by tearing the tunnel down.
+     * A phone that loses its signal for a moment, or a network that is merely
+     * slow, must not be answered by tearing the tunnel down. The threshold is
+     * deliberately tolerant; a single in-place reload is attempted before moving.
      *
      * A question the phone could not ask at all — because the phone itself has
      * no connection, or because the tunnel was being rebuilt — is not counted:
      * it says nothing about the config, and a config was being thrown away for
      * the state of the phone.
      */
-    private const val WATCH_MISSES_BEFORE_MOVING = 3
+    private const val WATCH_MISSES_BEFORE_RELOAD = 3
+    private const val WATCH_MISSES_BEFORE_MOVING = 5
 
     /**
      * The addresses the watch asks through the tunnel. Any one of them
@@ -313,7 +315,7 @@ object CoreServiceManager {
                 }
                 if (verdict == Verdict.Unreachable) continue
                 misses++
-                if (misses == 2) {
+                if (misses == WATCH_MISSES_BEFORE_RELOAD) {
                     // Try one quiet in-place recovery before failing over or dropping:
                     // for WireGuard, escalate MTU/noise anti-DPI if carrier started dropping data.
                     if (currentConfig?.configType == EConfigType.WIREGUARD) {
@@ -322,6 +324,7 @@ object CoreServiceManager {
                             AppLog.info(AppLog.Section.Connection, "WireGuard tunnel stalled; stepping up to ${nextWg.key}")
                         }
                     }
+                    AppLog.info(AppLog.Section.Connection, "Tunnel silent for $misses checks; trying in-place core reload")
                     reloadCore()
                     continue
                 }
@@ -466,7 +469,16 @@ object CoreServiceManager {
         networkMonitor = NetworkMonitor(
             connectivity = connectivity,
             onUnderlyingNetworksChanged = { networks -> serviceControl?.get()?.setUnderlyingNetworks(networks) },
-            onHandover = { reloadCore() },
+            onHandover = {
+                val guid = MmkvManager.getSelectServer().orEmpty()
+                val cfg = MmkvManager.decodeServerConfig(guid)
+                val isLocalRelayProfile = guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(cfg)
+                if (isLocalRelayProfile) {
+                    LogUtil.i(AppConfig.TAG, "Network handover: local relay profile, skipping core reload")
+                } else {
+                    reloadCore()
+                }
+            },
         ).also { it.register() }
     }
 

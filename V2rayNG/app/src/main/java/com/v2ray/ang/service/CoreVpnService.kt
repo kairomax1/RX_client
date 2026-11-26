@@ -199,7 +199,8 @@ class CoreVpnService : VpnService(), ServiceControl {
      */
     private fun configureNetworkSettings(builder: Builder) {
         val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
-        val bypassLan = SettingsManager.routingRulesetsBypassLan()
+        val gamingConfigExit = GamingMode.isEnabled() && GamingMode.gameExit() == GamingMode.EXIT_CONFIG
+        val bypassLan = if (gamingConfigExit) false else SettingsManager.routingRulesetsBypassLan()
 
         // Configure IPv4 settings
         builder.setMtu(SettingsManager.getVpnMtu())
@@ -215,39 +216,30 @@ class CoreVpnService : VpnService(), ServiceControl {
             builder.addRoute("0.0.0.0", 0)
         }
 
-        // Configure IPv6 if enabled
-        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true) {
+        // Configure IPv6 if enabled, or force-capture in gaming mode to prevent leaks.
+        val ipv6Enabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true
+        if (ipv6Enabled || GamingMode.isEnabled()) {
             builder.addAddress(vpnConfig.ipv6Client, 126)
-            if (bypassLan) {
+            if (bypassLan && ipv6Enabled && !gamingConfigExit) {
                 builder.addRoute("2000::", 3) // Currently only 1/8 of total IPv6 is in use
                 builder.addRoute("fc00::", 18) // Xray-core default FakeIPv6 Pool
             } else {
                 builder.addRoute("::", 0)
             }
-        } else if (GamingMode.isEnabled()) {
-            // A leak, closed.
-            //
-            // With IPv6 switched off in the settings, the tunnel had no IPv6 route
-            // at all — so the phone's own IPv6 line stayed outside it and carried
-            // anything the phone asked for over version 6. A filtered site that
-            // resolves to an IPv6 address therefore went out on the owner's own
-            // address while IPv4 went through the config: the address the site saw
-            // was the owner's, which is exactly what gaming mode promises never
-            // happens. In this mode the family is claimed by the tunnel instead,
-            // discarded there rather than sent out anywhere, so nothing leaves on
-            // version 6 at all. Whatever the phone's line allowed, it now cannot.
-            builder.addAddress(vpnConfig.ipv6Client, 126)
-            builder.addRoute("::", 0)
         }
 
-        // Configure DNS servers
-        //if (MmkvManager.decodeSettingsBool(AppConfig.PREF_LOCAL_DNS_ENABLED) == true) {
-        //  builder.addDnsServer(PRIVATE_VLAN4_ROUTER)
-        //} else {
-        SettingsManager.getVpnDnsServers().forEach {
-            if (Utils.isPureIpAddress(it)) {
-                builder.addDnsServer(it)
-            }
+        // Configure DNS servers. In strict gaming EXIT_CONFIG mode, avoid domestic
+        // resolvers so DNS cannot leak to the local/ISP path.
+        val dnsServers = SettingsManager.getVpnDnsServers().filter { dns ->
+            Utils.isPureIpAddress(dns) && (!gamingConfigExit || !GamingMode.isDirectResolver(dns))
+        }.ifEmpty {
+            SettingsManager.getVpnDnsServers().filter { Utils.isPureIpAddress(it) }
+        }
+        dnsServers.forEach { builder.addDnsServer(it) }
+
+        if (gamingConfigExit && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Block connections that don't go through VPN while the tunnel is up.
+            builder.setBlocking(true)
         }
 
         //builder.setSession(V2RayServiceManager.getRunningServerName())
@@ -280,6 +272,17 @@ class CoreVpnService : VpnService(), ServiceControl {
      */
     private fun configurePerAppProxy(builder: Builder) {
         val selfPackageName = BuildConfig.APPLICATION_ID
+        val strictGamingTunnel = GamingMode.isEnabled() && GamingMode.gameExit() == GamingMode.EXIT_CONFIG
+
+        // Strict gaming tunnel must not leak via per-app bypass/allow rules.
+        if (strictGamingTunnel) {
+            try {
+                builder.addDisallowedApplication(selfPackageName)
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to disallow self in strict gaming mode", e)
+            }
+            return
+        }
 
         // If per-app proxy is not enabled, disallow the VPN service's own package and return
         if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PER_APP_PROXY) == false) {

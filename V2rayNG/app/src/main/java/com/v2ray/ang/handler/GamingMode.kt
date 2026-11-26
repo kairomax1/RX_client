@@ -81,6 +81,9 @@ object GamingMode {
      */
     val DIRECT_RESOLVERS = listOf("178.22.122.100", "185.51.200.2")
 
+    /** True for resolvers that answer from inside the country and must not be used in strict tunnel mode. */
+    fun isDirectResolver(dns: String): Boolean = DIRECT_RESOLVERS.any { it.equals(dns.trim(), ignoreCase = true) }
+
     fun isEnabled(): Boolean =
         RemoteControl.isFeatureEnabled { it.gamingMode } &&
             MmkvManager.decodeSettingsBool(PREF_ENABLED, false)

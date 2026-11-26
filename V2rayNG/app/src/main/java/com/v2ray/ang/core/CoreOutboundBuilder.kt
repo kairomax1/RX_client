@@ -91,6 +91,7 @@ object CoreOutboundBuilder {
                 val sockopt = outbound.ensureSockopt()
                 if (sockopt.TcpNoDelay == null) sockopt.TcpNoDelay = true
                 if (sockopt.tcpKeepAliveIdle == null) sockopt.tcpKeepAliveIdle = 30
+                if (sockopt.tcpKeepAliveInterval == null) sockopt.tcpKeepAliveInterval = 15
             }
 
         } catch (e: Exception) {
