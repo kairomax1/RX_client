@@ -12,7 +12,7 @@ android {
     defaultConfig {
         applicationId = "com.mobix.vpn"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 29
         versionCode = 5
         versionName = "1.2.1"
 
