@@ -204,7 +204,8 @@ jobs:
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
             echo "$VERIFY" | head -40
             echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
-              echo "::error::$apk missing v1: $(echo "$VERIFY" | grep 'v1 scheme' | head -1)"
+              DETAIL=$(echo "$VERIFY" | head -10 | tr '\n' ' ' | sed 's/"/'\"'/g')
+              echo "::error::$apk missing v1: $DETAIL"
               exit 1
             }
           done
