@@ -252,10 +252,10 @@ jobs:
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # Broad compatibility: jarsigner provides v1 (JAR) for devices/installers
-          # that require it; apksigner adds v2+v3. targetSdk is 29 so v1-only was
-          # previously accepted, but some devices reject install/update without v2+.
-          # Order: jarsigner (v1) -> zipalign -> apksigner add v2/v3.
+          # Broad install/update compatibility: sign with v1+v2+v3.
+          # apksigner skips v1 when manifest minSdk>=24; override min-sdk to 21 so
+          # v1 is included while keeping v2/v3 for modern Android.
+          # Order for apksigner: zipalign first, then sign.
           set -euo pipefail
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
@@ -264,20 +264,15 @@ jobs:
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
             echo "== sign $apk"
             zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' 'META-INF/*.MF' 2>/dev/null || true
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore "$KEYSTORE_PATH" \
-              -storepass "$STORE_PASSWORD" \
-              -keypass "$KEY_PASSWORD" \
-              -storetype PKCS12 \
-              "$apk" "$KEY_ALIAS" 2>&1 | tail -5
-            ZA_OUT=$("$ZIPALIGN" -f 4 "$apk" "$apk.aligned" 2>&1) || {
+            ZA_OUT=$("$ZIPALIGN" -f -p 4 "$apk" "$apk.aligned" 2>&1) || {
               echo "$ZA_OUT"
               echo "::error::zipalign failed for $apk: ${ZA_OUT//$'\n'/ }"
               exit 1
             }
             mv "$apk.aligned" "$apk"
             "$APKSIGNER" sign \
-              --v1-signing-enabled false \
+              --min-sdk-version 21 \
+              --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
               --ks "$KEYSTORE_PATH" \
