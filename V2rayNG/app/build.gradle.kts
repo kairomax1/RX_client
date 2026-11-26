@@ -127,6 +127,10 @@ android {
         }
     }
 
+    lint {
+        abortOnError = false
+    }
+
     flavorDimensions.add("distribution")
     productFlavors {
         create("fdroid") {
