@@ -736,7 +736,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         // The relay would answer on loopback even with the core down, so the
         // core itself is waited for: without it the phone's own traffic never
         // reaches the tunnel and nothing opens in any app.
-        if (!waitForCore()) {
+        if (!waitForCore(20_000)) {
             AppLog.error(
                 AppLog.Section.Connection,
                 "Firefox VPN: the core never started, so no traffic reaches the tunnel"
@@ -746,7 +746,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             return null
         }
 
-        if (!FirefoxVpnCheck.waitUntilCarries(info.localPort, 15_000)) {
+        if (!FirefoxVpnCheck.waitUntilCarries(info.localPort, 25_000)) {
             AppLog.error(
                 AppLog.Section.Connection,
                 "Firefox VPN: ${info.countryName} was announced but carried nothing; moving on"
@@ -769,6 +769,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         monitor?.cancel()
         monitor = viewModelScope.launch {
             var missed = 0
+            var stableChecks = 0
             while (isActive) {
                 delay(25_000)
                 // Both halves are watched: the core carrying the phone's
@@ -779,8 +780,16 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 _state.update { it.copy(tested = ok) }
                 if (ok) {
                     missed = 0
+                    stableChecks++
+                    // After sustained stability, reset reconnect budget so transient
+                    // drops hours apart don't exhaust recovery.
+                    if (stableChecks >= 3 && reconnects > 0) {
+                        reconnects = 0
+                        AppLog.info(AppLog.Section.Connection, "Firefox VPN: tunnel stable, reconnect budget reset")
+                    }
                     continue
                 }
+                stableChecks = 0
                 missed++
                 if (missed < 2) continue
                 AppLog.error(
@@ -789,9 +798,9 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 stopTunnel()
                 _state.update { it.copy(connectionInfo = null, tested = false) }
-                if (reconnects < 2) {
+                if (reconnects < 4) {
                     reconnects++
-                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: reconnecting on its own")
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: reconnecting on its own ($reconnects/4)")
                     connect()
                 } else {
                     _state.update { it.copy(error = "The tunnel kept dropping; try another country") }

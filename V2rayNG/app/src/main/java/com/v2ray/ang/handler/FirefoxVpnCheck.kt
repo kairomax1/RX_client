@@ -18,32 +18,40 @@ import java.util.concurrent.TimeUnit
  */
 object FirefoxVpnCheck {
 
-    /** A page that answers 204 and nothing else: no body, no cache, no ads. */
-    private const val CHECK_URL = "https://www.gstatic.com/generate_204"
+    /** Lightweight pages used to verify that the tunnel really carries traffic. */
+    private val CHECK_URLS = listOf(
+        "https://www.gstatic.com/generate_204",
+        "https://cp.cloudflare.com/generate_204",
+        "https://www.apple.com/library/test/success.html",
+    )
 
     private val base = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .build()
 
     /** True when a real answer came back through the relay on [localPort]. */
     fun through(localPort: Int): Boolean {
         if (localPort <= 0) return false
-        return try {
-            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", localPort))
-            val client = base.newBuilder().proxy(proxy).build()
-            val request = Request.Builder()
-                .url(CHECK_URL)
-                .header("Connection", "close")
-                .header("User-Agent", "RXVPN/1.0")
-                .build()
-            client.newCall(request).execute().use { response ->
-                response.code in 200..399
+        val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", localPort))
+        val client = base.newBuilder().proxy(proxy).build()
+        for (url in CHECK_URLS) {
+            val ok = try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Connection", "close")
+                    .header("User-Agent", "RXVPN/1.0")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    response.code in 200..399
+                }
+            } catch (_: Exception) {
+                false
             }
-        } catch (_: Exception) {
-            false
+            if (ok) return true
         }
+        return false
     }
 
     /**

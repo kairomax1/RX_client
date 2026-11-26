@@ -765,9 +765,8 @@ object FirefoxVpnRelay {
                 "Firefox VPN: the proxy refused $count tunnels ($reason)"
             )
         }
-        // Three refusals in a row mean this address is not the one, not that
-        // the page asked for something odd.
-        if (count >= 3) {
+        // Two refusals in a row mean this address is likely bad; rotate faster.
+        if (count >= 2) {
             failures.set(0)
             rotate()
         }
