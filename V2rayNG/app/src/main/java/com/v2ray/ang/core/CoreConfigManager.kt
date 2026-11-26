@@ -148,6 +148,7 @@ object CoreConfigManager {
             }
         }
 
+        injectCustomConfigOptimizations(json)
         if (!needTun()) {
             return JsonUtil.toJsonPretty(json)?.let { ConfigResult(true, configContext.guid, it) } ?: result
         }
@@ -189,6 +190,78 @@ object CoreConfigManager {
         }
 
         return JsonUtil.toJsonPretty(json)?.let { ConfigResult(true, configContext.guid, it) } ?: result
+    }
+
+    /**
+     * Injects mux/fragment/sockopt keepalive into custom-config proxy outbounds so
+     * user settings take effect even on custom JSON configs.
+     */
+    private fun injectCustomConfigOptimizations(json: JsonObject) {
+        val outbounds = json.get("outbounds")?.takeIf { it.isJsonArray }?.asJsonArray ?: return
+        val muxEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false)
+            && Tuning.isMuxAllowed()
+        val muxConcurrency = MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_CONCURRENCY, "8")
+            ?.toIntOrNull()?.coerceAtLeast(-1) ?: 8
+        val muxXudp = MmkvManager.decodeSettingsString(
+            AppConfig.PREF_MUX_XUDP_CONCURRENCY,
+            AppConfig.DEFAULT_MUX_XUDP_CONCURRENCY
+        )?.toIntOrNull()?.coerceAtLeast(-1) ?: 16
+        val muxXudpQuic = MmkvManager.decodeSettingsString(AppConfig.PREF_MUX_XUDP_QUIC, "reject") ?: "reject"
+        val fragmentEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false)
+            && Tuning.isFragmentAllowed()
+        val fragPackets = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_PACKETS) ?: "tlshello"
+        val fragLength = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_LENGTH) ?: "50-100"
+        val fragInterval = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_INTERVAL) ?: "10-20"
+        val fragMaxSplit = MmkvManager.decodeSettingsString(AppConfig.PREF_FRAGMENT_MAXSPLIT) ?: "10"
+
+        for (elem in outbounds) {
+            val outbound = elem.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+            val protocol = outbound.get("protocol")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase().orEmpty()
+            if (protocol in arrayOf("freedom", "blackhole", "dns", "loopback")) continue
+
+            // Sockopt keepalive for stability
+            val streamSettings = outbound.get("streamSettings")?.takeIf { it.isJsonObject }?.asJsonObject
+                ?: JsonObject().also { outbound.add("streamSettings", it) }
+            val sockopt = streamSettings.get("sockopt")?.takeIf { it.isJsonObject }?.asJsonObject
+                ?: JsonObject().also { streamSettings.add("sockopt", it) }
+            if (!sockopt.has("tcpKeepAliveIdle")) sockopt.addProperty("tcpKeepAliveIdle", 100)
+            if (!sockopt.has("tcpKeepAliveInterval")) sockopt.addProperty("tcpKeepAliveInterval", 30)
+            if (!sockopt.has("TcpNoDelay")) sockopt.addProperty("TcpNoDelay", true)
+
+            // Mux for supported protocols
+            val muxCapable = protocol in arrayOf("vmess", "vless", "trojan", "shadowsocks", "http", "socks")
+            val net = streamSettings.get("network")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase() ?: "tcp"
+            if (muxCapable && net != "xhttp") {
+                val muxObj = outbound.get("mux")?.takeIf { it.isJsonObject }?.asJsonObject
+                    ?: JsonObject().also { outbound.add("mux", it) }
+                muxObj.addProperty("enabled", muxEnabled)
+                muxObj.addProperty("concurrency", if (muxEnabled) muxConcurrency else -1)
+                muxObj.addProperty("xudpConcurrency", if (muxEnabled) muxXudp else -1)
+                muxObj.addProperty("xudpProxyUDP443", muxXudpQuic)
+            }
+
+            // Fragment for TLS/REALITY on TCP-like transports
+            val security = streamSettings.get("security")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase().orEmpty()
+            val tcpLike = net in arrayOf("tcp", "raw", "ws", "httpupgrade", "grpc", "http", "h2")
+            if (fragmentEnabled && (security == "tls" || security == "reality") && tcpLike) {
+                val finalmask = streamSettings.get("finalmask")?.takeIf { it.isJsonObject }?.asJsonObject
+                    ?: JsonObject().also { streamSettings.add("finalmask", it) }
+                val tcpArr = finalmask.get("tcp")?.takeIf { it.isJsonArray }?.asJsonArray ?: JsonArray()
+                val hasFragment = tcpArr.any { it.isJsonObject && it.asJsonObject.get("type")?.asString == "fragment" }
+                if (!hasFragment) {
+                    val frag = JsonObject()
+                    frag.addProperty("type", "fragment")
+                    val settings = JsonObject()
+                    settings.addProperty("packets", fragPackets)
+                    settings.addProperty("length", fragLength)
+                    settings.addProperty("interval", fragInterval)
+                    settings.addProperty("maxSplit", fragMaxSplit)
+                    frag.add("settings", settings)
+                    tcpArr.add(frag)
+                }
+                finalmask.add("tcp", tcpArr)
+            }
+        }
     }
 
     /**
@@ -954,15 +1027,16 @@ object CoreConfigManager {
         v2rayConfig: V2rayConfig,
         policyGroupBalancerTags: Map<String, String>,
     ) {
+        val gamingConfigExit = GamingMode.isEnabled() && GamingMode.gameExit() == GamingMode.EXIT_CONFIG
         val servers = ArrayList<Any>()
         val remoteDns = SettingsManager.getRemoteDnsServers()
-        val domesticDns = SettingsManager.getDomesticDnsServers(configContext.context)
+        val domesticDns = if (gamingConfigExit) emptyList() else SettingsManager.getDomesticDnsServers(configContext.context)
 
         remoteDns.forEach { servers.add(it) }
 
         val hosts = buildDnsHostsFromRoutingRules(configContext)
-        val cnDomesticDnsTags = buildDnsCnModeFromRoutingRules(configContext, servers, domesticDns)
-        val domesticDnsTags = buildDnsFromRoutingRules(
+        val cnDomesticDnsTags = if (gamingConfigExit) mutableListOf() else buildDnsCnModeFromRoutingRules(configContext, servers, domesticDns)
+        val domesticDnsTags = if (gamingConfigExit) mutableListOf() else buildDnsFromRoutingRules(
             configContext = configContext,
             servers = servers,
             remoteDns = remoteDns,

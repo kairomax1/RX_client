@@ -117,17 +117,30 @@ object TuningRunner {
             }
 
             if (bestMillis == Long.MAX_VALUE) {
-                Tuning.forget(guid)
-                Tuning.markUnbypassable(guid)
-                MmkvManager.encodeServerTestDelayMillis(guid, -1L)
-                Tuning.apply(Tuning.PLAIN)
-                LauncherManager.stopService(context)
-                AppLog.error(
-                    AppLog.Section.Connection,
-                    "Tuning: could not bypass config with fragment or mux; stopping",
+                // On very limited/slow internet probes may time out; apply a conservative
+                // best-guess instead of giving up, so fragment/mux still take effect.
+                val fallback = Tuning.networkPreset(
+                    isCellular = false,
+                    probeLatencyMs = null,
+                    mode = mode,
                 )
-                onPhase(Phase.Failed)
-                return@withContext Outcome(Tuning.PLAIN, bypassed = false)
+                val fallbackSanitized = Tuning.sanitizeForCurrentMode(fallback, mode)
+                val chosen = if (fallbackSanitized != Tuning.PLAIN) fallbackSanitized
+                else candidates.firstOrNull { it != Tuning.PLAIN } ?: Tuning.PLAIN
+                Tuning.apply(chosen)
+                if (chosen != Tuning.PLAIN) {
+                    Tuning.remember(guid, chosen, mode)
+                } else {
+                    Tuning.forget(guid)
+                    Tuning.markUnbypassable(guid)
+                }
+                MmkvManager.encodeServerTestDelayMillis(guid, -1L)
+                AppLog.info(
+                    AppLog.Section.Connection,
+                    "Tuning: probes timed out on slow network; applying fallback ${chosen.key}",
+                )
+                onPhase(if (chosen != Tuning.PLAIN) Phase.Done else Phase.Failed)
+                return@withContext Outcome(chosen, bypassed = chosen != Tuning.PLAIN)
             }
 
             Tuning.apply(best)

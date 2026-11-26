@@ -438,12 +438,13 @@ object Tuning {
      * over [repeats]; null when the tunnel carried nothing, which counts as a
      * failure rather than as a slow result.
      */
-    fun measure(repeats: Int = 2, timeoutMs: Int = 4000): Long? {
+    fun measure(repeats: Int = 2, timeoutMs: Int = 8000): Long? {
         val port = SettingsManager.getSocksPort()
         if (port == 0) return null
         val fallbackUrl = SettingsManager.getDelayTestUrl()
         val urls = listOf(PROBE_URL, fallbackUrl).distinct()
         var total = 0L
+        var successes = 0
         repeat(repeats) {
             val start = System.currentTimeMillis()
             // SOCKS, not HTTP: the core of this build opens no other door, and a
@@ -453,9 +454,13 @@ object Tuning {
                     UrlContentRequest(url = url, timeout = timeoutMs, socksPort = port)
                 ) != null
             }
-            if (!answered) return null
-            total += System.currentTimeMillis() - start
+            if (answered) {
+                total += System.currentTimeMillis() - start
+                successes++
+            }
         }
-        return total / repeats
+        // On very limited/slow internet, require at least one successful probe rather than
+        // failing the whole measurement when one repeat times out.
+        return if (successes > 0) total / successes else null
     }
 }
