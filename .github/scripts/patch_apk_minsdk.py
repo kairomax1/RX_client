@@ -26,14 +26,33 @@ with zipfile.ZipFile(apk, 'r') as zin, zipfile.ZipFile(tmp, 'w') as zout:
                 j = b.find(NEEDLE, i)
                 if j < 0:
                     break
-                # typed value at j+12: size(2)=0800, res0=00, type, data(4)
-                if j + 20 <= len(b) and b[j+12:j+14] == b'\x08\x00':
-                    vtype = b[j+15]
-                    vdata = int.from_bytes(b[j+16:j+20], 'little')
-                    if vtype in (0x10, 0x11):  # int_dec or int_hex
-                        found_any.append((j, vtype, vdata))
-                        b[j+16:j+20] = NEW_VAL
-                        patched += 1
+                # AXML ResXMLTree_attribute: ns(4) name(4) rawValue(4) typedValue(8)
+                # name at j, typedValue at j+8: size(2) res0(1) type(1) data(4)
+                # Some dumps show different layout; scan a small window for int 24/23.
+                window = b[j:j+24]
+                found_any.append(('name@'+str(j), window.hex()))
+                patched_here = False
+                for off in range(4, 20):
+                    k = j + off
+                    if k + 8 <= len(b) and b[k] == 0x08 and b[k+1] == 0x00 and b[k+2] == 0x00 and b[k+3] in (0x10, 0x11):
+                        vdata = int.from_bytes(b[k+4:k+8], 'little')
+                        if vdata in (23, 24):
+                            b[k+4:k+8] = NEW_VAL
+                            patched += 1
+                            patched_here = True
+                            found_any.append(('patched', off, vdata))
+                            break
+                if not patched_here:
+                    # fallback: scan wider window around the name for an int 24 typed value
+                    for k in range(max(0, j-20), min(j+120, len(b)-8)):
+                        if b[k] == 0x08 and b[k+1] == 0x00 and b[k+2] == 0x00 and b[k+3] in (0x10, 0x11):
+                            vdata = int.from_bytes(b[k+4:k+8], 'little')
+                            if vdata == 24:
+                                b[k+4:k+8] = NEW_VAL
+                                patched += 1
+                                found_any.append(('fallback', k-j, vdata))
+                                patched_here = True
+                                break
                 i = j + 4
             if patched == 0:
                 # debug: dump any near-misses
