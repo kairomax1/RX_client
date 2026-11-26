@@ -163,71 +163,48 @@ jobs:
           cd V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           chmod +x gradlew
-          # The debug variant is signed with the same key as the release one (see build.gradle.kts),
-          # so no file from this run can force a tester to uninstall first.
-          ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
-            -Prx.storeFile="$KEYSTORE_PATH" \
-            -Prx.storePassword="$STORE_PASSWORD" \
-            -Prx.keyAlias="$KEY_ALIAS" \
-            -Prx.keyPassword="$KEY_PASSWORD"
+          # Build unsigned; we sign explicitly below with jarsigner (v1) + zipalign to guarantee
+          # v1 (JAR) signature, which some installers require to avoid "package appears to be invalid".
+          ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
-      - name: Re-sign APKs (v1+v2+v3, defensive)
+      - name: Sign APKs (v1 JAR signing)
         env:
           STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # AGP signs the APKs, but we re-sign explicitly to guarantee v1 (JAR) + v2 + v3.
-          # Some installers reject packages missing v1 as "package appears to be invalid".
-          # apksigner skips v1 by default when minSdk>=24; --min-sdk-version 23 forces it on.
+          # Sign with jarsigner (v1) + zipalign. v1-only is universally accepted and avoids
+          # the "package appears to be invalid" caused by missing v1 / broken re-signing.
+          # Do NOT patch AndroidManifest.xml binary - that corrupted the app in a previous attempt.
           set -euo pipefail
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          APKSIGNER="$BUILD_TOOLS/apksigner"
           ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
-            echo "== re-sign $apk"
-            # Patch manifest minSdkVersion 24->23 in the APK so apksigner emits v1 (JAR) signing.
-            # apksigner refuses v1 when manifest minSdk>=24; v1 absence causes "package appears
-            # to be invalid" on some installers. We patch before signing, then sign.
-            PATCH_OUT=$(python3 "$GITHUB_WORKSPACE/.github/scripts/patch_apk_minsdk.py" "$apk" 23 2>&1) || {
-              echo "$PATCH_OUT"
-              echo "::error::patch failed for $apk: ${PATCH_OUT//$'\n'/ }"
-              exit 1
-            }
-            echo "$PATCH_OUT"
+            echo "== sign $apk"
+            # Strip any existing v1 signature files so jarsigner signs cleanly.
+            zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' 'META-INF/*.MF' 2>/dev/null || true
+            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass "$STORE_PASSWORD" \
+              -keypass "$KEY_PASSWORD" \
+              -storetype PKCS12 \
+              "$apk" "$KEY_ALIAS" 2>&1 | tail -5
             ZA_OUT=$("$ZIPALIGN" -f 4 "$apk" "$apk.aligned" 2>&1) || {
               echo "$ZA_OUT"
               echo "::error::zipalign failed for $apk: ${ZA_OUT//$'\n'/ }"
               exit 1
             }
             mv "$apk.aligned" "$apk"
-            SIGN_OUT=$("$APKSIGNER" sign \
-              --ks "$KEYSTORE_PATH" \
-              --ks-pass "env:STORE_PASSWORD" \
-              --ks-key-alias "$KEY_ALIAS" \
-              --key-pass "env:KEY_PASSWORD" \
-              --min-sdk-version 23 \
-              --v1-signing-enabled true \
-              --v2-signing-enabled true \
-              --v3-signing-enabled true \
-              "$apk" 2>&1) || {
-              echo "$SIGN_OUT"
-              echo "::error::apksigner sign failed for $apk: ${SIGN_OUT//$'\n'/ }"
-              exit 1
-            }
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
             echo "$VERIFY" | head -40
             echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
               echo "::error::$apk missing v1: $(echo "$VERIFY" | grep 'v1 scheme' | head -1)"
-              exit 1
-            }
-            echo "$VERIFY" | grep -q "v2 scheme (APK Signature Scheme v2): true" || {
-              echo "::error::$apk missing v2: $(echo "$VERIFY" | grep 'v2 scheme' | head -1)"
               exit 1
             }
           done
