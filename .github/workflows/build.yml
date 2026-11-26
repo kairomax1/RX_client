@@ -271,7 +271,6 @@ jobs:
             }
             mv "$apk.aligned" "$apk"
             "$APKSIGNER" sign \
-              --min-sdk-version 21 \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
@@ -282,7 +281,9 @@ jobs:
               "$apk"
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
             echo "$VERIFY" | head -20
-            for scheme in "v1 scheme (JAR signing): true" "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
+            # minSdk is 24 (Android 7.0+), which supports v2; v2+v3 are required.
+            # apksigner may skip v1 for minSdk>=24, which is acceptable.
+            for scheme in "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
               echo "$VERIFY" | grep -q "$scheme" || {
                 DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
                 echo "::error::$apk missing $scheme: $DETAIL"
@@ -369,9 +370,9 @@ jobs:
           SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
-          # v1+v2+v3 for broad install/update compatibility across Android versions.
+          # v2+v3 required. minSdk is 24 so v1 is not required for supported devices.
           VERIFY_ALL=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1)
-          for scheme in "v1 scheme (JAR signing): true" "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
+          for scheme in "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
             echo "$VERIFY_ALL" | grep -q "$scheme" || {
               echo "::error::$SAMPLE missing $scheme"
               exit 1
