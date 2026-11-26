@@ -53,7 +53,7 @@ import java.net.InetSocketAddress
 object CoreServiceManager {
 
     /** How often the tunnel is asked, quietly, whether it still carries anything. */
-    private const val WATCH_EVERY_MILLIS = 60_000L
+    private const val WATCH_EVERY_MILLIS = 90_000L
 
     /**
      * How many empty answers in a row are answered by taking another config.
@@ -67,8 +67,8 @@ object CoreServiceManager {
      * it says nothing about the config, and a config was being thrown away for
      * the state of the phone.
      */
-    private const val WATCH_MISSES_BEFORE_RELOAD = 3
-    private const val WATCH_MISSES_BEFORE_MOVING = 5
+    private const val WATCH_MISSES_BEFORE_RELOAD = 4
+    private const val WATCH_MISSES_BEFORE_MOVING = 7
 
     /**
      * The addresses the watch asks through the tunnel. Any one of them
@@ -106,6 +106,9 @@ object CoreServiceManager {
 
     @Volatile
     private var isReloading = false
+
+    @Volatile
+    private var lastReloadAtMillis: Long = 0L
 
     /** Tun descriptor the core was started with, null in the proxy only and root run modes. */
     private var currentVpnInterface: ParcelFileDescriptor? = null
@@ -476,7 +479,12 @@ object CoreServiceManager {
                 if (isLocalRelayProfile) {
                     LogUtil.i(AppConfig.TAG, "Network handover: local relay profile, skipping core reload")
                 } else {
-                    reloadCore()
+                    val now = System.currentTimeMillis()
+                    if (now - lastReloadAtMillis < 60_000L) {
+                        LogUtil.i(AppConfig.TAG, "Network handover: reload debounced")
+                    } else {
+                        reloadCore()
+                    }
                 }
             },
         ).also { it.register() }
@@ -500,6 +508,7 @@ object CoreServiceManager {
             val tunFd = currentVpnInterface
 
             isReloading = true
+            lastReloadAtMillis = System.currentTimeMillis()
             connectionTestScope.coroutineContext.cancelChildren()
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload start...")
 

@@ -39,7 +39,7 @@ android {
     defaultConfig {
         applicationId = "com.mobix.vpn"
         minSdk = 24
-        targetSdk = 29
+        targetSdk = 34
         // 4 was a mistake to freeze: a phone only updates an installed app when
         // the new file has a higher number, and every build this project shipped
         // carried the same one, so an installed copy could never be replaced. The

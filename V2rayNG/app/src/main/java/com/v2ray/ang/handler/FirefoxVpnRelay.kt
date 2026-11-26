@@ -45,7 +45,7 @@ object FirefoxVpnRelay {
     private const val MAX_HEADER_BYTES = 16 * 1024
 
     /** Bytes carried per read: a page-sized chunk, so a pump is not the limit. */
-    private const val PUMP_BUFFER_BYTES = 32 * 1024
+    private const val PUMP_BUFFER_BYTES = 64 * 1024
 
     /**
      * Sockets kept ready to the proxy, so opening a tunnel does not wait for a

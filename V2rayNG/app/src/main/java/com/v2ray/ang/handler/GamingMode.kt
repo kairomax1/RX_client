@@ -220,7 +220,16 @@ object GamingMode {
         // 1. Adverts and trackers. Never wanted, never fetched.
         //    (Added in front by `ordered`, so it is deliberately not repeated here.)
 
-        // 2. A name that is filtered, sanctioned or region-locked is answered
+        // 2. QUIC on UDP 443: blocked on many Iranian networks and often breaks
+        //    YouTube/Google. Drop it so clients fall back to TCP through the tunnel.
+        rules += RulesetItem(
+            remarks = "Gaming: QUIC on UDP 443 dropped so it falls back to TCP",
+            outboundTag = AppConfig.TAG_BLOCKED,
+            network = "udp",
+            port = "443",
+        )
+
+        // 3. A name that is filtered, sanctioned or region-locked is answered
         //    through the config before anything else is looked at. This is the
         //    rule that opens YouTube, Instagram, Telegram, Proton, the AI sites
         //    and every blocked game — by name, inside the tunnel, whatever the
@@ -423,6 +432,14 @@ object GamingMode {
                 domain = adverts,
             )
         }
+        // QUIC/HTTP3 over UDP 443 is often broken/blocked and makes YouTube fail to load.
+        // Drop it so clients fall back to TCP through the tunnel.
+        rules += RulesetItem(
+            remarks = "QUIC on UDP 443 dropped so it falls back to TCP",
+            outboundTag = AppConfig.TAG_BLOCKED,
+            network = "udp",
+            port = "443",
+        )
         // YouTube and the rest must never depend on which preset the owner chose, on a rule
         // of theirs that sends a whole TLD out directly, or on a geo list being downloaded:
         // the names are written here, in front.

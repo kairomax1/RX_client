@@ -686,9 +686,10 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 .thenBy { measured[it.code] ?: Int.MAX_VALUE }
                 .thenBy { it.name }
         ).map { it.code }
-        // A choice made by hand is honoured; the rest follow by delay.
+        // A choice made by hand is honoured: only try the chosen country, so the
+        // user never ends up in a different country than they selected.
         val first = if (pickedByHand && chosen != null) {
-            listOf(chosen) + ordered.filter { it != chosen }
+            listOf(chosen)
         } else {
             ordered
         }
