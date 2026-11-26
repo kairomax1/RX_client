@@ -52,7 +52,7 @@ jobs:
         with:
           log-accepted-android-sdk-licenses: false
           cmdline-tools-version: '14742923'
-          packages: "platforms;android-37.0 build-tools;37.0.0 build-tools;35.0.0 platform-tools"
+          packages: "platforms;android-37.0 build-tools;37.0.0 build-tools;35.0.0 build-tools;30.0.3 platform-tools"
 
       - name: Accept licenses and install NDK
         run: |
@@ -170,42 +170,50 @@ jobs:
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
-      - name: Sign APKs (v1 JAR signing)
+      - name: Sign APKs (v1+v2+v3)
         env:
           STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # Sign with jarsigner (v1) + zipalign. v1-only is universally accepted and avoids
-          # the "package appears to be invalid" caused by missing v1 / broken re-signing.
-          # Do NOT patch AndroidManifest.xml binary - that corrupted the app in a previous attempt.
+          # Sign with apksigner v1+v2+v3. targetSdk>=30 requires v2+; some installers
+          # reject missing v1 as "package appears to be invalid". No manifest patching.
           set -euo pipefail
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
             echo "== sign $apk"
-            # Strip any existing v1 signature files so jarsigner signs cleanly.
             zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' 'META-INF/*.MF' 2>/dev/null || true
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore "$KEYSTORE_PATH" \
-              -storepass "$STORE_PASSWORD" \
-              -keypass "$KEY_PASSWORD" \
-              -storetype PKCS12 \
-              "$apk" "$KEY_ALIAS" 2>&1 | tail -5
-            ZA_OUT=$("$ZIPALIGN" -f 4 "$apk" "$apk.aligned" 2>&1) || {
-              echo "$ZA_OUT"
-              echo "::error::zipalign failed for $apk: ${ZA_OUT//$'\n'/ }"
+            "$ZIPALIGN" -f 4 "$apk" "$apk.aligned"
+            mv "$apk.aligned" "$apk"
+            SIGN_OUT=$("$APKSIGNER" sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-pass "env:STORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "env:KEY_PASSWORD" \
+              --min-sdk-version 23 \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              "$apk" 2>&1) || {
+              echo "$SIGN_OUT"
+              echo "::error::apksigner sign failed for $apk: ${SIGN_OUT//$'\n'/ }"
               exit 1
             }
-            mv "$apk.aligned" "$apk"
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
             echo "$VERIFY" | head -40
             echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
-              DETAIL=$(echo "$VERIFY" | head -10 | tr '\n' ' ' | sed 's/"/'\"'/g')
+              DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
               echo "::error::$apk missing v1: $DETAIL"
+              exit 1
+            }
+            echo "$VERIFY" | grep -q "v2 scheme (APK Signature Scheme v2): true" || {
+              DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
+              echo "::error::$apk missing v2: $DETAIL"
               exit 1
             }
           done
@@ -218,7 +226,8 @@ jobs:
           # have to uninstall before installing this build.
           APK=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*arm64-v8a.apk | head -1)
           echo "Checking $APK"
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
           grep -qi "$EXPECTED_SHA256" "$RUNNER_TEMP/certs.txt" || {
@@ -241,7 +250,8 @@ jobs:
         run: |
           # Every fact that decides whether a phone accepts the package is printed as an
           # annotation, so a failed install can be diagnosed without downloading the APK.
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           for apk in *.apk; do
             "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
@@ -257,7 +267,8 @@ jobs:
         run: |
           # apksigner proves the signature; these prove the file is a readable, aligned APK and
           # give the tester a hash to compare against what actually landed on the phone.
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           for apk in *.apk; do
             echo "== $apk"
@@ -276,7 +287,8 @@ jobs:
           # These lines are copied into the release notes so the exact packaging of the shipped file
           # can be inspected later without downloading anything.
           set +e
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
+          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
           {
