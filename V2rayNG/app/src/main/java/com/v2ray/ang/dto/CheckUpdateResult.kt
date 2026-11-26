@@ -11,4 +11,6 @@ data class CheckUpdateResult(
     val downloadSize: Long = 0L,
     /** Published SHA-256 of that APK (lower-case hex), or null when the release has none. */
     val sha256: String? = null,
+    /** Sent with the download, when the release is one only this phone may read. */
+    val downloadHeaders: Map<String, String> = emptyMap(),
 )

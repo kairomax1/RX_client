@@ -50,6 +50,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
@@ -251,10 +253,16 @@ private fun ExitAddressText(ip: String?, country: String?) {
     val countryUnits = remember(countryText) { MainExitAddress.typingUnits(countryText) }
     val ipProgress = remember { Animatable(0f) }
     val countryProgress = remember { Animatable(0f) }
+    // The address is typed out the first time it appears. After that a new address
+    // simply takes the place of the one before it: a config whose exit address
+    // moves would otherwise begin from an empty line again and again, and reading
+    // it would take longer than the connection did.
+    var typedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(ipText, countryText, animate) {
-        if (!animate) {
+        if (!animate || typedOnce) {
             ipProgress.snapTo(ipUnits.size.toFloat())
             countryProgress.snapTo(countryUnits.size.toFloat())
+            typedOnce = true
             return@LaunchedEffect
         }
         ipProgress.snapTo(0f)
@@ -270,17 +278,24 @@ private fun ExitAddressText(ip: String?, country: String?) {
                 tween(MainExitAddress.typingMillis(countryUnits.size), easing = LinearEasing),
             )
         }
+        typedOnce = true
     }
-    // Handed on as a State and read only while drawing: the blink does not recompose the line.
-    val caret = rememberInfiniteTransition(label = "caret").animateFloat(
-        initialValue = 1f,
-        targetValue = 0.15f,
-        animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
-        label = "caretAlpha",
-    )
     val ink = rxLiveColor()
     val typingIp = ipProgress.value < ipUnits.size
     val typingCountry = !typingIp && countryUnits.isNotEmpty() && countryProgress.value < countryUnits.size
+    // Handed on as a State and read only while drawing: the blink does not recompose the
+    // line. The loop itself only runs while something is actually being typed, so the
+    // bottom bar stays still once the address has settled.
+    val caret = if (animate && (typingIp || typingCountry)) {
+        rememberInfiniteTransition(label = "caret").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.15f,
+            animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
+            label = "caretAlpha",
+        )
+    } else {
+        null
+    }
     // Addresses are Latin: keep the pair left to right inside a right-to-left status line.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -291,7 +306,7 @@ private fun ExitAddressText(ip: String?, country: String?) {
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
             )
-            if (animate && typingIp) TypingCaret(ink, caret)
+            if (caret != null && typingIp) TypingCaret(ink, caret)
             if (countryProgress.value > 0f || typingCountry) {
                 Text(
                     text = typedText(countryUnits, countryProgress.value, ink),
@@ -301,7 +316,7 @@ private fun ExitAddressText(ip: String?, country: String?) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 10.dp),
                 )
-                if (animate && typingCountry) TypingCaret(ink, caret)
+                if (caret != null && typingCountry) TypingCaret(ink, caret)
             }
         }
     }
@@ -435,19 +450,30 @@ private fun ConnectButton(
         )
     }
 
-    val infinite = rememberInfiniteTransition(label = "connect")
-    val stripeShift by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
-        label = "stripes",
-    )
-    val sheen by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
-        label = "sheen",
-    )
+    // The bottom bar is on screen in every state, so these loops must not run while the
+    // button is idle: an infinite transition redraws the layer every frame. Stripes only
+    // while connecting, the sheen only while connected; idle and failed stay static.
+    // Kept as States and read only inside drawWithContent, so they never recompose.
+    val stripeShift: State<Float>?
+    val sheen: State<Float>?
+    if (animate && (connecting || connected)) {
+        val infinite = rememberInfiniteTransition(label = "connect")
+        stripeShift = infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
+            label = "stripes",
+        )
+        sheen = infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
+            label = "sheen",
+        )
+    } else {
+        stripeShift = null
+        sheen = null
+    }
     val glow by animateFloatAsState(if (connected) 1f else 0f, tween(600), label = "glow")
     val red by animateFloatAsState(if (failed) 1f else 0f, tween(260), label = "red")
 
@@ -474,7 +500,7 @@ private fun ConnectButton(
                         val band = 14.dp.toPx()
                         val period = band * 2f
                         val slant = size.height / tan(Math.toRadians(70.0)).toFloat()
-                        var x = -period - slant + stripeShift * period
+                        var x = -period - slant + (stripeShift?.value ?: 0f) * period
                         while (x < size.width + slant) {
                             drawLine(
                                 color = Color.Black.copy(alpha = 0.10f),
@@ -484,10 +510,10 @@ private fun ConnectButton(
                             )
                             x += period
                         }
-                    } else if (!failed) {
+                    } else if (connected) {
                         // A band of light gliding across, most of the cycle off screen.
                         val travel = size.width * 2.6f
-                        val centre = -size.width * 0.8f + travel * sheen
+                        val centre = -size.width * 0.8f + travel * (sheen?.value ?: 0f)
                         drawRect(
                             Brush.linearGradient(
                                 colors = listOf(

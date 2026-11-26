@@ -10,6 +10,8 @@ import com.v2ray.ang.enums.NetworkType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.extension.nullIfBlank
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.GamingMode
+import com.v2ray.ang.handler.Tuning
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -44,7 +46,8 @@ object CoreOutboundBuilder {
     /** Applies global outbound options (mux, protocol-specific tweaks, etc.). */
     private fun updateOutboundWithGlobalSettings(outbound: OutboundBean): Boolean {
         try {
-            var muxEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false)
+            var muxEnabled = MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false) &&
+                Tuning.isMuxAllowed()
             val protocol = outbound.protocol
             if (protocol.equals(EConfigType.SHADOWSOCKS.name, true)
                 || protocol.equals(EConfigType.SOCKS.name, true)
@@ -58,6 +61,11 @@ object CoreOutboundBuilder {
             } else if (outbound.streamSettings?.network == NetworkType.XHTTP.type) {
                 muxEnabled = false
             }
+            // A game wants the packet it is sending now to leave now. Mux carries
+            // many streams over one connection and every one of them waits behind
+            // the others — which is how a file is fetched quickly and how a game
+            // is made to stutter.
+            if (GamingMode.isEnabled()) muxEnabled = false
 
             if (muxEnabled) {
                 outbound.mux?.enabled = true
@@ -72,23 +80,17 @@ object CoreOutboundBuilder {
                 outbound.mux?.concurrency = -1
             }
 
-            outbound.streamSettings?.let { streamSettings ->
-                val sockopt = streamSettings.sockopt
-                    ?: OutboundBean.StreamSettingsBean.SockoptBean().also { streamSettings.sockopt = it }
-                if (sockopt.tcpKeepAliveIdle == null) {
-                    sockopt.tcpKeepAliveIdle = 100
-                }
-                if (sockopt.TcpNoDelay == null) {
-                    sockopt.TcpNoDelay = true
-                }
-                if (sockopt.happyEyeballs == null) {
-                    sockopt.happyEyeballs = OutboundBean.StreamSettingsBean.HappyEyeballsBean(
-                        prioritizeIPv6 = false,
-                        maxConcurrentTry = 4,
-                        tryDelayMs = 250,
-                        interleave = 1
-                    )
-                }
+            if (protocol.equals(EConfigType.VMESS.name, true)
+                || protocol.equals(EConfigType.VLESS.name, true)
+                || protocol.equals(EConfigType.TROJAN.name, true)
+                || protocol.equals(EConfigType.SHADOWSOCKS.name, true)
+                || protocol.equals(EConfigType.SOCKS.name, true)
+                || protocol.equals(EConfigType.HTTP.name, true)
+                || protocol.equals(AppConfig.PROTOCOL_FREEDOM, true)
+            ) {
+                val sockopt = outbound.ensureSockopt()
+                if (sockopt.TcpNoDelay == null) sockopt.TcpNoDelay = true
+                if (sockopt.tcpKeepAliveIdle == null) sockopt.tcpKeepAliveIdle = 30
             }
 
         } catch (e: Exception) {
@@ -254,8 +256,80 @@ object CoreOutboundBuilder {
         return outboundBean
     }
 
+    /**
+     * Mobile carriers drop the NAT entry of a silent UDP flow within a minute;
+     * this keeps it. Twenty-five seconds is the usual answer, but a carrier that
+     * is quicker than that — and several are — leaves the tunnel dead for the
+     * twenty seconds before the next packet, which is exactly the "it pings but
+     * then stops working" that was reported. Fifteen is cheap (a handshake-sized
+     * packet every fifteen seconds) and is under every carrier's timer.
+     */
+    private const val WIREGUARD_KEEP_ALIVE_SECONDS = 15
+
+    /**
+     * The packet size for a WireGuard tunnel. Configs ask for 1420, which fits plain Ethernet
+     * only: on mobile data and PPPoE the handshake passes and then large packets vanish, so
+     * the tunnel "connects" and loads nothing. 1280 fits every path (it is the IPv6 minimum);
+     * anything above 1380 is brought down to it, a smaller wish is kept.
+     */
+    internal fun wireguardMtu(wanted: Int?): Int = when {
+        // A config that asks for more than fits a mobile path is brought down to
+        // the largest size that still does; 1280 is the IPv6 minimum and is safe
+        // everywhere, but it is also the slowest, so it is the floor rather than
+        // the default.
+        wanted == null || wanted > WIREGUARD_SAFE_MTU -> WIREGUARD_SAFE_MTU
+        wanted < 1280 -> 1280
+        else -> wanted
+    }
+
+    /** Fits a PPPoE and a mobile path (1500 minus tunnel and carrier overhead). */
+    private const val WIREGUARD_SAFE_MTU = 1360
+    private const val PREF_WG_MODE_PREFIX = "pref_rx_wg_mode_"
+
+    enum class WireguardMode(val key: String, val maxMtu: Int, val noise: Boolean) {
+        STANDARD("standard", WIREGUARD_SAFE_MTU, false),
+        MTU_1280("mtu1280", 1280, false),
+        NOISE_1280("noise1280", 1280, true),
+        NOISE_1360("noise1360", WIREGUARD_SAFE_MTU, true);
+
+        companion object {
+            fun fromKey(key: String?): WireguardMode? = entries.firstOrNull { it.key == key }
+        }
+    }
+
+    @Volatile
+    private var activeWgMode: WireguardMode = WireguardMode.STANDARD
+
+    fun wgModeFor(guid: String?): WireguardMode {
+        if (guid.isNullOrBlank()) return WireguardMode.STANDARD
+        val saved = runCatching { MmkvManager.decodeSettingsString(PREF_WG_MODE_PREFIX + guid) }.getOrNull()
+        return WireguardMode.fromKey(saved) ?: WireguardMode.STANDARD
+    }
+
+    fun applyWgMode(mode: WireguardMode) {
+        activeWgMode = mode
+    }
+
+    fun applyWgModeFor(guid: String?) {
+        activeWgMode = wgModeFor(guid)
+    }
+
+    fun rememberWgMode(guid: String?, mode: WireguardMode) {
+        if (guid.isNullOrBlank()) return
+        runCatching { MmkvManager.encodeSettings(PREF_WG_MODE_PREFIX + guid, mode.key) }
+    }
+
+    /** Steps up WireGuard anti-DPI protection when a tunnel stalls under carrier filtering. */
+    fun nextWgFallbackMode(guid: String?): WireguardMode? = when (wgModeFor(guid)) {
+        WireguardMode.STANDARD -> WireguardMode.MTU_1280
+        WireguardMode.MTU_1280 -> WireguardMode.NOISE_1280
+        WireguardMode.NOISE_1360 -> WireguardMode.NOISE_1280
+        WireguardMode.NOISE_1280 -> null
+    }
+
     private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
         val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
+        val wgMode = activeWgMode
 
         val rawAddresses = profileItem.localAddress
             ?.split(",")
@@ -264,25 +338,12 @@ object CoreOutboundBuilder {
             ?.ifEmpty { null }
             ?: listOf(AppConfig.WIREGUARD_LOCAL_ADDRESS_V4)
 
-        val addresses = if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true) {
+        val ipv6Enabled = runCatching { MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true }.getOrDefault(false)
+        val addresses = if (ipv6Enabled) {
             rawAddresses
         } else {
             val ipv4Addresses = rawAddresses.filter { !it.contains(":") }
             ipv4Addresses.ifEmpty { listOf(AppConfig.WIREGUARD_LOCAL_ADDRESS_V4) }
-        }
-
-        val rawDNS = profileItem.remoteDNS
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?.ifEmpty { null }
-            ?: listOf(AppConfig.WIREGUARD_LOCAL_REMOTE_DNS)
-
-        val remotes = if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true) {
-            rawDNS
-        } else {
-            val ipv4Dns = rawDNS.filter { !it.contains(":") }
-            ipv4Dns.ifEmpty { listOf(AppConfig.WIREGUARD_LOCAL_REMOTE_DNS) }
         }
 
         outboundBean?.settings?.let { wireguard ->
@@ -294,16 +355,51 @@ object CoreOutboundBuilder {
                 peer.preSharedKey = profileItem.preSharedKey?.nullIfBlank()
                 peer.endpoint = Utils.getIpv6Address(profileItem.server) + ":${profileItem.serverPort}"
             }
-            wireguard.mtu = profileItem.mtu
-            wireguard.remoteDNS = remotes
+            wireguard.peers?.firstOrNull()?.keepAlive = WIREGUARD_KEEP_ALIVE_SECONDS
+            wireguard.mtu = minOf(wireguardMtu(profileItem.mtu), wgMode.maxMtu)
+            // With IPv6 off, an endpoint name is not tried over an address family that leads nowhere.
+            if (!ipv6Enabled) wireguard.domainStrategy = "ForceIPv4"
+            // The DNS a WireGuard outbound carries is asked inside the tunnel by the
+            // core, before routing is consulted — so a resolver written here answers
+            // every name, including the ones that must be answered at home, and
+            // the anti-sanction relays stop being used at all. Blank means the
+            // core asks through its own DNS section, which is the one that knows
+            // which names belong on which line.
+            wireguard.remoteDNS = emptyList()
             wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
         }
 
+        outboundBean?.ensureSockopt()?.domainStrategy = if (ipv6Enabled) "UseIP" else "UseIPv4"
+
         if (!profileItem.finalMask.isNullOrBlank()) {
-            outboundBean?.streamSettings = OutboundBean.StreamSettingsBean()
+            outboundBean?.streamSettings = outboundBean?.streamSettings ?: OutboundBean.StreamSettingsBean()
             outboundBean?.streamSettings?.let {
                 updateOutboundFinalMask(it, profileItem)
                 it.network = null
+            }
+        } else if (wgMode.noise) {
+            outboundBean?.streamSettings = outboundBean?.streamSettings ?: OutboundBean.StreamSettingsBean()
+            outboundBean?.streamSettings?.let { ss ->
+                ss.network = null
+                ss.finalmask = OutboundBean.StreamSettingsBean.FinalMaskBean(
+                    udp = listOf(
+                        OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
+                            type = "noise",
+                            settings = OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
+                                noise = listOf(
+                                    OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean.NoiseMaskBean(
+                                        rand = "12-28",
+                                        delay = "10-18",
+                                    ),
+                                    OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean.NoiseMaskBean(
+                                        rand = "18-40",
+                                        delay = "12-22",
+                                    ),
+                                )
+                            )
+                        )
+                    )
+                )
             }
         }
         return outboundBean
@@ -574,7 +670,12 @@ object CoreOutboundBuilder {
      */
     fun populateTlsSettings(streamSettings: OutboundBean.StreamSettingsBean, profileItem: ProfileItem, sniExt: String?) {
         val streamSecurity = profileItem.security.orEmpty()
-        val allowInsecure = profileItem.insecure == true && profileItem.pinnedCA256.isNullOrEmpty()
+        // Xray-core no longer accepts "allowInsecure": when it is true the core throws the
+        // whole config away and refuses to start, so a profile asking for it used to end
+        // with no connection at all and no rules at all. What the core offers instead is to
+        // name the peer rather than trust any certificate: the name is still checked, so an
+        // untrusted or expired certificate is accepted while a wrong one is not.
+        val skipCertificateCheck = profileItem.insecure == true && profileItem.pinnedCA256.isNullOrEmpty()
         val sni = if (profileItem.sni.isNullOrEmpty()) {
             when {
                 sniExt.isNotNullEmpty() && Utils.isDomainName(sniExt) -> sniExt
@@ -588,12 +689,15 @@ object CoreOutboundBuilder {
         streamSettings.security = streamSecurity.nullIfBlank()
         if (streamSettings.security == null) return
         val tlsSetting = OutboundBean.StreamSettingsBean.TlsSettingsBean(
-            allowInsecure = allowInsecure,
+            // Never true: it is not a setting the core reads any more, it is a reason for
+            // the core to refuse the config.
+            allowInsecure = false,
             serverName = sni.nullIfBlank(),
             fingerprint = profileItem.fingerPrint.nullIfBlank(),
             alpn = profileItem.alpn?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.takeIf { !it.isNullOrEmpty() },
             echConfigList = profileItem.echConfigList.nullIfBlank(),
-            verifyPeerCertByName = profileItem.verifyPeerCertByName.nullIfBlank(),
+            verifyPeerCertByName = profileItem.verifyPeerCertByName.nullIfBlank()
+                ?: if (skipCertificateCheck) sni.nullIfBlank() else null,
             pinnedPeerCertSha256 = profileItem.pinnedCA256.nullIfBlank(),
             publicKey = profileItem.publicKey.nullIfBlank(),
             shortId = profileItem.shortId.nullIfBlank(),
@@ -621,9 +725,31 @@ object CoreOutboundBuilder {
      * @param streamSettings The streamSettings object to be modified
      * @return true if fragment configuration was successful, false otherwise
      */
+    /**
+     * Whether the fragment/noise masks may be applied to an outbound with this network.
+     *
+     * The masks wrap the raw connection the core dials, so they only exist where that
+     * connection is a TCP stream carrying the TLS handshake. On UDP-dialing transports
+     * (kcp/quic/hysteria) the TCP fragment mask never applies and the UDP noise mask
+     * corrupts the QUIC handshake — the VPN shows connected but passes zero traffic.
+     * XHTTP already hides the handshake, and fragmenting under it breaks the stream on
+     * mobile networks (v2rayNG #4934), so the masks are skipped there as well.
+     */
+    internal fun fragmentAppliesToNetwork(network: String?): Boolean {
+        val n = network?.lowercase()?.ifBlank { NetworkType.TCP.type } ?: NetworkType.TCP.type
+        return n == NetworkType.TCP.type
+            || n == NetworkType.WS.type
+            || n == NetworkType.HTTP_UPGRADE.type
+            || n == NetworkType.HTTP.type
+            || n == NetworkType.H2.type
+            || n == NetworkType.GRPC.type
+    }
+
     private fun updateOutboundFragment(streamSettings: OutboundBean.StreamSettingsBean): Boolean {
         try {
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false) == false) {
+            if (!MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false) ||
+                !Tuning.isFragmentAllowed()
+            ) {
                 return true
             }
             if (streamSettings.security != AppConfig.TLS
@@ -632,6 +758,12 @@ object CoreOutboundBuilder {
                 return true
             }
             if (streamSettings.sockopt?.dialerProxy.isNotNullEmpty()) {
+                return true
+            }
+            // The masks wrap the raw connection the core dials, so they only exist where
+            // that connection is a TCP stream carrying the TLS handshake; on other
+            // transports they either never apply or break the handshake outright.
+            if (!fragmentAppliesToNetwork(streamSettings.network)) {
                 return true
             }
 

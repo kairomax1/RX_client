@@ -25,7 +25,6 @@ object AppConfig {
     const val PREF_PER_APP_PROXY = "pref_per_app_proxy"
     const val PREF_PER_APP_PROXY_SET = "pref_per_app_proxy_set"
     const val PREF_BYPASS_APPS = "pref_bypass_apps"
-    const val PREF_GAMING_MODE_ENABLED = "pref_gaming_mode_enabled"
     const val PREF_LOCAL_DNS_ENABLED = "pref_local_dns_enabled"
     const val PREF_FAKE_DNS_ENABLED = "pref_fake_dns_enabled"
     const val PREF_APPEND_HTTP_PROXY = "pref_append_http_proxy"
@@ -45,6 +44,8 @@ object AppConfig {
     const val PREF_FRAGMENT_LENGTH = "pref_fragment_length"
     const val PREF_FRAGMENT_INTERVAL = "pref_fragment_interval"
     const val PREF_FRAGMENT_MAXSPLIT = "pref_fragment_maxsplit"
+    const val PREF_RX_FRAGMENT_ENABLED = "pref_rx_fragment_enabled"
+    const val PREF_RX_MUX_ENABLED = "pref_rx_mux_enabled"
     const val PREF_OBSERVATORY_LEAST_PING_INTERVAL = "pref_observatory_least_ping_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_INTERVAL = "pref_observatory_least_load_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_METHOD = "pref_observatory_least_load_method"
@@ -95,6 +96,7 @@ object AppConfig {
     const val PREF_BENCHMARK_PREFIX = "pref_benchmark_"
     const val PREF_GEO_FILES_SOURCES = "pref_geo_files_sources"
     const val PREF_USE_HEV_TUNNEL = "pref_use_hev_tunnel_v2"
+    const val PREF_AUTO_FAILOVER = "pref_auto_failover"
     const val PREF_HEV_TUNNEL_LOGLEVEL = "pref_hev_tunnel_loglevel"
     const val PREF_HEV_TUNNEL_RW_TIMEOUT = "pref_hev_tunnel_rw_timeout_v2"
     const val PREF_UPDATE_SUBSCRIPTION = "pref_update_subscription"
@@ -142,6 +144,17 @@ object AppConfig {
     const val ANDROID_PACKAGE_NAME_LIST_URL = "$GITHUB_RAW_URL/2dust/androidpackagenamelist/master/proxy.txt"
     const val APP_URL = "$GITHUB_URL/kairomax1/RX_client"
     const val APP_API_URL = "https://api.github.com/repos/kairomax1/RX_client/releases"
+
+    /**
+     * A key the owner makes once, in GitHub, that lets this phone read the releases
+     * no one else can see. A release kept as a draft is invisible to anybody who is
+     * not signed in, and an app cannot sign in, so without this the phone simply
+     * never hears of the build that was made for it.
+     */
+    const val PREF_GITHUB_TOKEN = "pref_rx_github_token"
+
+    /** The assets of a release are fetched from the API, which is the only door a key opens. */
+    const val GITHUB_ASSET_URL = "https://api.github.com/repos/kairomax1/RX_client/releases/assets/%d"
     const val MAKER_GITHUB_URL = "$GITHUB_URL/kairomax1"
     const val MAKER_TELEGRAM_URL = "https://t.me/aimobix"
     const val MAKER_YOUTUBE_URL = "https://youtube.com/@aimobixnet"
@@ -261,7 +274,7 @@ object AppConfig {
     const val ROOT_OOM_SCORE = "-1000"          // oom_score_adj that makes the LMK never kill us
 
     /** hev-sock5-tunnel read-write-timeout value */
-    const val HEVTUN_RW_TIMEOUT = "300,60"
+    const val HEVTUN_RW_TIMEOUT = "600,180"
 
     // Google API rule constants
     const val GOOGLEAPIS_CN_DOMAIN = "domain:googleapis.cn"

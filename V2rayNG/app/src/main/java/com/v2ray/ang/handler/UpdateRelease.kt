@@ -32,7 +32,10 @@ object UpdateRelease {
      * mistaken for `x86_64`.
      */
     fun <T> pickApk(assets: List<T>, abis: List<String>, nameOf: (T) -> String): T? {
-        val apks = assets.filter { nameOf(it).endsWith(".apk", ignoreCase = true) }
+        // Test builds carry "debug" in their name and are signed differently; never offer them.
+        val apks = assets.filter {
+            nameOf(it).endsWith(".apk", ignoreCase = true) && !nameOf(it).contains("debug", ignoreCase = true)
+        }
         for (abi in abis) {
             apks.firstOrNull { nameOf(it).endsWith("_$abi.apk", ignoreCase = true) }?.let { return it }
         }

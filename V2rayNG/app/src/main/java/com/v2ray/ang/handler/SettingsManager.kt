@@ -2,8 +2,11 @@ package com.v2ray.ang.handler
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.text.TextUtils
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.AppConfig.DEFAULT_SUBSCRIPTION_ID
@@ -43,6 +46,22 @@ object SettingsManager {
         initRoutingRulesets(context)
         migrateServerListToSubscriptions()
         migrateHysteria2PinSHA256()
+        removeRetiredFragmentVpn()
+    }
+
+    /**
+     * The separate "Fragment" screen is gone from the app. Its internal profile and group must
+     * go with it, otherwise a phone that used the screen keeps a dead config in its list and a
+     * tab that leads nowhere. The per-config fragment setting in Settings is unrelated and stays.
+     */
+    private fun removeRetiredFragmentVpn() {
+        val groupId = "rx_fragment_vpn"
+        val profileGuid = "rx-fragment-vpn"
+        if (MmkvManager.decodeSubscription(groupId) != null) {
+            MmkvManager.removeSubscription(groupId)
+        } else if (MmkvManager.decodeServerConfig(profileGuid) != null) {
+            MmkvManager.removeServer(profileGuid)
+        }
     }
 
     /**
@@ -194,7 +213,7 @@ object SettingsManager {
             return exist == true
         }
 
-        val rulesetItems = MmkvManager.decodeRoutingRulesets()
+        val rulesetItems = GamingMode.effectiveRulesets()
         val exist = rulesetItems?.filter { it.enabled && it.outboundTag == TAG_DIRECT }?.any {
             it.domain?.contains(GEOSITE_PRIVATE) == true || it.ip?.contains(GEOIP_PRIVATE) == true
         }
@@ -330,14 +349,64 @@ object SettingsManager {
      * Get domestic DNS servers from preference.
      * @return A list of domestic DNS servers.
      */
-    fun getDomesticDnsServers(): List<String> {
-        val domesticDns =
-            MmkvManager.decodeSettingsString(AppConfig.PREF_DOMESTIC_DNS) ?: AppConfig.DNS_DIRECT
+    fun getDomesticDnsServers(context: Context? = null): List<String> {
+        val saved = MmkvManager.decodeSettingsString(AppConfig.PREF_DOMESTIC_DNS)
+        // In DNS mode almost every name is resolved here. The stock default is a
+        // resolver in China, which from this country answers slowly if it answers
+        // at all, and a name that is not answered is a site that never opens —
+        // so it is never used, whether it was stored or not.
+        val domesticDns = saved?.takeIf { it.isNotBlank() && it != AppConfig.DNS_DIRECT }
+            ?: (phoneDnsServers(context) + GamingMode.DIRECT_RESOLVERS).distinct().joinToString(",")
         val ret = domesticDns.split(",").filter { Utils.isPureIpAddress(it) || Utils.isCoreDNSAddress(it) }
         if (ret.isEmpty()) {
-            return listOf(AppConfig.DNS_DIRECT)
+            return GamingMode.DIRECT_RESOLVERS
         }
         return ret
+    }
+
+    /**
+     * The resolvers the phone's own line was given: the ones the mobile network or
+     * the Wi-Fi handed out, never the ones this app invented for the tunnel.
+     *
+     * A name that has to be answered from the phone's own line — a bank, a shop, a
+     * site at home — is best answered by whoever answers names on that line. They
+     * are always reachable from it, which is more than can be said of a resolver
+     * chosen on a map, and they answer with the address a visitor of this country
+     * is meant to get: a site that is served from inside it is answered from
+     * inside it, which is both the quicker way round and the cheaper one.
+     *
+     * The tunnel's own network is left out on purpose. Asking it for the phone's
+     * resolvers is asking this app, which is the question going round in circles.
+     */
+    fun phoneDnsServers(context: Context?): List<String> {
+        val manager = runCatching {
+            (context ?: AngApplication.application)
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        }.getOrNull() ?: return emptyList()
+        return runCatching {
+            manager.allNetworks
+                .asSequence()
+                .filterNot { network ->
+                    manager.getNetworkCapabilities(network)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                }
+                .filter { network ->
+                    val caps = manager.getNetworkCapabilities(network) ?: return@filter false
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                }
+                .flatMap { network ->
+                    manager.getLinkProperties(network)?.dnsServers?.asSequence() ?: emptySequence()
+                }
+                .mapNotNull { address ->
+                    address.hostAddress?.takeIf { Utils.isPureIpAddress(it) }
+                }
+                .filterNot { it == "127.0.0.1" || it.startsWith("127.") }
+                .distinct()
+                .take(4)
+                .toList()
+        }.getOrDefault(emptyList())
     }
 
     /**
@@ -403,8 +472,20 @@ object SettingsManager {
      * Get the VPN MTU from settings, defaulting to AppConfig.VPN_MTU.
      */
     fun getVpnMtu(): Int {
-        return Utils.parseInt(MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_MTU), AppConfig.VPN_MTU)
+        val stored = MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_MTU)
+        // In gaming mode the tunnel is tuned for latency, and 1500 is the wrong
+        // number for a mobile line: the tunnel wraps every packet in its own
+        // header, so a 1500-byte packet does not fit the line's real limit and is
+        // split on the way out. Splitting costs a second round of sending for one
+        // packet — which a game feels far more than a download does. 1280 is the
+        // largest size every network in the world is required to carry, so nothing
+        // is split; the number is only lowered when she has not chosen one herself.
+        if (GamingMode.isEnabled() && stored.isNullOrBlank()) return GAMING_MTU
+        return Utils.parseInt(stored, AppConfig.VPN_MTU)
     }
+
+    /** The tunnel's packet size in gaming mode: the largest every network must carry. */
+    private const val GAMING_MTU = 1280
 
     /**
      * Check if HEV TUN is being used.
@@ -418,6 +499,14 @@ object SettingsManager {
      * Check if VPN mode is enabled.
      * @return True if VPN mode is enabled, false otherwise.
      */
+    /**
+     * Whether the app may leave a config that has stopped carrying traffic and
+     * take another one of the same group. On by default; the switch is there for
+     * a phone or a network where a config is better left alone.
+     */
+    fun isAutoFailoverEnabled(): Boolean =
+        MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_FAILOVER, true)
+
     fun isVpnMode(): Boolean {
         val mode = MmkvManager.decodeSettingsString(AppConfig.PREF_MODE)
         return mode == null || mode == VPN

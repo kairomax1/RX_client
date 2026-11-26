@@ -18,6 +18,7 @@ import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.contracts.Tun2SocksControl
 import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
@@ -223,6 +224,20 @@ class CoreVpnService : VpnService(), ServiceControl {
             } else {
                 builder.addRoute("::", 0)
             }
+        } else if (GamingMode.isEnabled()) {
+            // A leak, closed.
+            //
+            // With IPv6 switched off in the settings, the tunnel had no IPv6 route
+            // at all — so the phone's own IPv6 line stayed outside it and carried
+            // anything the phone asked for over version 6. A filtered site that
+            // resolves to an IPv6 address therefore went out on the owner's own
+            // address while IPv4 went through the config: the address the site saw
+            // was the owner's, which is exactly what gaming mode promises never
+            // happens. In this mode the family is claimed by the tunnel instead,
+            // discarded there rather than sent out anywhere, so nothing leaves on
+            // version 6 at all. Whatever the phone's line allowed, it now cannot.
+            builder.addAddress(vpnConfig.ipv6Client, 126)
+            builder.addRoute("::", 0)
         }
 
         // Configure DNS servers

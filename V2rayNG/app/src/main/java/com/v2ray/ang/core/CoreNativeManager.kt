@@ -44,9 +44,16 @@ object CoreNativeManager {
     }
 
     fun reconcileBrowserDialer(dialerAddr: String) {
+        // Nothing to reconcile when the address is empty — the browser dialer is
+        // not in use — and saying so on every start filled the log with a
+        // sentence that reads like a success and reports nothing.
+        if (dialerAddr.isBlank()) {
+            LogUtil.d(AppConfig.TAG, "Browser dialer is not in use; nothing to reconcile")
+            return
+        }
         try {
             Libv2ray.reconcileBrowserDialer(dialerAddr)
-            LogUtil.i(AppConfig.TAG, "Browser dialer reconciled successfully with address: $dialerAddr")
+            LogUtil.i(AppConfig.TAG, "Browser dialer reconciled with address: $dialerAddr")
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to reconcile browser dialer with address: $dialerAddr", e)
         }
@@ -78,7 +85,12 @@ object CoreNativeManager {
         return try {
             Libv2ray.measureOutboundDelay(config, testUrl)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to measure outbound delay", e)
+            // A config that answers nothing is the ordinary case here: the list
+            // holds hundreds of public ones and most of them are dead. Written as
+            // an error, every one of them filled the log — two hundred and
+            // forty-six lines in a day — and the lines that were real faults
+            // could not be found among them. It is still recorded, quietly.
+            LogUtil.w(AppConfig.TAG, "A config carried nothing: ${e.message?.take(120).orEmpty()}")
             -1L
         }
     }

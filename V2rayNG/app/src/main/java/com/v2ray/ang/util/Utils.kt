@@ -92,6 +92,13 @@ object Utils {
      */
     private fun tryDecodeBase64(text: String?): String? {
         if (text.isNullOrEmpty()) return null
+        // A share link is imported as plain text as well as encoded, and the plain
+        // text was being handed to the decoder on every import: it could only fail,
+        // and each failure wrote two lines to the log. Over one day that was seven
+        // hundred and eighty-six lines of noise, which hid the errors that mattered.
+        // Nothing outside the alphabet can decode, so it is answered here instead —
+        // the same answer as before, without the attempt and without the lines.
+        if (!isPossiblyBase64(text)) return null
 
         try {
             return Base64.decode(text, Base64.NO_WRAP).toString(Charsets.UTF_8)
@@ -104,6 +111,25 @@ object Utils {
             LogUtil.e(AppConfig.TAG, "Failed to decode URL-safe base64", e)
         }
         return null
+    }
+
+    /**
+     * True when [text] could be base64 at all: its characters are all in the
+     * alphabet, padding aside, and it is long enough to mean something. A share
+     * link carries `:` and a plain sentence carries spaces, so both are settled
+     * without a decoder.
+     */
+    fun isPossiblyBase64(text: String?): Boolean {
+        if (text.isNullOrEmpty()) return false
+        var seen = 0
+        for (ch in text) {
+            val isPadding = ch == '\n' || ch == '\r' || ch == ' ' || ch == '='
+            val inAlphabet = ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' ||
+                ch == '+' || ch == '/' || ch == '-' || ch == '_'
+            if (!isPadding && !inAlphabet) return false
+            if (inAlphabet) seen++
+        }
+        return seen >= 4
     }
 
     /**

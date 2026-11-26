@@ -1,5 +1,11 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.PublicConfigs
+import com.v2ray.ang.handler.Tuning
+import com.v2ray.ang.handler.TuningRunner
+import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.Failover
+import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.ConfigBadge
 import android.app.Application
 import androidx.lifecycle.ViewModel
@@ -35,6 +41,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -45,11 +53,17 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.PatternSyntaxException
 
+/** A failed measurement is "not measured", never a number that can be read. */
+internal fun cleanTestDelay(millis: Long): Long = if (millis < 0L) 0L else millis
+
+/** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
+private const val FIREFOX_TUNNEL_GUID = "firefox-vpn"
+
 private fun applyTestDelayResults(
     servers: List<ServersCache>,
     updates: Map<String, Long>,
 ): List<ServersCache> = servers.map { server ->
-    val delayMillis = updates[server.guid]
+    val delayMillis = updates[server.guid]?.let(::cleanTestDelay)
     if (delayMillis == null || delayMillis == server.testDelayMillis) {
         server
     } else {
@@ -61,7 +75,7 @@ private fun applyTestDelayResultsToRows(
     rows: List<ServerRowUiModel>,
     updates: Map<String, Long>,
 ): List<ServerRowUiModel> = rows.map { row ->
-    val delayMillis = updates[row.guid]
+    val delayMillis = updates[row.guid]?.let(::cleanTestDelay)
     if (delayMillis == null || delayMillis == row.testDelayMillis) {
         row
     } else {
@@ -121,6 +135,145 @@ class MainViewModel(
     private var autoTestRequestId: String? = null
     private var autoTestGroups: Map<String, List<String>> = emptyMap()
 
+    /** Set while a test is running whose winner is to be selected and connected. */
+    private var connectBestAfterTest = false
+    private val _connectBestTick = MutableStateFlow(0)
+
+    /** Goes up each time a tested winner was selected; the screen then (re)starts the tunnel. */
+    val connectBestTick: StateFlow<Int> = _connectBestTick.asStateFlow()
+
+    /**
+     * Pings every config and connects to the one that answers fastest. Used when DNS mode is
+     * switched on, so the user does not have to find a working config first.
+     */
+    fun testAllAndConnectBest() {
+        connectBestAfterTest = true
+        viewModelScope.launch {
+            // Make sure the built-in Aether profile is there as the fallback for a phone with no
+            // working config, and that the list shows it before the test starts.
+            val added = withContext(ioDispatcher) {
+                val before = dataSource.getSubscriptions().sumOf { dataSource.getServerGuidList(it.guid).size }
+                dataSource.ensureAetherProfile()
+                dataSource.getSubscriptions().sumOf { dataSource.getServerGuidList(it.guid).size } != before
+            }
+            if (added) setupGroupTab(forceRefresh = true).join()
+            if (withContext(ioDispatcher) { allConfigGuids() }.isEmpty()) {
+                connectBestAfterTest = false
+                return@launch
+            }
+            startAutoTest(emptySet())
+        }
+    }
+
+    /** How many public configs stay after the running test; 0 when the test is not theirs. */
+    private var publicKeep = 0
+
+    /** True when the public test in progress ends with a connection to its winner. */
+    private var publicConnect = false
+
+    /**
+     * Runs the real test (a request through each config) on the freshly collected public
+     * configs and keeps the [keep] quickest that answered. The winner (ping, then a short real
+     * download on the best few) is selected, and connected to when [connect] is set.
+     */
+    /**
+     * Opens the public group on what the collection already measured.
+     *
+     * The collection measures every config by making it carry a download before
+     * it is kept, so there is nothing left to decide — it is already ordered
+     * best-first and each one that is in it answers. This used to start a second
+     * test over the whole group, which is where a link that had just been proven
+     * was thrown away for a slow ping and a group of twenty was left holding a
+     * dozen.
+     */
+    fun testPublicConfigs(keep: Int, connect: Boolean, openTab: Boolean = connect) {
+        viewModelScope.launch {
+            setupGroupTab(forceRefresh = true).join()
+            if (connect || openTab) subscriptionIdChanged(PublicConfigs.GROUP_ID)
+            publicConnect = false
+            applyAutoTestOrder(listOf(PublicConfigs.GROUP_ID))
+            if (connect) {
+                val head = dataSource.getServerGuidList(PublicConfigs.GROUP_ID).firstOrNull()
+                if (head != null) {
+                    updateSelectedGuid(head)
+                    _connectBestTick.update { it + 1 }
+                }
+            }
+            AppLog.info(
+                AppLog.Section.Other,
+                "Public configs: ${dataSource.getServerGuidList(PublicConfigs.GROUP_ID).size} already measured, opened on the best of them",
+            )
+        }
+    }
+
+    /** What the screen shows while the best mux and fragment settings are looked for. */
+    fun setTuning(phase: TuningRunner.Phase, mode: Tuning.Mode = Tuning.currentMode()) {
+        // The attempt is already under way while the settings are looked for, so
+        // the button offers to cancel it and nothing announces a connection that
+        // is not there yet.
+        _uiState.update {
+            it.copy(
+                tuning = phase,
+                tuningMode = mode,
+                connectPhase = when (phase) {
+                    TuningRunner.Phase.Searching -> ConnectPhase.Connecting
+                    TuningRunner.Phase.Failed -> ConnectPhase.Failed
+                    else -> it.connectPhase
+                },
+            )
+        }
+        if (phase == TuningRunner.Phase.Done ||
+            phase == TuningRunner.Phase.Unsupported ||
+            phase == TuningRunner.Phase.Failed
+        ) {
+            tuningNoticeJob?.cancel()
+            tuningNoticeJob = viewModelScope.launch {
+                delay(3_000)
+                _uiState.update { it.copy(tuning = TuningRunner.Phase.Idle) }
+            }
+        }
+    }
+
+    private var tuningNoticeJob: Job? = null
+
+    /**
+     * True when this config's mux and fragment settings have never been measured
+     * here (under the active Settings mode), were measured so long ago that the
+     * answer is no longer about this line, or the config previously failed
+     * (`-1ms`) and must verify whether allowed tuning can bypass the block.
+     */
+    fun needsTuning(guid: String?): Boolean {
+        if (guid == null) return false
+        val failedBefore = (dataSource.decodeAffiliationInfo(guid)?.testDelayMillis ?: 0L) < 0L
+        if (Tuning.currentMode() == Tuning.Mode.NONE) {
+            return failedBefore
+        }
+        return Tuning.bestForCurrentMode(guid) == null ||
+            Tuning.stale(guid) ||
+            failedBefore
+    }
+
+    /** Selects the built-in Aether profile and connects through it. */
+    fun connectAether() {
+        viewModelScope.launch {
+            val guid = withContext(ioDispatcher) { dataSource.ensureAetherProfile() } ?: return@launch
+            setupGroupTab(forceRefresh = true).join()
+            updateSelectedGuid(guid)
+            _connectBestTick.update { it + 1 }
+        }
+    }
+
+    /** Selects the config with the lowest ping among [guids]; false when none of them answered. */
+    private fun selectFastest(guids: List<String>): Boolean {
+        val best = guids
+            .mapNotNull { guid -> dataSource.getTestDelayMillis(guid).takeIf { it > 0 }?.let { guid to it } }
+            .minByOrNull { it.second }
+        // No config answered: fall back to the built-in Aether route, when this build has it.
+        val chosen = best?.first ?: dataSource.ensureAetherProfile() ?: return false
+        updateSelectedGuid(chosen)
+        return true
+    }
+
     @Volatile
     private var badges: Map<String, ConfigBadge> = emptyMap()
 
@@ -129,8 +282,30 @@ class MainViewModel(
     // ---------- Service events ----------
     init {
         collectServiceEvents()
+        collectPublicConfigUpdates()
         setupGroupTab()
         refreshUiSettings()
+    }
+
+    private fun collectPublicConfigUpdates() {
+        viewModelScope.launch {
+            com.v2ray.ang.handler.PublicConfigs.groupUpdated
+                .drop(1)
+                .collectLatest {
+                    delay(120L)
+                    setupGroupTab(forceRefresh = true).join()
+                    val hasPublic = withContext(ioDispatcher) {
+                        dataSource.getServerGuidList(com.v2ray.ang.handler.PublicConfigs.GROUP_ID).isNotEmpty()
+                    }
+                    val currentId = _uiState.value.selectedGroupId
+                    val currentEmpty = withContext(ioDispatcher) {
+                        dataSource.getServerGuidList(currentId).isEmpty()
+                    }
+                    if (hasPublic && (currentEmpty || currentId == com.v2ray.ang.handler.PublicConfigs.GROUP_ID)) {
+                        subscriptionIdChanged(com.v2ray.ang.handler.PublicConfigs.GROUP_ID)
+                    }
+                }
+        }
     }
 
     private fun collectServiceEvents() {
@@ -159,6 +334,9 @@ class MainViewModel(
             // No toast on connect or disconnect: the connect button itself carries the state.
             MainServiceEvent.StateStartSuccess -> {
                 updateRunningState(true)
+                // The service may have moved to another config on its own; the
+                // list follows it, so what is shown is what is carrying the traffic.
+                if (dataSource.getSelectServer() != uiState.value.selectedGuid) refreshSelectedGuid()
                 beginConnectionVerification()
                 // With the tunnel up GitHub is reachable: the best moment to look for an update.
                 viewModelScope.launch {
@@ -267,17 +445,90 @@ class MainViewModel(
     private var connectWatchdog: Job? = null
     private var failureResetJob: Job? = null
 
-    /** The user asked to connect; the button shows "connecting" until the tunnel is proven. */
+    /** Set while the owner is the one who asked for the tunnel to come down. */
+    private var stopRequested = false
+
+    /** Ends the round of automatic moves once the connection has carried traffic long enough. */
+    private var settleJob: Job? = null
+
+    /**
+     * The owner asked to connect: a fresh round starts, so a config that failed
+     * before is offered again. The button shows "connecting" until the tunnel
+     * is proven.
+     */
     fun onConnectRequested() {
+        Failover.reset()
+        settleJob?.cancel()
+        beginConnectAttempt()
+    }
+
+    /**
+     * The tunnel went down and another config is worth trying: the next one of
+     * the group is taken, quietly, and the tunnel is raised on it. True when it
+     * moved, so the caller knows the failure is already being dealt with and
+     * must not be shown as one.
+     */
+    private fun tryNextConfig(): Boolean {
+        if (!dataSource.isAutoFailoverEnabled()) return false
+        if (!Failover.canMove()) return false
+        // The app's own ways of reaching the internet are not configs to fall
+        // back on: moving to one of them would change what the phone is doing,
+        // not only where it does it. Reading every config is only worth it when
+        // the engine that has to be told apart from the rest is even there.
+        val aetherPossible = AetherEngine.isAvailable(getApplication())
+        val guids = dataSource.getServerGuidList(uiState.value.selectedGroupId).filter { guid ->
+            guid != FIREFOX_TUNNEL_GUID &&
+                !(aetherPossible && AetherEngine.isAetherProfile(dataSource.decodeServerConfig(guid)))
+        }
+        val next = Failover.next(
+            current = uiState.value.selectedGuid,
+            guids = guids,
+            pingOf = { guid -> dataSource.getTestDelayMillis(guid) },
+        ) ?: return false
+        AppLog.info(AppLog.Section.Connection, "Failover: another config of this group is taken instead")
+        Failover.moved(next)
+        dataSource.setSelectServer(next)
+        _uiState.update { it.copy(selectedGuid = next) }
+        beginConnectAttempt()
+        // A tunnel that is standing is restarted so that the new config is read;
+        // one that is not is simply started.
+        dataSource.startService()
+        return true
+    }
+
+    /** The owner asked for the tunnel to come down; nothing is taken in its place. */
+    fun onStopRequested() {
+        stopRequested = true
+        connectWatchdog?.cancel()
+        settleJob?.cancel()
+        Failover.reset()
+    }
+
+    private fun beginConnectAttempt() {
+        stopRequested = false
         failureResetJob?.cancel()
         verifyAttempts = 0
-        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null, exitIp = null, exitCountry = null) }
+        AppLog.info(AppLog.Section.Connection, "Connect requested")
+        // A little slack: file times are coarse on some storage.
+        connectRequestedAt = System.currentTimeMillis() - 2000
+        // The address stays on the line while the new one is being found, and is
+        // replaced when it arrives. Wiping it here would leave an empty line for
+        // as long as the connection takes, only to type the same digits again.
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Connecting, pingMillis = null) }
         connectWatchdog?.cancel()
         connectWatchdog = viewModelScope.launch {
-            delay(CONNECT_TIMEOUT_MS)
+            // Aether first has to find a route that works on this network; that takes far
+            // longer than a ready-made config needs.
+            val aether = withContext(ioDispatcher) { dataSource.isAetherSelected() }
+            delay(if (aether) AetherEngine.MAX_SEARCH_MILLIS + CONNECT_TIMEOUT_MS else CONNECT_TIMEOUT_MS)
             if (uiState.value.connectPhase == ConnectPhase.Connecting) {
+                AppLog.error(AppLog.Section.Connection, "No working connection within the time limit")
                 val wasRunning = uiState.value.isRunning
-                onConnectFailed()
+                // Nothing came within the time limit, which means it was slow,
+                // not that the config is dead. Another config is left to the
+                // watcher, which measures the traffic itself; a tunnel that was
+                // only slow is not torn down for being slow.
+                onConnectFailed(canMove = false)
                 if (wasRunning) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
             }
         }
@@ -290,9 +541,40 @@ class MainViewModel(
             _uiState.update { it.copy(connectPhase = ConnectPhase.Connected) }
         }
         viewModelScope.launch {
+            if (withContext(ioDispatcher) { dataSource.isAetherSelected() } && !awaitAetherRoute()) return@launch
             // The tunnel needs a moment after the core reports success.
             delay(VERIFY_SETTLE_MS)
             if (uiState.value.isRunning) testCurrentServerRealPing()
+        }
+    }
+
+    /**
+     * Waits while the Aether engine walks through its routes, showing which one it is on.
+     * True once a route works; false when none did (the attempt is then failed and stopped)
+     * or the user gave up meanwhile.
+     */
+    /** When the current attempt began; an Aether status written before it belongs to an older one. */
+    private var connectRequestedAt = 0L
+
+    private suspend fun awaitAetherRoute(): Boolean {
+        try {
+            val deadline = System.currentTimeMillis() + AetherEngine.MAX_SEARCH_MILLIS
+            while (System.currentTimeMillis() < deadline) {
+                if (!uiState.value.isRunning) return false
+                val status = withContext(ioDispatcher) { dataSource.aetherStatus(connectRequestedAt) }
+                when (status?.phase) {
+                    AetherEngine.Phase.Ready -> return true
+                    AetherEngine.Phase.Failed -> break
+                    else -> _uiState.update { it.copy(aetherSearch = status) }
+                }
+                delay(AETHER_POLL_MS)
+            }
+            if (uiState.value.connectPhase == ConnectPhase.Connecting) {
+                if (!onConnectFailed()) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            }
+            return false
+        } finally {
+            _uiState.update { it.copy(aetherSearch = null) }
         }
     }
 
@@ -303,33 +585,68 @@ class MainViewModel(
             return
         }
         if (delayMillis >= 0) {
+            AppLog.info(AppLog.Section.Connection, "Connected; traffic flows ($delayMillis ms)")
             connectWatchdog?.cancel()
             _uiState.update { it.copy(connectPhase = ConnectPhase.Connected, pingMillis = delayMillis) }
+            rememberIfItLasts()
             return
         }
-        // One failed probe can be a hiccup of the test address; a second one means no traffic flows.
+        // A probe that answers nothing right after the tunnel came up says more
+        // about the tunnel than about the config: the interface has only just
+        // been handed the routes, and the first name being looked up can time out
+        // on its own. Giving it one second and then giving up was what turned a
+        // working config into "two connection tests in a row failed" — the log
+        // shows exactly that, a failure pair and a good answer a moment later.
+        // Each retry now waits longer than the one before it, and three are
+        // allowed, so a line that needs four seconds to settle still connects.
         verifyAttempts++
         if (verifyAttempts < VERIFY_MAX_ATTEMPTS) {
+            val wait = VERIFY_RETRY_MS * verifyAttempts
             viewModelScope.launch {
-                delay(VERIFY_RETRY_MS)
+                delay(wait)
                 if (uiState.value.isRunning && uiState.value.connectPhase == ConnectPhase.Connecting) {
                     testCurrentServerRealPing()
                 }
             }
         } else {
-            onConnectFailed()
-            dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            AppLog.error(
+                AppLog.Section.Connection,
+                "$VERIFY_MAX_ATTEMPTS connection tests in a row failed; the config is not carrying traffic",
+            )
+            if (!onConnectFailed()) dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
         }
     }
 
     fun onConnectCancelled() {
+        AppLog.info(AppLog.Section.Connection, "Connecting was cancelled by the user")
         connectWatchdog?.cancel()
         _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
     }
 
-    /** Red button, shake, vibration and the floating message; then back to the idle button. */
-    fun onConnectFailed() {
+    /**
+     * Forgets the round of automatic moves once this connection has carried
+     * traffic for a while. A config that only came up and fell over again does
+     * not earn that: the next move then continues where the round left off
+     * instead of starting from the same config again.
+     */
+    private fun rememberIfItLasts() {
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch {
+            delay(Failover.SETTLE_MILLIS)
+            if (uiState.value.isRunning) Failover.reset()
+        }
+    }
+
+    /**
+     * Red button, shake, vibration and the floating message; then back to the
+     * idle button. Returns true when another config was taken instead, in which
+     * case nothing of that is shown — the move is not a failure until there is
+     * nothing left to move to.
+     */
+    fun onConnectFailed(canMove: Boolean = true): Boolean {
         connectWatchdog?.cancel()
+        if (canMove && tryNextConfig()) return true
+        AppLog.error(AppLog.Section.Connection, "Connection attempt failed; the service is being stopped")
         _uiState.update {
             it.copy(connectPhase = ConnectPhase.Failed, pingMillis = null, exitIp = null, exitCountry = null, failureTick = it.failureTick + 1)
         }
@@ -340,19 +657,28 @@ class MainViewModel(
                 if (it.connectPhase == ConnectPhase.Failed) it.copy(connectPhase = ConnectPhase.Idle) else it
             }
         }
+        return false
     }
 
     private fun onServiceStopped() {
+        val stoppedByHand = stopRequested
+        stopRequested = false
         when (uiState.value.connectPhase) {
             // A stop that follows a failed attempt must not wipe the failure feedback early.
             ConnectPhase.Failed -> Unit
-            // The service died before the connection was ever proven.
-            ConnectPhase.Connecting -> if (verifyAttempts > 0) onConnectFailed()
-            else -> {
-                connectWatchdog?.cancel()
-                _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
-            }
+            // The service died before the connection was ever proven. A stop the
+            // owner asked for is not answered by another config.
+            ConnectPhase.Connecting -> if (!stoppedByHand && verifyAttempts > 0) onConnectFailed()
+            // A stop while it was carrying traffic is taken as asked for: whether
+            // it came from the button or from the notification cannot be told
+            // apart here, and taking another config would fight the owner.
+            else -> markStopped()
         }
+    }
+
+    private fun markStopped() {
+        connectWatchdog?.cancel()
+        _uiState.update { it.copy(connectPhase = ConnectPhase.Idle, pingMillis = null, exitIp = null, exitCountry = null) }
     }
 
     internal fun formatStatus(status: MainStatus): String = when (status) {
@@ -414,6 +740,8 @@ class MainViewModel(
             MainAction.Initialize -> initialize()
             MainAction.RefreshGroups -> setupGroupTab(forceRefresh = true)
             MainAction.TestAllServers -> testAllRealPing(true)
+            // The thunder pings the tab the user is looking at, not every list they own.
+            MainAction.PingAndSortAll -> startAutoTest(emptySet(), uiState.value.selectedGroupId)
             MainAction.TestRealAllServers -> testAllRealPing()
             is MainAction.TestGroupRealPing -> testAllRealPing(groupId = action.groupId)
             MainAction.PingThenRemoveInvalid -> pingThenRemoveInvalid()
@@ -467,6 +795,12 @@ class MainViewModel(
                 delay(32)
                 dataSource.initAssets()
                 dataSource.syncSubscriptions()
+                val keep = dataSource.renewPublicConfigs(_uiState.value.isRunning)
+                if (keep > 0) {
+                    val currentEmpty = dataSource.getServerGuidList(_uiState.value.selectedGroupId).isEmpty()
+                    val onPublic = _uiState.value.selectedGroupId == com.v2ray.ang.handler.PublicConfigs.GROUP_ID
+                    testPublicConfigs(keep, connect = false, openTab = currentEmpty || onPublic)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -740,19 +1074,25 @@ class MainViewModel(
     }
 
     /**
-     * Tests every config that was not there [before]. The ping runs through the same test
-     * service as "test all", so the list fills in live; when it finishes, [finishAutoTest]
-     * measures speed, hands out the badges and sorts the list.
+     * Tests every config that was not there [before], in [groupId] when one is given and in
+     * every list otherwise. The ping runs through the same test service as "test all", so the
+     * list fills in live; when it finishes, [finishAutoTest] measures speed, hands out the
+     * badges and sorts the list.
      */
-    private fun startAutoTest(before: Set<String>) {
+    private fun startAutoTest(before: Set<String>, groupId: String? = null) {
         viewModelScope.launch {
             try {
                 val freshByGroup = withContext(ioDispatcher) {
-                    dataSource.getSubscriptions().associate { sub ->
-                        sub.guid to dataSource.getServerGuidList(sub.guid).filter { it !in before }
-                    }.filterValues { it.isNotEmpty() }
+                    dataSource.getSubscriptions()
+                        .filter { groupId.isNullOrBlank() || it.guid == groupId }
+                        .associate { sub ->
+                            sub.guid to dataSource.getServerGuidList(sub.guid).filter { it !in before }
+                        }.filterValues { it.isNotEmpty() }
                 }
-                if (freshByGroup.isEmpty()) return@launch
+                if (freshByGroup.isEmpty()) {
+                    connectBestAfterTest = false
+                    return@launch
+                }
                 // Let the reload that follows an import settle, so results land in a loaded list.
                 setupGroupJob?.join()
                 autoTestJob?.cancel()
@@ -784,11 +1124,37 @@ class MainViewModel(
         autoTestJob?.cancel()
         autoTestJob = viewModelScope.launch(ioDispatcher) {
             try {
+                val keep = publicKeep
+                publicKeep = 0
+                if (keep > 0 && PublicConfigs.GROUP_ID in groups) PublicConfigs.prune(keep)
+                val tested = groups.values.flatten().filter { keep == 0 || dataSource.getTestDelayMillis(it) > 0 }
                 // First pass right away: pings are known, so the list is sorted without waiting
                 // for the speed measurements.
                 applyAutoTestOrder(groups.keys)
-                dataSource.finishAutoTest(groups.values.flatten())
+                if (connectBestAfterTest) {
+                    connectBestAfterTest = false
+                    // Connect on ping alone; the speed measurements below can take a while.
+                    if (selectFastest(tested)) _connectBestTick.update { it + 1 }
+                }
+                dataSource.finishAutoTest(tested)
                 applyAutoTestOrder(groups.keys)
+                val runningGuid = uiState.value.selectedGuid
+                if (uiState.value.isRunning &&
+                    runningGuid != null &&
+                    runningGuid in groups.values.flatten() &&
+                    (dataSource.decodeAffiliationInfo(runningGuid)?.testDelayMillis ?: 0L) < 0L
+                ) {
+                    // Running config tested -1ms and could not be bypassed with fragment/mux: stop it.
+                    onConnectFailed(canMove = false)
+                    dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+                }
+                if (keep > 0 && tested.isNotEmpty()) {
+                    // Public configs: the winner is the head of the list after the download
+                    // measurements, not the lowest ping alone.
+                    val winner = dataSource.getServerGuidList(PublicConfigs.GROUP_ID).firstOrNull { it in tested } ?: tested.first()
+                    updateSelectedGuid(winner)
+                    if (publicConnect) _connectBestTick.update { it + 1 }
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Throwable) {
@@ -1207,6 +1573,15 @@ class MainViewModel(
         viewModelScope.launch(ioDispatcher) {
             cacheMutex.withLock { groupDataCache.clear() }
             reloadAllGroups(_uiState.value.groups.map { it.id })
+            val runningGuid = uiState.value.selectedGuid
+            if (uiState.value.isRunning &&
+                runningGuid != null &&
+                (dataSource.decodeAffiliationInfo(runningGuid)?.testDelayMillis ?: 0L) < 0L &&
+                Tuning.isUnbypassable(runningGuid)
+            ) {
+                onConnectFailed(canMove = false)
+                dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+            }
         }
     }
 
@@ -1270,9 +1645,11 @@ class MainViewModel(
     private companion object {
         const val TEST_RESULT_FLUSH_INTERVAL_MS = 500L
         const val CONNECT_TIMEOUT_MS = 25_000L
+        const val AETHER_POLL_MS = 700L
         const val VERIFY_SETTLE_MS = 400L
-        const val VERIFY_RETRY_MS = 900L
-        const val VERIFY_MAX_ATTEMPTS = 2
+        /** How long the first retry waits; each further retry waits this much longer again. */
+        const val VERIFY_RETRY_MS = 1_500L
+        const val VERIFY_MAX_ATTEMPTS = 3
         const val FAILURE_FEEDBACK_MS = 3_800L
     }
 }

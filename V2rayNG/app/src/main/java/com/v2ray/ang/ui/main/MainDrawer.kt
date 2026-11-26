@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,27 +45,36 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     Subscriptions(R.drawable.ic_subscriptions_24dp, R.string.title_sub_setting),
     PerAppProxy(R.drawable.ic_per_apps_24dp, R.string.per_app_proxy_settings),
     Routing(R.drawable.ic_routing_24dp, R.string.routing_settings_title),
-    GamingMode(R.drawable.ic_gaming_24dp, R.string.title_gaming_mode),
+    /** Not a screen: opens the DNS mode card on the main screen. */
+    GamingMode(R.drawable.ic_dns_mode_24dp, R.string.gaming_title),
     Cloudflare(R.drawable.ic_cloud_download_24dp, R.string.cloudflare_title),
     SpeedTest(R.drawable.ic_flash_on_24dp, R.string.speedtest_title),
     Settings(R.drawable.ic_settings_24dp, R.string.title_settings),
     CheckUpdate(R.drawable.ic_check_update_24dp, R.string.update_check_for_update),
     BackupRestore(R.drawable.ic_restore_24dp, R.string.title_configuration_backup_restore),
+    XboxDns(R.drawable.ic_search_24dp, R.string.xbox_dns_title),
+    PublicConfigs(R.drawable.ic_cloud_download_24dp, R.string.public_title),
+    FirefoxVpn(R.drawable.rx_fox_badge, R.string.firefox_vpn_title),
+    Log(R.drawable.ic_logcat_24dp, R.string.drawer_app_log),
     About(R.drawable.ic_about_24dp, R.string.title_about)
 }
 
-/** Subscriptions, per-app, routing and gaming mode live in the quick card beside the connect button. */
+/** Subscriptions, per-app, routing and settings live in the quick card beside the connect button. */
 internal val quickSheetItems = listOf(
     MainDestination.Subscriptions,
     MainDestination.PerAppProxy,
     MainDestination.Routing,
+    MainDestination.Settings,
     MainDestination.GamingMode,
 )
 
 private val drawerItems = listOf(
-    MainDestination.Settings,
+    MainDestination.PublicConfigs,
+    MainDestination.XboxDns,
+    MainDestination.FirefoxVpn,
     MainDestination.CheckUpdate,
     MainDestination.BackupRestore,
+    MainDestination.Log,
     MainDestination.About,
 )
 
@@ -143,7 +154,18 @@ fun MainDrawerContent(
                     ),
                     selected = false,
                     onClick = { onNavigate(item) },
-                    icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
+                    // The fox keeps its own colours; the other marks take the ink.
+                    icon = {
+                        Icon(
+                            painterResource(item.iconRes),
+                            contentDescription = null,
+                            tint = if (item == MainDestination.FirefoxVpn) {
+                                Color.Unspecified
+                            } else {
+                                LocalContentColor.current
+                            }
+                        )
+                    },
                     badge = badge,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier

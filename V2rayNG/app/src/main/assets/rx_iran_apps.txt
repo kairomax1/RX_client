@@ -1,0 +1,380 @@
+# Iranian apps, as this phone can know them.
+#
+# One entry per line. A line with a dot in it is a package name: an app matches
+# when its package is that name, or begins with it followed by a dot. A line
+# without a dot is a piece of an app's name, and matches whether the phone shows
+# that name in Persian or in the Latin alphabet. Lines starting with # are notes.
+#
+# These apps are the ones that must not arrive from a foreign address: a bank
+# that sees a foreign address refuses the login, and a shop that sees one shows
+# the wrong prices. The app picks them out and sends them on the phone's own
+# line; the owner can change every one of them afterwards.
+
+# ── Shops and markets ────────────────────────────────────────────
+com.farsitel.bazaar
+ir.cafebazaar
+ir.cafebazaar.pardakht
+ir.mservices.market
+ir.myket
+ir.sib.app
+com.divar
+ir.divar
+com.digikala
+ir.digikala
+ir.basalam
+ir.torob
+ir.sheypoor
+ir.emalls
+ir.bonbast
+ir.technolife
+ir.mobit
+ir.zoodfood
+ir.snappfood
+ir.jabama
+ir.alibaba.android
+ir.alibaba.travel
+ir.mrbilit
+ir.miare
+ir.okala
+ir.modiseh
+ir.sabzjavanan
+digikala
+دیجی کالا
+دیجیکالا
+divar
+دیوار
+basalam
+باسلام
+torob
+ترب
+sheypoor
+شیپور
+myket
+مایکت
+cafebazaar
+کافه بازار
+cafe bazaar
+bazaar myket
+snappfood
+اسنپ فود
+jabama
+جاباما
+mrbilit
+mr bilit
+مستر بلیط
+
+# ── Travel and transport ────────────────────────────────────────
+cab.snapp.passenger
+ir.snapp
+ir.snapp.passenger
+ir.tapsi.passenger
+ir.tapsi
+ir.alopeyk
+ir.miare.driver
+snapp
+اسنپ
+tapsi
+تپسی
+alopeyk
+الوپیک
+miare
+میاره
+
+# ── Messengers and social ───────────────────────────────────────
+ir.eitaa.messenger
+ir.bale.messenger
+ir.rubika.messenger
+ir.rubika
+ir.soroush.messenger
+ir.gap.messenger
+ir.igap
+ir.hamtamessage
+ir.virgool
+ir.clubhouse.iran
+ir.facenama
+eitaa
+ایتا
+bale
+بله
+rubika
+روبیکا
+soroush
+سروش
+igap
+آی گپ
+آیگپ
+gap messenger
+virgool
+ویرگول
+
+# ── Video, music and reading ────────────────────────────────────
+ir.aparat.app
+com.aparat.android
+ir.namava
+ir.filimo
+ir.telewebion
+ir.tamasha
+ir.sibvideo
+ir.irib
+ir.iribtv
+ir.shabakeh3
+ir.radiojavan
+ir.navayemahdi
+aparat
+آپارات
+namava
+نماوا
+filimo
+فیلیمو
+telewebion
+تلوبیون
+tamasha
+تماشا
+radio javan
+رادیو جوان
+
+# ── News and sport ──────────────────────────────────────────────
+ir.varzesh3
+ir.tarafdari
+ir.zoomit
+ir.digiato
+ir.zoomg
+ir.irna
+ir.isna
+ir.farsnews
+ir.tasnimnews
+ir.mehrnews
+ir.mashreghnews
+ir.asriran
+ir.entekhab
+ir.khabaronline
+ir.tabnak
+ir.fararu
+ir.aftabnews
+ir.khabarvarzeshi
+ir.iranpress
+ir.irinn
+varzesh3
+ورزش سه
+ورزش۳
+tarafdari
+طرفداری
+zoomit
+زومیت
+digiato
+دیجیاتو
+zoomg
+زومج
+irna
+ایرنا
+isna
+ایسنا
+farsnews
+خبرگزاری فارس
+tasnim
+تسنیم
+mehrnews
+خبرگزاری مهر
+mashregh
+مشرق
+asriran
+عصر ایران
+entekhab
+انتخاب
+khabaronline
+خبرآنلاین
+tabnak
+تابناک
+fararu
+فرارو
+
+# ── Banks and payment ───────────────────────────────────────────
+ir.bmi
+ir.bank.melli
+ir.bank.mellat
+ir.bank.sepah
+ir.bank.saderat
+ir.bank.tejarat
+ir.bank.pasargad
+ir.bank.parsian
+ir.bank.saman
+ir.bank.sina
+ir.bank.karafarin
+ir.bank.ayandeh
+ir.bank.refah
+ir.bank.maskan
+ir.bank.tosee
+ir.bank.sarmaye
+ir.bank.ghavamin
+ir.bank.ansar
+ir.bank.hekmat
+ir.bank.iranzamin
+ir.bank.shahr
+ir.bank.mehr
+ir.bank.dey
+ir.bank.noor
+ir.bank.keshavarzi
+ir.bank.sanatmadan
+ir.bank.post
+ir.zarinpal
+ir.payping
+ir.jibit
+ir.digipay
+ir.tala
+ir.nobitex
+ir.wallex
+ir.ramzinex
+ir.bitpin
+ir.tabdeal
+ir.exir
+ir.behpardakht
+ir.pasargad
+ir.saman
+ir.sina
+ir.mellat
+ir.sepah
+ir.saderat
+ir.tejarat
+ir.parsian
+zarinpal
+زرین پال
+payping
+پی پینگ
+nobitex
+نوبیتکس
+wallex
+والکس
+ramzinex
+رمزینکس
+bitpin
+بیت پین
+tabdeal
+تبدیل
+bank mellat
+بانک ملت
+bank melli
+بانک ملی
+bank sepah
+بانک سپه
+bank saderat
+بانک صادرات
+bank tejarat
+بانک تجارت
+bank pasargad
+بانک پاسارگاد
+bank parsian
+بانک پارسیان
+bank saman
+بانک سامان
+bank sina
+بانک سینا
+بانک
+ملت
+صادرات
+تجارت
+پاسارگاد
+پارسیان
+سامان
+
+# ── Operators and internet providers ────────────────────────────
+ir.irancell
+ir.mci
+ir.rightel
+ir.shatel
+ir.asiatech
+ir.pishgaman
+ir.parsonline
+ir.respina
+ir.dotin
+ir.fanava
+ir.tosegar
+irancell
+ایرانسل
+rightel
+رایتل
+همراه اول
+hamrahe aval
+shatel
+شاتل
+asiatech
+آسیاتک
+pishgaman
+پیشگامان
+parsonline
+پارس آنلاین
+
+# ── Government, education and everyday services ─────────────────
+ir.gov
+ir.irangov
+ir.post
+ir.tax
+ir.epolice
+ir.justice
+ir.salamat
+ir.behdasht
+ir.amozesh
+ir.shad
+ir.da
+ir.sanad
+ir.divan
+ir.rahvar
+ir.navar
+ir.ghabz
+ir.charge
+ir.bill
+ir.ostan
+ir.shahrdari
+ir.weather
+ir.hava
+ir.namaz
+ir.quran
+ir.azan
+ir.metro
+ir.tehranmetro
+ir.bus
+ir.rail
+ir.iranair
+ir.iranhava
+ir.iran aseman
+shad
+شاد
+ghabz
+قبض
+rahvar
+راهور
+metro
+مترو
+
+# ── Words that name an Iranian app in Persian ───────────────────
+ایران
+ایرانی
+تهران
+مشهد
+اصفهان
+شیراز
+تبریز
+کرمان
+اهواز
+قم
+یزد
+کرمانشاه
+گیلان
+مازندران
+فروشگاه ایرانی
+پرداخت
+کیف پول
+شارژ
+بسته اینترنت
+سامانه
+دولت
+خدمات دولتی
+سنجش
+آموزش
+مدرسه
+دانشگاه
+طلاب
+حوزه
+نماز
+قرآن
+اذان
+تقویم

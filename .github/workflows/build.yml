@@ -52,7 +52,7 @@ jobs:
         with:
           log-accepted-android-sdk-licenses: false
           cmdline-tools-version: '14742923'
-          packages: "platforms;android-37.0 build-tools;37.0.0 build-tools;35.0.0 build-tools;30.0.3 platform-tools"
+          packages: "platforms;android-37.0 build-tools;37.0.0 platform-tools"
 
       - name: Accept licenses and install NDK
         run: |
@@ -90,6 +90,86 @@ jobs:
           mkdir -p V2rayNG/app/libs
           cp -r libs/* V2rayNG/app/libs/
 
+      # ---- Aether engine (optional) ------------------------------------------------------
+      # Built from source once and cached. Every step may fail without failing the build:
+      # the app then simply reports that Aether is not included.
+      - name: Restore cached Aether engine
+        id: cache-aether
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/libs-aether
+          key: aether-engine-${{ runner.os }}-${{ hashFiles('build-aether.sh') }}
+
+      - name: Install toolchain for the Aether engine
+        if: steps.cache-aether.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.3.11579264" > /dev/null
+          echo "AETHER_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Build the Aether engine
+        id: build-aether
+        if: steps.cache-aether.outputs.cache-hit != 'true'
+        continue-on-error: true
+        timeout-minutes: 90
+        run: |
+          set -o pipefail
+          bash build-aether.sh 2>&1 | tee "$RUNNER_TEMP/aether-build.log" | tail -n 400
+
+      - name: Surface Aether build errors
+        if: steps.cache-aether.outputs.cache-hit != 'true' && steps.build-aether.outcome != 'success'
+        continue-on-error: true
+        run: |
+          rm -rf libs-aether
+          echo "::warning::Aether engine was not built; this APK ships without it."
+          if [ -f "$RUNNER_TEMP/aether-build.log" ]; then
+            grep -nE "^error|ERROR|error:|panicked|No such file|not found|failed" "$RUNNER_TEMP/aether-build.log" | tail -n 25 | while IFS= read -r line; do
+              echo "::warning::${line}"
+            done
+          fi
+
+      - name: Cache Aether engine
+        if: steps.cache-aether.outputs.cache-hit != 'true' && steps.build-aether.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/libs-aether
+          key: aether-engine-${{ runner.os }}-${{ hashFiles('build-aether.sh') }}
+
+      - name: Copy the Aether engine into the app module
+        run: |
+          if [ -f libs-aether/arm64-v8a/libaether.so ]; then
+            SYSROOT_LIB="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
+            for abi in arm64-v8a armeabi-v7a x86_64; do
+              mkdir -p "V2rayNG/app/libs/${abi}"
+              cp libs-aether/${abi}/*.so "V2rayNG/app/libs/${abi}/"
+              case "$abi" in
+                arm64-v8a)   triple="aarch64-linux-android" ;;
+                armeabi-v7a) triple="arm-linux-androideabi" ;;
+                x86_64)      triple="x86_64-linux-android" ;;
+              esac
+              if [ -f "V2rayNG/app/libs/${abi}/libc++_shared.so" ] && [ -f "${SYSROOT_LIB}/${triple}/libc++_shared.so" ]; then
+                cp "${SYSROOT_LIB}/${triple}/libc++_shared.so" "V2rayNG/app/libs/${abi}/libc++_shared.so"
+              fi
+            done
+            # Verify all undefined symbols of libaether.so against NDK 30 libc++_shared.so (when needed)
+            LLVM_NM=$(ls "$ANDROID_HOME"/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm | head -1)
+            if [ -f "V2rayNG/app/libs/arm64-v8a/libc++_shared.so" ]; then
+              "$LLVM_NM" -D --defined-only "V2rayNG/app/libs/arm64-v8a/libc++_shared.so" | awk '{print $NF}' | sort -u > "$RUNNER_TEMP/libcxx_syms.txt"
+              MISSING=$("$LLVM_NM" -D --undefined-only "V2rayNG/app/libs/arm64-v8a/libaether.so" | awk '{print $NF}' | grep '^_Z.*__ndk1' | grep -vxFf "$RUNNER_TEMP/libcxx_syms.txt" || true)
+              if [ -n "$MISSING" ]; then
+                echo "::warning::Missing NDK C++ symbols in NDK 30 libc++_shared.so: $MISSING"
+              fi
+            fi
+            echo "Aether engine included (commit $(cat libs-aether/AETHER_COMMIT))"
+            ls -la V2rayNG/app/libs/arm64-v8a
+          else
+            echo "::warning::No Aether engine in this build."
+          fi
+
       - name: Resolve Xray core version
         run: |
           cd AndroidLibXrayLite
@@ -125,17 +205,12 @@ jobs:
         if: failure()
         run: |
           python3 - <<'PYEOF'
-          import os
+          import os, re
           path = os.path.join(os.environ["RUNNER_TEMP"], "rx-validation.log")
           if os.path.exists(path):
-              lines = open(path, encoding="utf-8", errors="replace").readlines()
-              keys = ("e:", "FAILED", "Caused by:", "Manifest merger failed", "uses-sdk", "minSdkVersion", "AGPBI:", "What went wrong", "Execution failed")
-              for i, line in enumerate(lines):
-                  if any(k in line for k in keys):
-                      for j in range(max(0, i-1), min(len(lines), i+3)):
-                          msg = lines[j].rstrip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-                          if msg.strip():
-                              print("::error::" + msg)
+              for line in open(path, encoding="utf-8", errors="replace"):
+                  if line.startswith("e:") or "FAILED" in line or line.startswith("Caused by:"):
+                      print("::error::" + line.strip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
           PYEOF
 
       - name: Load signing key
@@ -163,9 +238,10 @@ jobs:
           cd V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           chmod +x gradlew
-          # Build unsigned; we sign explicitly below with jarsigner (v1) + zipalign to guarantee
-          # v1 (JAR) signature, which some installers require to avoid "package appears to be invalid".
-          ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug
+          # Build unsigned; sign below with jarsigner v1-only for maximum install compatibility.
+          ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
+            -Prx.versionCode="$((4000004 + GITHUB_RUN_NUMBER))" \
+            -Prx.versionName="1.2.1"
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
@@ -176,11 +252,10 @@ jobs:
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # v1-only JAR signing. targetSdk is set to 29 to allow v1-only verification.
+          # v1-only JAR signing. targetSdk is 29 so v1-only is accepted.
           # No manifest binary patching.
           set -euo pipefail
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
@@ -200,7 +275,7 @@ jobs:
             }
             mv "$apk.aligned" "$apk"
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
-            echo "$VERIFY" | head -40
+            echo "$VERIFY" | head -20
             echo "$VERIFY" | grep -q "v1 scheme (JAR signing): true" || {
               DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
               echo "::error::$apk missing v1: $DETAIL"
@@ -216,9 +291,7 @@ jobs:
           # have to uninstall before installing this build.
           APK=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*arm64-v8a.apk | head -1)
           echo "Checking $APK"
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
           grep -qi "$EXPECTED_SHA256" "$RUNNER_TEMP/certs.txt" || {
             echo "::error::APK is not signed with the RX VPN release key; in-place updates would fail"
@@ -235,31 +308,122 @@ jobs:
           done
           echo "All release and debug APKs carry the same certificate."
 
+      - name: Refuse an APK that a phone cannot update
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          # 4000004 is the highest versionCode any earlier build carries, so anything
+          # above it is newer than everything that came before. A file at or below it
+          # would install on a clean phone and silently refuse to update one that has
+          # RX VPN on it already - which is the report this step exists to make
+          # impossible to ship again.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in *.apk; do
+            CODE=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+            NAME=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+            echo "$apk: versionCode=$CODE versionName=$NAME"
+            if [ -z "$CODE" ] || [ "$CODE" -le 4000004 ]; then
+              echo "::error::$apk carries versionCode ${CODE:-none}; it must be greater than 4000004 or a phone with RX VPN installed will not take it."
+              exit 1
+            fi
+          done
+
       - name: Report APK facts
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release
         run: |
-          # Every fact that decides whether a phone accepts the package is printed as an
-          # annotation, so a failed install can be diagnosed without downloading the APK.
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          for apk in *.apk; do
-            "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
-              | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" \
-              | while read -r line; do echo "::notice title=$apk::$line"; done
-            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$apk" 2>&1 \
-              | grep -E "Verified using|v1 scheme|v2 scheme|v3 scheme|v4 scheme|Signer #1|ERROR|WARNING" \
-              | while read -r line; do echo "::notice title=signature::$apk: $line"; done
+          # Every fact that decides whether a phone accepts the package, in one block.
+          # A check-run annotation only keeps the first line of a step's own output, so
+          # the facts are also written to the job summary, where nothing is truncated.
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          {
+            echo "## APK facts"
+            echo '```'
+            for apk in *.apk; do
+              echo "== $apk"
+              "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
+                | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:|^split:"
+              "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$apk" 2>&1 \
+                | grep -E "Verified using|Number of signers|Signer #1 certificate SHA-256|WARNING"
+              "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$apk" 2>/dev/null \
+                | grep -icE "extractNativeLibs=..true" | sed -e "s/^/extractNativeLibs=true count: /"
+            done
+            echo '```'
+          } | tee "$GITHUB_STEP_SUMMARY"
+          # Emit at most 6 concise notices so GitHub does not drop any under the per-step cap.
+          SAMPLE=$(ls RXVPN_*_arm64-v8a.apk | head -1)
+          BADGE=$("$BUILD_TOOLS/aapt2" dump badging "$SAMPLE" 2>/dev/null \
+            | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" | tr '\n' ' ')
+          echo "::notice title=badging::$SAMPLE $BADGE"
+          EXTRACT_FLAG=$("$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$SAMPLE" 2>/dev/null \
+            | grep -i "extractNativeLibs" | head -1 | xargs)
+          echo "::notice title=manifest::$SAMPLE ${EXTRACT_FLAG:-extractNativeLibs_MISSING}"
+          LIBS_SUMMARY=$(unzip -v "$SAMPLE" | grep -E "lib/arm64-v8a/" | awk '{print $8 ":" $3}' | tr '\n' ' ')
+          echo "::notice title=nativelibs::$LIBS_SUMMARY"
+          SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
+            | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
+          echo "::notice title=signature::$SIG_SUMMARY"
+          for scheme in "v2 scheme" "v3 scheme"; do
+            "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
+              | grep -qE "Verified using ${scheme}.*: true" || {
+                echo "::error::$SAMPLE missing ${scheme} signature"
+                exit 1
+              }
           done
+          # Compare against released v1.0.1 to confirm identical signing key and packaging shape.
+          if curl -fsSL "https://github.com/kairomax1/RX_client/releases/download/v1.0.1/RXVPN_1.0.1_arm64-v8a.apk" -o "$RUNNER_TEMP/v101.apk"; then
+            V101_SIG=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/v101.apk" 2>&1 \
+              | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
+            echo "::notice title=v1.0.1-sig::$V101_SIG"
+          fi
+
+      - name: Compare APK with v1.0.1
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          SAMPLE=$(ls RXVPN_*_arm64-v8a.apk | head -1)
+          V101="$RUNNER_TEMP/v101.apk"
+          if [ -f "$V101" ]; then
+            V101_CERT=$("$BUILD_TOOLS/apksigner" verify --print-certs "$V101" 2>&1 | grep "SHA-256 digest" | head -1 | xargs)
+            V12_CERT=$("$BUILD_TOOLS/apksigner" verify --print-certs "$SAMPLE" 2>&1 | grep "SHA-256 digest" | head -1 | xargs)
+            echo "::notice title=cert-compare::v101=[$V101_CERT] | v12=[$V12_CERT]"
+
+            "$BUILD_TOOLS/aapt2" dump badging "$V101" 2>/dev/null > "$RUNNER_TEMP/v101.badge"
+            "$BUILD_TOOLS/aapt2" dump badging "$SAMPLE" 2>/dev/null > "$RUNNER_TEMP/v12.badge"
+            BADGE_DIFF=$(diff -u "$RUNNER_TEMP/v101.badge" "$RUNNER_TEMP/v12.badge" | grep -E "^[+-][^+-]" | tr '\n' '|' | head -c 900)
+            echo "::notice title=badge-diff::$BADGE_DIFF"
+
+            "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$V101" 2>/dev/null > "$RUNNER_TEMP/v101.xml"
+            "$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$SAMPLE" 2>/dev/null > "$RUNNER_TEMP/v12.xml"
+            XML_DIFF=$(diff -u "$RUNNER_TEMP/v101.xml" "$RUNNER_TEMP/v12.xml" | grep -E "^[+-][^+-]" | grep -E "E: |name\(|icon\(|foregroundServiceType|process\(|extractNativeLibs" | tr '\n' '|' | head -c 900)
+            echo "::notice title=manifest-diff::$XML_DIFF"
+
+            unzip -Z1 "$V101" | sort > "$RUNNER_TEMP/v101.files"
+            unzip -Z1 "$SAMPLE" | sort > "$RUNNER_TEMP/v12.files"
+            ZIP_DIFF=$(comm -13 "$RUNNER_TEMP/v101.files" "$RUNNER_TEMP/v12.files" | grep -vE "^assets/|^res/|^classes" | tr '\n' '|' | head -c 900)
+            echo "::notice title=new-nonasset-files::$ZIP_DIFF"
+
+            Z_V101=$("$BUILD_TOOLS/zipalign" -c -p 4 "$V101" && echo OK || echo FAIL)
+            Z_V12=$("$BUILD_TOOLS/zipalign" -c -p 4 "$SAMPLE" && echo OK || echo FAIL)
+            echo "::notice title=zipalign-p::v101=$Z_V101 | v12=$Z_V12"
+          fi
+          READELF=$(ls "$ANDROID_HOME"/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf | head -1)
+          mkdir -p "$RUNNER_TEMP/so_inspect"
+          unzip -o -j "$SAMPLE" "lib/arm64-v8a/*" -d "$RUNNER_TEMP/so_inspect" > /dev/null
+          ELF_INFO=""
+          for f in "$RUNNER_TEMP/so_inspect"/*.so; do
+            bn=$(basename "$f")
+            tp=$("$READELF" -h "$f" 2>/dev/null | grep "Type:" | awk '{print $2}')
+            al=$("$READELF" -l "$f" 2>/dev/null | grep "LOAD" | awk '{print $NF}' | sort -u | tr '\n' ',')
+            it=$("$READELF" -l "$f" 2>/dev/null | grep -c "INTERP" || true)
+            ELF_INFO="${ELF_INFO}${bn}(type=${tp},align=${al},interp=${it}); "
+          done
+          echo "::notice title=elf-check::$ELF_INFO"
 
       - name: Verify APK structure and write checksums
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release
         run: |
           # apksigner proves the signature; these prove the file is a readable, aligned APK and
           # give the tester a hash to compare against what actually landed on the phone.
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           for apk in *.apk; do
             echo "== $apk"
             "$BUILD_TOOLS/aapt2" dump badging "$apk" 2>/dev/null \
@@ -277,9 +441,7 @@ jobs:
           # These lines are copied into the release notes so the exact packaging of the shipped file
           # can be inspected later without downloading anything.
           set +e
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/30.0.3"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          [ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
           {
             echo '```'
@@ -297,18 +459,50 @@ jobs:
             echo '```'
           } > APK-FACTS.txt 2>&1
           cat APK-FACTS.txt
-          while IFS= read -r line; do
-            [ -n "$line" ] && echo "::notice title=apk-facts::$line"
-          done < APK-FACTS.txt
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: RXVPN-apk
+          compression-level: 0
           path: |
             V2rayNG/app/build/outputs/apk/playstore/release/*.apk
             V2rayNG/app/build/outputs/apk/playstore/release/SHA256SUMS.txt
             V2rayNG/app/build/outputs/apk/playstore/release/APK-FACTS.txt
+          if-no-files-found: error
+
+      - name: Prepare direct APK and standard ZIP files
+        working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        run: |
+          mkdir -p "$RUNNER_TEMP/direct"
+          ARM64_APK=$(ls RXVPN_*_arm64-v8a.apk | head -1)
+          UNI_APK=$(ls RXVPN_*_universal.apk | head -1)
+          cp "$ARM64_APK" "$RUNNER_TEMP/direct/RXVPN_1.2_arm64-v8a.apk"
+          cp "$UNI_APK" "$RUNNER_TEMP/direct/RXVPN_1.2_universal.apk"
+          # Standard Info-ZIP (no Zip64, no streaming data descriptor) so built-in Android File Managers extract it cleanly.
+          zip -0 -j "$RUNNER_TEMP/direct/RXVPN_1.2_arm64-v8a.zip" "$ARM64_APK"
+          unzip -t "$RUNNER_TEMP/direct/RXVPN_1.2_arm64-v8a.zip"
+          ls -lh "$RUNNER_TEMP/direct"
+
+      - name: Upload direct arm64-v8a APK (no ZIP wrapper)
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ${{ runner.temp }}/direct/RXVPN_1.2_arm64-v8a.apk
+          if-no-files-found: error
+
+      - name: Upload standard arm64-v8a ZIP (non-Zip64)
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ${{ runner.temp }}/direct/RXVPN_1.2_arm64-v8a.zip
+          if-no-files-found: error
+
+      - name: Upload direct universal APK (no ZIP wrapper)
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ${{ runner.temp }}/direct/RXVPN_1.2_universal.apk
           if-no-files-found: error
 
   release:
@@ -363,13 +557,11 @@ jobs:
             DRAFT_FLAG=""
             LATEST_FLAG="--latest"
           fi
-          ASSETS=(apk/*.apk apk/SHA256SUMS.txt)
-          [ -f apk/APK-FACTS.txt ] && ASSETS+=(apk/APK-FACTS.txt)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" apk/*.apk apk/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md" $DRAFT_FLAG
           else
-            gh release create "$TAG" "${ASSETS[@]}" \
+            gh release create "$TAG" apk/*.apk apk/SHA256SUMS.txt \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "RX VPN $TAG" \
