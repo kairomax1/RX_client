@@ -188,6 +188,12 @@ jobs:
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
             echo "== sign $apk"
             zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' 'META-INF/*.MF' 2>/dev/null || true
+            PATCH_OUT=$(python3 "$GITHUB_WORKSPACE/.github/scripts/patch_apk_minsdk.py" "$apk" 23 2>&1) || {
+              echo "$PATCH_OUT"
+              echo "::error::patch failed for $apk: ${PATCH_OUT//$'\n'/ }"
+              exit 1
+            }
+            echo "$PATCH_OUT"
             "$ZIPALIGN" -f 4 "$apk" "$apk.aligned"
             mv "$apk.aligned" "$apk"
             SIGN_OUT=$("$APKSIGNER" sign \
