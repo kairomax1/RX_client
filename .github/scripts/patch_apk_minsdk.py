@@ -55,17 +55,31 @@ with zipfile.ZipFile(apk, 'r') as zin, zipfile.ZipFile(tmp, 'w') as zout:
                                 break
                 i = j + 4
             if patched == 0:
-                # debug: dump any near-misses
-                dbg = []
-                i = 0
+                # Global fallback: patch any Res_value int_dec 24 in the manifest.
+                pat = b'\x08\x00\x00\x10\x18\x00\x00\x00'
+                rep = b'\x08\x00\x00\x10' + (23).to_bytes(4,'little')
+                count = 0
+                start = 0
                 while True:
-                    j = b.find(NEEDLE, i)
-                    if j < 0:
+                    k = b.find(pat, start)
+                    if k < 0:
                         break
-                    chunk = b[j:j+24].hex()
-                    dbg.append(chunk)
-                    i = j + 4
-                raise SystemExit(f'minSdkVersion attr not patched; found name occurrences={len(dbg)} details={dbg[:5]}')
+                    b[k:k+8] = rep
+                    count += 1
+                    start = k + 8
+                if count > 0:
+                    patched = count
+                    print(f'global fallback: patched {count} int_dec 24->23 value(s) in AndroidManifest.xml')
+                else:
+                    dbg = []
+                    i = 0
+                    while True:
+                        j = b.find(NEEDLE, i)
+                        if j < 0:
+                            break
+                        dbg.append(b[j:j+24].hex())
+                        i = j + 4
+                    raise SystemExit(f'minSdkVersion attr not patched; name_occurrences={len(dbg)} details={dbg[:5]}')
             data = bytes(b)
             print(f'patched AndroidManifest.xml minSdkVersion {found_any} -> {target} ({patched} occurrence(s))')
         zi = zipfile.ZipInfo(item.filename)
