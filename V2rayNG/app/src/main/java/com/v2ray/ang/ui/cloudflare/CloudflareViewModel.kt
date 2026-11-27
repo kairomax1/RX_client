@@ -4,13 +4,17 @@ import android.app.Application
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.CloudflareAssistant
+import com.v2ray.ang.handler.IpScanner
+import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.ui.base.BaseViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 
 class CloudflareViewModel(application: Application) : BaseViewModel(application) {
@@ -33,6 +37,17 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
         val fixedName: String? = null,
         val fixedGuid: String? = null,
         val fixedPingMs: Long? = null,
+        val optimizing: Boolean = false,
+        val optimizationProgress: String? = null,
+        val optimization: OptimizationResult? = null,
+    )
+
+    data class OptimizationResult(
+        val address: String,
+        val edgeResponseMs: Long,
+        val downloadMbps: Double?,
+        val uploadMbps: Double?,
+        val configPingMs: Long?,
     )
 
     /** What the hands-off pass decided, so the screen can explain itself. */
@@ -126,6 +141,123 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
         }
     }
 
+    /**
+     * Tests a few of the quickest TLS-responsive edges against Cloudflare's speed endpoint, then
+     * copies the selected config to the best measured edge and records its real core ping. The
+     * upload/download sample is pinned to speed.cloudflare.com, not misreported as VPN throughput.
+     */
+    fun optimizeSelected() {
+        if (_state.value.optimizing || _isLoading.value) return
+        val app = getApplication<Application>()
+        _state.update {
+            it.copy(
+                optimizing = true,
+                optimizationProgress = null,
+                optimization = null,
+            )
+        }
+        launchLoading {
+            try {
+                val (sourceGuid, config) = withContext(Dispatchers.IO) {
+                    CloudflareAssistant.selectedGuid() to CloudflareAssistant.selectedConfig()
+                }
+                if (sourceGuid.isNullOrBlank() || config == null ||
+                    !CloudflareAssistant.isCloudflareConfig(config)
+                ) {
+                    toastError(R.string.cloudflare_optimize_needs_cloudflare)
+                    return@launchLoading
+                }
+                val sni = config.sni?.takeIf { it.isNotBlank() }
+                    ?: config.host?.takeIf { it.isNotBlank() }
+                val reachable = CloudflareAssistant.scan(sni)
+                if (reachable.isEmpty()) {
+                    toastError(R.string.toast_cloudflare_scan_failed)
+                    return@launchLoading
+                }
+                val currentAddress = config.server?.trim().orEmpty()
+                val includeCurrent = CloudflareAssistant.isCloudflareIpv4(currentAddress) &&
+                    reachable.take(MAX_OPTIMIZE_CANDIDATES).none { it.address == currentAddress }
+                val targets = reachable.take(
+                    if (includeCurrent) MAX_OPTIMIZE_CANDIDATES - 1 else MAX_OPTIMIZE_CANDIDATES,
+                ).toMutableList()
+                if (includeCurrent) {
+                    val responseMs = CloudflareAssistant.measure(currentAddress, sni)
+                    if (responseMs != null) {
+                        targets += CloudflareAssistant.ScanResult(currentAddress, responseMs)
+                    }
+                }
+
+                val candidates = mutableListOf<IpScanner.EdgeCandidate>()
+                targets.forEachIndexed { index, edge ->
+                    val speed = IpScanner.measureSpeed(edge.address)
+                    candidates += IpScanner.EdgeCandidate(
+                        address = edge.address,
+                        edgeResponseMs = edge.latencyMs,
+                        downloadMbps = speed.downloadMbps,
+                        uploadMbps = speed.uploadMbps,
+                    )
+                    _state.update {
+                        it.copy(
+                            optimizationProgress = localizedContext.getString(
+                                R.string.cloudflare_optimize_progress,
+                                index + 1,
+                                targets.size,
+                            ),
+                        )
+                    }
+                }
+                val best = IpScanner.bestEdgeCandidate(candidates) ?: run {
+                    toastError(R.string.toast_cloudflare_scan_failed)
+                    return@launchLoading
+                }
+                val configPing = if (best.address == currentAddress) {
+                    CloudflareAssistant.measureRealPing(app, sourceGuid)
+                } else {
+                    val report = withContext(Dispatchers.IO) {
+                        CloudflareAssistant.buildCloudflareConfig(
+                            context = app,
+                            sourceGuid = sourceGuid,
+                            address = best.address,
+                            groupName = groupName,
+                            remarksSuffix = copySuffix,
+                        )
+                    } ?: run {
+                        toastError(R.string.toast_failure)
+                        return@launchLoading
+                    }
+                    _state.update {
+                        it.copy(
+                            fixedName = report.newConfigName,
+                            fixedGuid = report.newConfigGuid,
+                            fixedPingMs = report.latencyMs,
+                        )
+                    }
+                    report.latencyMs
+                }
+                _state.update {
+                    it.copy(
+                        optimization = OptimizationResult(
+                            address = best.address,
+                            edgeResponseMs = best.edgeResponseMs,
+                            downloadMbps = best.downloadMbps,
+                            uploadMbps = best.uploadMbps,
+                            configPingMs = configPing,
+                        ),
+                    )
+                }
+                withContext(Dispatchers.IO) { refresh() }
+                toastSuccess(R.string.cloudflare_optimize_done)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                LogUtil.w(com.v2ray.ang.AppConfig.TAG, "Cloudflare optimizer failed", error)
+                toastError(R.string.toast_failure)
+            } finally {
+                _state.update { it.copy(optimizing = false, optimizationProgress = null) }
+            }
+        }
+    }
+
     fun choose(address: String) {
         _state.value = _state.value.copy(chosenAddress = address)
     }
@@ -214,6 +346,7 @@ class CloudflareViewModel(application: Application) : BaseViewModel(application)
 
     private companion object {
         const val MAX_RESULTS = 6
+        const val MAX_OPTIMIZE_CANDIDATES = 3
 
         /** Enough to give the user a number without starting a core run per config. */
         const val MAX_MEASURE = 3

@@ -223,13 +223,19 @@ object SettingsManager {
     /**
      * Get server via remarks.
      * @param remarks The remarks of the server.
+     * @param additionalGroupId An optional scratch group, not present in decodeAllServerList().
      * @return The ProfileItem.
      */
-    fun getServerViaRemarks(remarks: String?): ProfileItem? {
+    fun getServerViaRemarks(remarks: String?, additionalGroupId: String? = null): ProfileItem? {
         if (remarks.isNullOrEmpty()) {
             return null
         }
-        val serverList = decodeAllServerList()
+        val serverList = buildList {
+            addAll(decodeAllServerList())
+            additionalGroupId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { addAll(MmkvManager.decodeServerList(it)) }
+        }.distinct()
         return serverList
             .mapNotNull { guid -> decodeServerConfig(guid) }
             .firstOrNull { it.remarks == remarks }

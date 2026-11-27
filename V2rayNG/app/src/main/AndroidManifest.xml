@@ -238,6 +238,9 @@
             android:name=".ui.cloudflare.CloudflareActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.ipscanner.IpScannerActivity"
+            android:exported="false" />
+        <activity
             android:name=".ui.speedtest.SpeedTestActivity"
             android:exported="false" />
         <activity

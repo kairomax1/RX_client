@@ -19,6 +19,9 @@ object AppConfig {
     // Default subscription ID for ungrouped servers
     const val DEFAULT_SUBSCRIPTION_ID = "__default_subscription__"
 
+    /** Internal Mozilla tunnel profile; it must never appear as an ordinary server row. */
+    const val FIREFOX_VPN_PROFILE_ID = "firefox-vpn"
+
     /** Preferences mapped to MMKV storage. */
     const val PREF_SNIFFING_ENABLED = "pref_sniffing_enabled"
     const val PREF_ROUTE_ONLY_ENABLED = "pref_route_only_enabled"
@@ -92,6 +95,11 @@ object AppConfig {
 
     /** Maps a source profile to the Cloudflare copy made from it, so a repair refreshes it. */
     const val PREF_CLOUDFLARE_COPY_PREFIX = "pref_cloudflare_copy_"
+
+    /** Local group and source-to-copy map owned by the IP scanner. */
+    const val PREF_IP_SCANNER_GROUP = "pref_ip_scanner_group"
+    const val PREF_IP_SCANNER_COPY_PREFIX = "pref_ip_scanner_copy_"
+    const val PREF_IP_SCANNER_CHAIN_PREFIX = "pref_ip_scanner_chain_"
     const val PREF_SERVICE_RUNNING = "pref_service_running"
     const val PREF_BENCHMARK_PREFIX = "pref_benchmark_"
     const val PREF_GEO_FILES_SOURCES = "pref_geo_files_sources"

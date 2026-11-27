@@ -57,7 +57,7 @@ import java.util.regex.PatternSyntaxException
 internal fun cleanTestDelay(millis: Long): Long = if (millis < 0L) 0L else millis
 
 /** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
-private const val FIREFOX_TUNNEL_GUID = "firefox-vpn"
+private const val FIREFOX_TUNNEL_GUID = AppConfig.FIREFOX_VPN_PROFILE_ID
 
 private fun applyTestDelayResults(
     servers: List<ServersCache>,
@@ -149,16 +149,16 @@ class MainViewModel(
     fun testAllAndConnectBest() {
         connectBestAfterTest = true
         viewModelScope.launch {
-            // Make sure the built-in Aether profile is there as the fallback for a phone with no
-            // working config, and that the list shows it before the test starts.
-            val added = withContext(ioDispatcher) {
-                val before = dataSource.getSubscriptions().sumOf { dataSource.getServerGuidList(it.guid).size }
-                dataSource.ensureAetherProfile()
-                dataSource.getSubscriptions().sumOf { dataSource.getServerGuidList(it.guid).size } != before
-            }
-            if (added) setupGroupTab(forceRefresh = true).join()
+            // Keep the hidden service-owned profile ready for use if every regular config fails.
+            val aetherFallback = withContext(ioDispatcher) { dataSource.ensureAetherProfile() }
             if (withContext(ioDispatcher) { allConfigGuids() }.isEmpty()) {
+                // Service-owned profiles are deliberately absent from ordinary group lists. If
+                // there is nothing else to test, still honour the requested Aether fallback.
                 connectBestAfterTest = false
+                if (aetherFallback != null) {
+                    updateSelectedGuid(aetherFallback)
+                    _connectBestTick.update { it + 1 }
+                }
                 return@launch
             }
             startAutoTest(emptySet())

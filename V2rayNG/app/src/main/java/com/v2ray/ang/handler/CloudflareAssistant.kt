@@ -60,6 +60,9 @@ object CloudflareAssistant {
 
     data class ScanResult(val address: String, val latencyMs: Long)
 
+    /** The tested Cloudflare edge sample shared with the standalone IP scanner. */
+    fun edgeAddresses(): List<String> = EDGE_IPS.toList()
+
     /**
      * What the automatic pass did, so the screen and the log can say it without guessing.
      */
@@ -244,6 +247,7 @@ object CloudflareAssistant {
         groupId: String,
         remarksSuffix: String,
     ): String? {
+        if (!isCloudflareIpv4(address)) return null
         val source = MmkvManager.decodeServerConfig(sourceGuid) ?: return null
         val originalAddress = source.server?.trim().orEmpty()
         if (originalAddress.isEmpty()) return null
@@ -258,10 +262,18 @@ object CloudflareAssistant {
         // The profile may already be one of ours (the auto pass selects what it builds), so it is
         // refreshed in place instead of becoming a copy of a copy. Anything else gets a copy, and a
         // second repair of the same source refreshes that copy rather than making another entry.
-        val isOwnCopy = source.subscriptionId == groupId
+        // A local tab can contain user-imported profiles too; only mutate a profile our tool
+        // marked as its own copy. Any other selected source is copied instead.
+        val isOwnCopy = source.subscriptionId == groupId &&
+            source.remarks.trim().endsWith(remarksSuffix)
         val previous = if (isOwnCopy) null else {
             MmkvManager.decodeSettingsString(AppConfig.PREF_CLOUDFLARE_COPY_PREFIX + sourceGuid)
-                ?.takeIf { it.isNotBlank() && MmkvManager.decodeServerConfig(it) != null }
+                ?.takeIf { candidateGuid ->
+                    if (candidateGuid.isBlank() || candidateGuid == sourceGuid) return@takeIf false
+                    val candidate = MmkvManager.decodeServerConfig(candidateGuid) ?: return@takeIf false
+                    candidate.subscriptionId == groupId &&
+                        candidate.remarks.trim().endsWith(remarksSuffix)
+                }
         }
         val targetGuid = if (isOwnCopy) sourceGuid else previous.orEmpty()
 
@@ -325,8 +337,9 @@ object CloudflareAssistant {
         groupName: String,
         remarksSuffix: String,
     ): RepairReport? {
-        // Validate before anything is created, so a profile without a usable host never leaves an
-        // empty Cloudflare tab behind.
+        // Validate before anything is created, so invalid edges or a profile without a usable
+        // host never leave an empty Cloudflare tab behind.
+        if (!isCloudflareIpv4(address)) return null
         val source = MmkvManager.decodeServerConfig(sourceGuid) ?: return null
         val sourceAddress = source.server?.trim().orEmpty()
         if (sourceAddress.isEmpty()) return null

@@ -37,6 +37,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import java.util.concurrent.atomic.AtomicBoolean
 
+/** Keeps service-owned profiles out of the ordinary server groups without removing their records. */
+internal object MainGroupVisibility {
+
+    fun visibleGuids(
+        guids: List<String>,
+        profileFor: (String) -> ProfileItem?,
+    ): List<String> = guids.filterNot { guid ->
+        guid == AppConfig.FIREFOX_VPN_PROFILE_ID || AetherEngine.isAetherProfile(profileFor(guid))
+    }
+
+    /** Empty user groups remain usable; only groups made non-empty solely by hidden profiles vanish. */
+    fun shouldExposeGroup(storedGuids: List<String>, visibleGuids: List<String>): Boolean =
+        storedGuids.isEmpty() || visibleGuids.isNotEmpty()
+}
+
 class MainRepository(
     private val app: AngApplication
 ) : MainDataSource {
@@ -157,7 +172,13 @@ class MainRepository(
         }
         // decodeSubscriptions already leaves out the groups the app keeps for
         // itself, so the tab list cannot inherit "rx public pending" again.
-        result += MmkvManager.decodeSubscriptions()
+        // Aether and Mozilla profiles are implementation details, not config tabs. If a local
+        // group contains only those profiles, suppress that otherwise empty-looking group too.
+        result += MmkvManager.decodeSubscriptions().filter { subscription ->
+            val stored = MmkvManager.decodeServerList(subscription.guid)
+            val visible = MainGroupVisibility.visibleGuids(stored, MmkvManager::decodeServerConfig)
+            MainGroupVisibility.shouldExposeGroup(stored, visible)
+        }
         return result
     }
 
@@ -175,12 +196,14 @@ class MainRepository(
     override fun getTestDelayMillis(guid: String): Long =
         MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis?.let(::cleanTestDelay) ?: 0L
 
-    override fun getServerGuidList(groupId: String): List<String> =
-        if (groupId.isEmpty()) {
+    override fun getServerGuidList(groupId: String): List<String> {
+        val stored = if (groupId.isEmpty()) {
             MmkvManager.decodeAllServerList()
         } else {
             MmkvManager.decodeServerList(groupId)
         }
+        return MainGroupVisibility.visibleGuids(stored, MmkvManager::decodeServerConfig)
+    }
 
     override fun decodeServerConfig(guid: String): ProfileItem? =
         MmkvManager.decodeServerConfig(guid)

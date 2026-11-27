@@ -186,7 +186,7 @@ object CoreConfigContextBuilder {
         try {
             return config.proxyChainProfiles.orEmpty().split(",")
                 .asSequence()
-                .mapNotNull { remark -> SettingsManager.getServerViaRemarks(remark) }
+                .mapNotNull { remark -> SettingsManager.getServerViaRemarks(remark, config.subscriptionId) }
                 .filter { it.server.isNotNullEmpty() }
                 .filter { Utils.isPureIpAddress(it.server!!) || Utils.isValidUrl(it.server!!) }
                 .filter { !it.configType.isComplexType() }
@@ -211,9 +211,9 @@ object CoreConfigContextBuilder {
         try {
             val subItem = MmkvManager.decodeSubscription(config.subscriptionId) ?: return listOf(config)
             val resolved = mutableListOf<ProfileItem>()
-            SettingsManager.getServerViaRemarks(subItem.nextProfile)?.let { resolved.add(it) }
+            SettingsManager.getServerViaRemarks(subItem.nextProfile, config.subscriptionId)?.let { resolved.add(it) }
             resolved.add(config)
-            SettingsManager.getServerViaRemarks(subItem.prevProfile)?.let { resolved.add(it) }
+            SettingsManager.getServerViaRemarks(subItem.prevProfile, config.subscriptionId)?.let { resolved.add(it) }
             return resolved
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to resolve proxy chain from group for '${config.remarks}'", e)

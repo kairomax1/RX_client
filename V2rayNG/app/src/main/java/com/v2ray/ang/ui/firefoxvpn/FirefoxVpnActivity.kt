@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.FirefoxVpnAuth
@@ -75,6 +76,7 @@ import com.v2ray.ang.handler.FirefoxVpnServers
 import com.v2ray.ang.handler.FirefoxVpnStore
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.ServiceRuntimeState
+import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.RxFogBackground
@@ -474,7 +476,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
 
     private companion object {
         /** The profile the core is pointed at; one is enough. */
-        const val TUNNEL_GUID = "firefox-vpn"
+        const val TUNNEL_GUID = AppConfig.FIREFOX_VPN_PROFILE_ID
     }
 
     private var connectJob: Job? = null
@@ -739,6 +741,9 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         )
         com.v2ray.ang.handler.MmkvManager.encodeServerConfig(TUNNEL_GUID, profile)
         com.v2ray.ang.handler.MmkvManager.setSelectServer(TUNNEL_GUID)
+        // The refreshed profile remains hidden as a Mozilla service profile, but the main page
+        // re-reads its groups when this dedicated activity returns.
+        SettingsChangeManager.makeSetupGroupTab()
         com.v2ray.ang.core.LauncherManager.startService(getApplication(), guid = TUNNEL_GUID)
 
         // The relay would answer on loopback even with the core down, so the

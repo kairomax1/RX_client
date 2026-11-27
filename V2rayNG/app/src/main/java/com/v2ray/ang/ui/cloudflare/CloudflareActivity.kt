@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -71,7 +72,7 @@ class CloudflareActivity : BaseComponentActivity() {
 
         CloudflareScreen(
             state = state,
-            isLoading = isLoading || state.scanning,
+            isLoading = isLoading || state.scanning || state.optimizing,
             onBack = { finish() },
             onToggleAntiBlock = viewModel::setAntiBlock,
             onToggleAuto = viewModel::setAutoEnabled,
@@ -79,7 +80,8 @@ class CloudflareActivity : BaseComponentActivity() {
             onChoose = viewModel::choose,
             onApply = viewModel::applyChosen,
             onProbe = viewModel::probeSelected,
-            onAddOther = viewModel::addOtherConfig
+            onAddOther = viewModel::addOtherConfig,
+            onOptimize = viewModel::optimizeSelected,
         )
     }
 }
@@ -95,7 +97,8 @@ fun CloudflareScreen(
     onChoose: (String) -> Unit,
     onApply: () -> Unit,
     onProbe: () -> Unit,
-    onAddOther: (String) -> Unit
+    onAddOther: (String) -> Unit,
+    onOptimize: () -> Unit,
 ) {
     var showOtherDialog by remember { mutableStateOf(false) }
     var otherText by remember { mutableStateOf("") }
@@ -144,22 +147,53 @@ fun CloudflareScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                RxGlassButton(onClick = onScan, enabled = !state.scanning) {
+                RxGlassButton(
+                    onClick = onScan,
+                    enabled = !state.scanning && !state.optimizing,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                ) {
                     Text(stringResource(R.string.cloudflare_scan))
+                }
+                RxGlassButton(
+                    onClick = onOptimize,
+                    enabled = state.isCloudflare && !state.scanning && !state.optimizing,
+                    accent = true,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.cloudflare_optimize))
                 }
             }
 
-            // The numbers below come from a TLS handshake against each edge, not from the config, so
-            // the screen says that instead of pretending they are a config ping.
+            // The edge handshake and speed sample are direct endpoint measurements; neither is
+            // represented as the selected config's real tunnel ping or throughput.
             Text(
                 text = stringResource(R.string.cloudflare_scan_note),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.5.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
             )
+            Text(
+                text = stringResource(R.string.cloudflare_optimize_note),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.5.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+            state.optimizationProgress?.let { progress ->
+                Text(
+                    text = progress,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                )
+            }
+            state.optimization?.let { optimization ->
+                OptimizationCard(optimization)
+            }
 
             state.results.forEach { result ->
                 SettingsMenuItem(
@@ -257,6 +291,55 @@ private fun AutoOutcomeText(@StringRes textRes: Int) {
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
     )
 }
+
+@Composable
+private fun OptimizationCard(result: CloudflareViewModel.OptimizationResult) {
+    RxGlassPanel(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.cloudflare_optimize_edge,
+                    result.address,
+                    result.edgeResponseMs,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = result.downloadMbps?.let {
+                    stringResource(R.string.ipscan_download_mbps, formatCloudflareMbps(it))
+                } ?: stringResource(R.string.ipscan_speed_unavailable),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+            )
+            Text(
+                text = result.uploadMbps?.let {
+                    stringResource(R.string.ipscan_upload_mbps, formatCloudflareMbps(it))
+                } ?: stringResource(R.string.ipscan_speed_unavailable),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+            )
+            Text(
+                text = result.configPingMs?.let {
+                    stringResource(R.string.cloudflare_optimize_config_ping, it)
+                } ?: stringResource(R.string.cloudflare_optimize_config_ping_unavailable),
+                color = if (result.configPingMs != null) MaterialTheme.colorScheme.tertiary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+private fun formatCloudflareMbps(value: Double): String =
+    String.format(java.util.Locale.US, "%.1f", value)
 
 /** The config the last fix produced: its name and the latency that was actually measured. */
 @Composable

@@ -37,6 +37,7 @@ import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.handler.FirefoxVpnStore
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.ServiceRuntimeState
@@ -47,6 +48,7 @@ import com.v2ray.ang.ui.backup.BackupActivity
 import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.checkupdate.CheckUpdateActivity
 import com.v2ray.ang.ui.cloudflare.CloudflareActivity
+import com.v2ray.ang.ui.ipscanner.IpScannerActivity
 import com.v2ray.ang.ui.onboarding.LanguageOnboarding
 import com.v2ray.ang.ui.onboarding.WelcomeMessage
 import com.v2ray.ang.ui.onboarding.WelcomeMessageOverlay
@@ -105,12 +107,19 @@ class MainActivity : HelperBaseComponentActivity() {
         }
 
     private val settingsActivityLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val restartService = SettingsChangeManager.consumeRestartService()
             val refreshGroups = SettingsChangeManager.consumeSetupGroupTab()
             mainViewModel.refreshUiSettings()
             if (refreshGroups) mainViewModel.onAction(MainAction.RefreshGroups)
-            if (restartService) LauncherManager.restartService(this)
+
+            val connectGuid = result.data?.getStringExtra(IpScannerActivity.EXTRA_CONNECT_GUID)
+            if (result.resultCode == RESULT_OK && !connectGuid.isNullOrBlank()) {
+                mainViewModel.updateSelectedGuid(connectGuid)
+                requestServiceStart()
+            } else if (restartService) {
+                LauncherManager.restartService(this)
+            }
         }
 
     private val publicConfigsLauncher =
@@ -271,6 +280,7 @@ class MainActivity : HelperBaseComponentActivity() {
             MainDestination.BackupRestore -> Intent(this, BackupActivity::class.java)
             MainDestination.XboxDns -> Intent(this, com.v2ray.ang.ui.xboxdns.XboxDnsActivity::class.java)
             MainDestination.FirefoxVpn -> Intent(this, com.v2ray.ang.ui.firefoxvpn.FirefoxVpnActivity::class.java)
+            MainDestination.IpScanner -> Intent(this, com.v2ray.ang.ui.ipscanner.IpScannerActivity::class.java)
             MainDestination.Log -> Intent(this, com.v2ray.ang.ui.applog.AppLogActivity::class.java)
             MainDestination.About -> Intent(this, AboutActivity::class.java)
         }
@@ -301,12 +311,31 @@ class MainActivity : HelperBaseComponentActivity() {
     }
 
     private fun requestServiceStart() {
+        if (openFirefoxVpnScreenIfRelayMissing()) return
         if (!SettingsManager.isVpnMode()) {
             startV2Ray()
             return
         }
         val intent = VpnService.prepare(this)
         if (intent == null) startV2Ray() else requestVpnPermission.launch(intent)
+    }
+
+    /** A stale loopback Firefox profile cannot be started like a saved proxy. */
+    private fun openFirefoxVpnScreenIfRelayMissing(): Boolean {
+        // Match the GUID LauncherManager will actually start, not a potentially stale UI snapshot.
+        val selectedGuid = MmkvManager.getSelectServer()
+        val serviceRunning = ServiceRuntimeState.isRunning(this)
+        val tunnelPort = FirefoxVpnStore.loadTunnelPort(this)
+        if (!MainConnectionPolicy.shouldOpenFirefoxVpnScreen(selectedGuid, serviceRunning, tunnelPort)) {
+            return false
+        }
+
+        AppLog.info(
+            AppLog.Section.Connection,
+            "Firefox VPN: the main connect action opened the Firefox screen because its relay is no longer running"
+        )
+        com.v2ray.ang.ui.firefoxvpn.FirefoxVpnActivity.start(this)
+        return true
     }
 
     private fun handleLayoutTestClick() {
@@ -316,6 +345,7 @@ class MainActivity : HelperBaseComponentActivity() {
     }
 
     private fun startV2Ray() {
+        if (openFirefoxVpnScreenIfRelayMissing()) return
         val state = mainViewModel.uiState.value
         if (!MainConnectionPolicy.canConnect(
                 state.isRunning, state.selectedGuid, state.routingMode, state.routedAppCount

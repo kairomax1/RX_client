@@ -189,6 +189,8 @@ object FirefoxVpnRelay {
     private val failures = AtomicInteger(0)
     @Volatile
     private var lastFailureLogAt = 0L
+    @Volatile
+    private var lastDestinationPolicyLogAt = 0L
 
     /** Bytes carried since the relay was started: down is what the phone received. */
     private val bytesDown = java.util.concurrent.atomic.AtomicLong(0)
@@ -235,6 +237,7 @@ object FirefoxVpnRelay {
         this.problem = null
         failures.set(0)
         endpointFailures.reset()
+        lastDestinationPolicyLogAt = 0L
         bytesDown.set(0)
         bytesUp.set(0)
         startedAt.set(System.currentTimeMillis())
@@ -1025,8 +1028,22 @@ object FirefoxVpnRelay {
      */
     private fun noteFailure(reason: String, endpoint: Endpoint? = activeEndpoint) {
         problem = reason
-        val count = failures.incrementAndGet()
         val now = System.currentTimeMillis()
+        if (FirefoxProxyFailurePolicy.isTargetPolicyRejection(reason)) {
+            // A destination denied by Mozilla is not evidence that the proxy or
+            // the rest of the tunnel is down. Keep the route and avoid a futile
+            // country/Worker switch for this one rejected request.
+            if (now - lastDestinationPolicyLogAt > 30_000L) {
+                lastDestinationPolicyLogAt = now
+                AppLog.info(
+                    AppLog.Section.Connection,
+                    "Firefox VPN: proxy denied one destination ($reason); keeping the authenticated route"
+                )
+            }
+            return
+        }
+
+        val count = failures.incrementAndGet()
         if (now - lastFailureLogAt > 15_000) {
             lastFailureLogAt = now
             AppLog.error(
@@ -1040,30 +1057,11 @@ object FirefoxVpnRelay {
         }
     }
 
-    private fun isEndpointFailure(reason: String): Boolean {
-        val status = Regex("HTTP/1\\.[01] (\\d{3})").find(reason)?.groupValues?.getOrNull(1)
-        if (status != null) {
-            val code = status.toIntOrNull() ?: return false
-            return code == 421 || code in 500..599
-        }
-        val lower = reason.lowercase()
-        return listOf(
-            "cannot be reached", "no answer", "did not answer", "timed out", "timeout",
-            "connection reset", "connection refused", "broken pipe", "unreachable", "closed",
-            "handshake",
-        ).any(lower::contains)
-    }
+    private fun isEndpointFailure(reason: String): Boolean =
+        FirefoxProxyFailurePolicy.isEndpointFailure(reason)
 
-    private fun shouldTryWorker(reason: String): Boolean {
-        val status = Regex("HTTP/1\\.[01] (\\d{3})").find(reason)?.groupValues?.getOrNull(1)
-        if (status != null) return status.toIntOrNull()?.let { it in 500..599 } == true
-        val lower = reason.lowercase()
-        return listOf(
-            "cannot be reached", "no answer", "did not answer", "timed out", "timeout",
-            "connection reset", "connection refused", "broken pipe", "unreachable", "closed",
-            "handshake",
-        ).any(lower::contains)
-    }
+    private fun shouldTryWorker(reason: String): Boolean =
+        FirefoxProxyFailurePolicy.shouldTryWorker(reason)
 
     /** Switches only to a spare which already passed the same authenticated CONNECT probe. */
     private fun rotate() {
