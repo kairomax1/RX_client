@@ -444,7 +444,9 @@ object CoreServiceManager {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    AppLog.error(AppLog.Section.Connection, "Firefox VPN: background recovery failed: ${e.message}", e)
+                    val message = "Firefox VPN: background recovery failed: ${e.message ?: e.javaClass.simpleName}"
+                    AppLog.error(AppLog.Section.Connection, message)
+                    LogUtil.e(AppConfig.TAG, message, e)
                     false
                 } finally {
                     firefoxRecoveryInProgress.set(false)
