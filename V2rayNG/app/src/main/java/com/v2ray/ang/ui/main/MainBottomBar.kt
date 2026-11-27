@@ -29,6 +29,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import java.util.Locale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -158,36 +160,44 @@ fun MainBottomBar(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // The design pins this row left to right in every locale.
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    DockSideButton(
-                        onClick = onOpenQuickSheet,
-                        contentDescription = stringResource(R.string.quick_sheet_open),
-                        modifier = Modifier.size(DOCK_BUTTON_HEIGHT),
+            // The design pins this row left to right in every locale. On a narrow
+            // phone or with large system text, shrink side controls before allowing
+            // the connect label to run off the edge.
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val compact = maxWidth < 370.dp || LocalDensity.current.fontScale >= 1.2f
+                val sideSize = if (compact) 54.dp else DOCK_BUTTON_HEIGHT
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_grid_24dp),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
+                        DockSideButton(
+                            onClick = onOpenQuickSheet,
+                            contentDescription = stringResource(R.string.quick_sheet_open),
+                            modifier = Modifier.width(sideSize).height(DOCK_BUTTON_HEIGHT),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_grid_24dp),
+                                contentDescription = null,
+                                modifier = Modifier.size(if (compact) 22.dp else 24.dp),
+                            )
+                        }
+                        PingButton(
+                            enabled = connected && !isTesting,
+                            isTesting = isTesting && connected,
+                            pingMillis = pingMillis.takeIf { connected },
+                            compact = compact,
+                            onClick = { onAction(MainAction.TestCurrentServer) },
+                        )
+                        ConnectButton(
+                            phase = phase,
+                            failureTick = failureTick,
+                            enabled = canConnect || phase != ConnectPhase.Idle,
+                            compact = compact,
+                            onClick = { onAction(MainAction.ToggleService) },
+                            modifier = Modifier.weight(1f).height(DOCK_BUTTON_HEIGHT),
                         )
                     }
-                    PingButton(
-                        enabled = connected && !isTesting,
-                        isTesting = isTesting && connected,
-                        pingMillis = pingMillis.takeIf { connected },
-                        onClick = { onAction(MainAction.TestCurrentServer) },
-                    )
-                    ConnectButton(
-                        phase = phase,
-                        failureTick = failureTick,
-                        enabled = canConnect || phase != ConnectPhase.Idle,
-                        onClick = { onAction(MainAction.ToggleService) },
-                        modifier = Modifier.weight(1f).height(DOCK_BUTTON_HEIGHT),
-                    )
                 }
             }
             if (phase == ConnectPhase.Idle && !canConnect) {
@@ -305,6 +315,8 @@ private fun ExitAddressText(ip: String?, country: String?) {
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
             if (caret != null && typingIp) TypingCaret(ink, caret)
             if (countryProgress.value > 0f || typingCountry) {
@@ -313,6 +325,7 @@ private fun ExitAddressText(ip: String?, country: String?) {
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 10.dp),
                 )
@@ -357,13 +370,14 @@ private fun PingButton(
     enabled: Boolean,
     isTesting: Boolean,
     pingMillis: Long?,
+    compact: Boolean,
     onClick: () -> Unit,
 ) {
     DockSideButton(
         onClick = onClick,
         enabled = enabled,
         contentDescription = stringResource(R.string.connection_test_pending),
-        modifier = Modifier.width(72.dp).height(DOCK_BUTTON_HEIGHT),
+        modifier = Modifier.width(if (compact) 58.dp else 72.dp).height(DOCK_BUTTON_HEIGHT),
     ) {
         val label = when {
             isTesting -> "…"
@@ -418,6 +432,7 @@ private fun ConnectButton(
     phase: ConnectPhase,
     failureTick: Int,
     enabled: Boolean,
+    compact: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -547,24 +562,29 @@ private fun ConnectButton(
         AnimatedContent(
             targetState = label,
             transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = if (compact) 6.dp else 10.dp),
             label = "connectLabel",
         ) { text ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_power_24dp),
                     contentDescription = null,
                     tint = contentColor,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(if (compact) 20.dp else 22.dp),
                 )
                 Text(
                     text = text,
                     color = contentColor,
-                    fontSize = 17.sp,
+                    fontSize = if (compact) 15.sp else 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
             }
         }

@@ -136,6 +136,7 @@ object FirefoxVpnRelay {
         appContext = context.applicationContext
     }
 
+    @Volatile
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private val openSockets = CopyOnWriteArrayList<Socket>()
@@ -176,6 +177,9 @@ object FirefoxVpnRelay {
 
     /** One reading of the counter, taken when it is asked for. */
     data class Usage(val down: Long, val up: Long, val sinceMillis: Long, val open: Int)
+
+    /** True only in the process that currently owns the loopback listener. */
+    fun isRunning(): Boolean = running && serverSocket?.isBound == true && serverSocket?.isClosed == false
 
     /**
      * What this tunnel has carried so far. Counted where the bytes pass, in

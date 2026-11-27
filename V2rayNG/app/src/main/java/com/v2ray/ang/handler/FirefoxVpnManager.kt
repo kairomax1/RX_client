@@ -22,6 +22,8 @@ object FirefoxVpnManager {
         val countryName: String,
         val quotaRemaining: Long,
         val quotaLimit: Long,
+        /** The exact country requested/resolved for this tunnel, used by background recovery. */
+        val countryCode: String = "",
         /** Loopback port the core's HTTP outbound talks to; 0 before the relay starts. */
         val localPort: Int = 0
     )
@@ -117,9 +119,10 @@ object FirefoxVpnManager {
         // recommended one — so choosing a country could land anywhere, which is
         // exactly what was reported. A code that is not in the list is an error to
         // be said out loud, not a reason to pick another one.
-        val country = countries.firstOrNull { it.code == countryCode }
-        if (countryCode != null && countryCode != FirefoxVpnServers.RECOMMENDED_CODE && country == null) {
-            return@withContext ConnectResult.Error("no-such-country:$countryCode")
+        val requestedCountry = countryCode?.trim()?.takeIf { it.isNotEmpty() }
+        val country = countries.firstOrNull { it.code == requestedCountry }
+        if (requestedCountry != null && requestedCountry != FirefoxVpnServers.RECOMMENDED_CODE && country == null) {
+            return@withContext ConnectResult.Error("no-such-country:$requestedCountry")
         }
         val chosenCountry = country ?: FirefoxVpnServers.pickRecommended(countries)
         val countryName = chosenCountry?.name ?: "Recommended"
@@ -149,6 +152,7 @@ object FirefoxVpnManager {
                 countryName = countryName,
                 quotaRemaining = pass.quotaRemaining,
                 quotaLimit = pass.quotaLimit,
+                countryCode = chosenCountry?.code ?: FirefoxVpnServers.RECOMMENDED_CODE,
                 localPort = localPort
             )
         )

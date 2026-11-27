@@ -22,6 +22,7 @@ import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.root.RootLanSharing
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
@@ -32,6 +33,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class CoreVpnService : VpnService(), ServiceControl {
     private lateinit var mInterface: ParcelFileDescriptor
     private var isRunning = false
+    @Volatile
+    private var startAttemptAtMillis = 0L
+    @Volatile
+    private var hasSuccessfullyStartedCore = false
     private var tun2SocksService: Tun2SocksControl? = null
     private val isStartingLock = AtomicBoolean(false)
 
@@ -56,6 +61,8 @@ class CoreVpnService : VpnService(), ServiceControl {
     override fun onDestroy() {
         super.onDestroy()
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service destroyed")
+        hasSuccessfullyStartedCore = false
+        ServiceRuntimeState.markRunning(false)
 
         // Ensure VPN interface is properly closed when the service is destroyed without
         // going through stopAllService() (e.g. when killed unexpectedly). isRunning is
@@ -78,23 +85,43 @@ class CoreVpnService : VpnService(), ServiceControl {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         NotificationManager.ensureForeground()
         // Always-on VPN restarts from OS deliver intent.action == SERVICE_INTERFACE or null intent.
-        // Reset any stuck start lock left by a killed process to allow setupVpnService() to run.
+        // Reset a stale lock only when the OS is recreating this service command.
         val isSystemVpnStart = intent == null || intent.action == SERVICE_INTERFACE
-        if (isSystemVpnStart) {
-            unlockStart()
+        if (isSystemVpnStart) unlockStart()
+
+        // A foreground service may receive duplicate starts. Do not tear down a healthy
+        // tunnel; if this service had already started successfully but the core later
+        // died, allow one controlled rebuild instead of leaving the lock stuck forever.
+        if (CoreServiceManager.isRunning()) {
+            LogUtil.i(AppConfig.TAG, "StartCore-VPN: Core already running; keeping current TUN")
+            return START_STICKY
         }
         if (!tryLockStart()) {
-            LogUtil.w(AppConfig.TAG, "StartCore-VPN: Start already in progress")
-            return START_NOT_STICKY
-        }
-        LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received, systemVpnStart=$isSystemVpnStart")
-        if (!setupVpnService()) {
+            val attemptAge = System.currentTimeMillis() - startAttemptAtMillis
+            if (!hasSuccessfullyStartedCore && attemptAge < 60_000L) {
+                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Start already in progress")
+                return START_STICKY
+            }
             unlockStart()
-            // Stop service if setup fails to avoid infinite restart loops (START_STICKY)
-            stopSelf()
+            if (!tryLockStart()) {
+                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Could not acquire start lock")
+                return START_STICKY
+            }
+        }
+        startAttemptAtMillis = System.currentTimeMillis()
+        LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received, systemVpnStart=$isSystemVpnStart")
+        // If only the core died, the VPN interface is still owned by this live
+        // service. Reuse it rather than establishing a second TUN and replacing
+        // a running tun2socks worker; a brand-new service still needs setup.
+        if ((!isRunning || !::mInterface.isInitialized) && !setupVpnService()) {
+            hasSuccessfullyStartedCore = false
+            unlockStart()
+            // Stop service if setup fails to avoid an infinite START_STICKY loop.
+            stopSelf(startId)
             return START_NOT_STICKY
         }
         startService()
+        hasSuccessfullyStartedCore = CoreServiceManager.isRunning()
         return START_STICKY
     }
 
@@ -342,6 +369,7 @@ class CoreVpnService : VpnService(), ServiceControl {
 //        saveVpnNetworkInfo(configName, info)
         unlockStart()
         isRunning = false
+        hasSuccessfullyStartedCore = false
 
         tun2SocksService?.stopTun2Socks()
         tun2SocksService = null

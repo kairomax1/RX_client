@@ -153,61 +153,79 @@ object FirefoxVpnStore {
         File(storeDir(context), ACCOUNTS_FILE).writeBytes(encrypted)
     }
 
-    // ── Selected country ──────────────────────────────────────────
+    // ── Selected country and live tunnel state ────────────────────
+    //
+    // The VPN core runs in :daemon while this screen normally runs in the app
+    // process. SharedPreferences is cached per process and does not reliably
+    // publish an update to its sibling process. MMKV's multi-process store is
+    // used for the small pieces of state the recovery watcher must read and
+    // write even after the screen has gone away. The old preferences are read
+    // once as a migration path for existing installs.
 
     private const val PREFS_NAME = "firefox_vpn_prefs"
+    private const val KEY_SELECTED_COUNTRY = "rx_firefox_selected_country"
+    private const val KEY_ACTIVE_ACCOUNT = "rx_firefox_active_account"
+    private const val KEY_TUNNEL_PORT = "rx_firefox_tunnel_port"
+    private const val KEY_TUNNEL_COUNTRY = "rx_firefox_tunnel_country"
+    private const val KEY_TUNNEL_NAME = "rx_firefox_tunnel_name"
+    private const val UNSET_INT = Int.MIN_VALUE
+
+    private fun legacyPrefs(context: Context) =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun readString(context: Context, key: String, oldKey: String): String? {
+        val current = MmkvManager.decodeSettingsString(key)
+        if (current != null) return current.takeIf { it.isNotBlank() }
+        val legacy = legacyPrefs(context).getString(oldKey, null)
+        if (!legacy.isNullOrBlank()) MmkvManager.encodeSettings(key, legacy)
+        return legacy?.takeIf { it.isNotBlank() }
+    }
 
     fun saveSelectedCountry(context: Context, countryCode: String) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString("selected_country", countryCode).apply()
+        MmkvManager.encodeSettings(KEY_SELECTED_COUNTRY, countryCode)
     }
 
-    fun loadSelectedCountry(context: Context): String? {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString("selected_country", null)
-    }
+    fun loadSelectedCountry(context: Context): String? =
+        readString(context, KEY_SELECTED_COUNTRY, "selected_country")
 
     fun saveActiveAccountId(context: Context, accountId: String?) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString("active_account", accountId).apply()
+        MmkvManager.encodeSettings(KEY_ACTIVE_ACCOUNT, accountId.orEmpty())
     }
 
-    fun loadActiveAccountId(context: Context): String? {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString("active_account", null)
-    }
+    fun loadActiveAccountId(context: Context): String? =
+        readString(context, KEY_ACTIVE_ACCOUNT, "active_account")
 
-    // ── The tunnel that is up ─────────────────────────────────────
-    //
-    // The screen is not the tunnel. Leaving it used to leave nothing behind that
-    // knew a tunnel was up, so coming back drew a screen with no connection on it
-    // — and the next screen that did draw one saw a tunnel nobody was watching,
-    // which is the "it is cut when I come back" that was reported. The fact is
-    // written down where the service itself can be asked about it afterwards.
-
+    /**
+     * Records the loopback listener the Xray profile currently uses. This is
+     * intentionally cross-process: the daemon may replace the relay while the
+     * Firefox screen is closed, and the screen must adopt the new port rather
+     * than continuing to probe the dead one.
+     */
     fun saveTunnel(context: Context, localPort: Int, countryCode: String, countryName: String) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putInt("tunnel_port", localPort)
-            .putString("tunnel_country", countryCode)
-            .putString("tunnel_name", countryName)
-            .apply()
+        MmkvManager.encodeSettings(KEY_TUNNEL_PORT, localPort)
+        MmkvManager.encodeSettings(KEY_TUNNEL_COUNTRY, countryCode)
+        MmkvManager.encodeSettings(KEY_TUNNEL_NAME, countryName)
     }
 
-    fun loadTunnelPort(context: Context): Int =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getInt("tunnel_port", 0)
+    fun loadTunnelPort(context: Context): Int {
+        val current = MmkvManager.decodeSettingsInt(KEY_TUNNEL_PORT, UNSET_INT)
+        if (current != UNSET_INT) return current.coerceAtLeast(0)
+        val legacy = legacyPrefs(context).getInt("tunnel_port", 0)
+        if (legacy > 0) MmkvManager.encodeSettings(KEY_TUNNEL_PORT, legacy)
+        return legacy
+    }
 
     fun loadTunnelCountry(context: Context): String? =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString("tunnel_country", null)
+        readString(context, KEY_TUNNEL_COUNTRY, "tunnel_country")
 
     fun loadTunnelName(context: Context): String? =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString("tunnel_name", null)
+        readString(context, KEY_TUNNEL_NAME, "tunnel_name")
 
     fun clearTunnel(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .remove("tunnel_port")
-            .remove("tunnel_country")
-            .remove("tunnel_name")
-            .apply()
+        // Store explicit empty values so a process with an older SharedPreferences
+        // cache cannot resurrect a tunnel that has already been disconnected.
+        MmkvManager.encodeSettings(KEY_TUNNEL_PORT, 0)
+        MmkvManager.encodeSettings(KEY_TUNNEL_COUNTRY, "")
+        MmkvManager.encodeSettings(KEY_TUNNEL_NAME, "")
     }
 }

@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.compose
 
+import android.app.ActivityManager
 import androidx.compose.runtime.LongState
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.lifecycle.Lifecycle
@@ -76,6 +77,13 @@ fun rxFloatingBorder(): BorderStroke {
 fun rememberAnimationsEnabled(): Boolean {
     val context = LocalContext.current
     return remember(context) {
+        val lowMemoryPhone = try {
+            val manager = context.getSystemService(ActivityManager::class.java)
+            manager?.isLowRamDevice == true || (manager?.memoryClass ?: Int.MAX_VALUE) <= 128
+        } catch (e: Exception) {
+            false
+        }
+        if (lowMemoryPhone) return@remember false
         try {
             Settings.Global.getFloat(
                 context.contentResolver,

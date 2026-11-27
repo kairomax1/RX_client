@@ -73,6 +73,7 @@ import com.v2ray.ang.handler.FirefoxVpnManager
 import com.v2ray.ang.handler.FirefoxVpnRelay
 import com.v2ray.ang.handler.FirefoxVpnServers
 import com.v2ray.ang.handler.FirefoxVpnStore
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.ServiceRuntimeState
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
@@ -181,6 +182,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun adoptRunningTunnel() {
         val context = getApplication<Application>()
+        if (MmkvManager.getSelectServer() != TUNNEL_GUID) return
         if (!ServiceRuntimeState.isRunning(context)) return
         val port = FirefoxVpnStore.loadTunnelPort(context)
         if (port <= 0) return
@@ -193,6 +195,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             countryName = name,
             quotaRemaining = 0L,
             quotaLimit = 0L,
+            countryCode = country,
             localPort = port,
         )
         _state.update {
@@ -207,17 +210,20 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Reads the relay's own byte counter four times a second while a tunnel is up.
-     * The number comes from the bytes that actually passed, so it is the traffic
-     * used and not an estimate.
+     * Reads the relay's own byte counter periodically while the app process owns
+     * the listener. Updates are display telemetry, not a health check.
      */
     private fun watchUsage() {
         usageJob?.cancel()
         usageJob = viewModelScope.launch {
             while (isActive) {
-                val up = _state.value.connectionInfo != null
-                _state.update { it.copy(usage = if (up) FirefoxVpnRelay.usage() else null) }
-                delay(1_000)
+                val up = _state.value.connectionInfo != null && FirefoxVpnRelay.isRunning()
+                val usage = if (up) FirefoxVpnRelay.usage() else null
+                _state.update { if (it.usage == usage) it else it.copy(usage = usage) }
+                // This is display-only telemetry. Polling once a second forced a
+                // Compose update even on idle phones; slower, change-only updates
+                // keep the screen lighter on low-memory devices.
+                delay(if (up) 3_000 else 8_000)
             }
         }
     }
@@ -472,7 +478,6 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
 
     private var connectJob: Job? = null
     private var monitor: Job? = null
-    private var reconnects: Int = 0
 
     /**
      * The phone's VPN permission, asked for before the first tunnel.
@@ -612,7 +617,6 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 )
             }
             if (connected != null) {
-                reconnects = 0
                 startMonitor(connected.localPort)
             }
         }
@@ -648,7 +652,10 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
      */
     private suspend fun candidates(pass: FirefoxVpnGuardian.ProxyPass): List<String> {
         val countries = _state.value.countries
-        if (countries.isEmpty()) return listOf(_state.value.selectedCountryCode.orEmpty())
+        if (countries.isEmpty()) {
+            return listOf(_state.value.selectedCountryCode?.takeIf { it.isNotBlank() }
+                ?: FirefoxVpnServers.RECOMMENDED_CODE)
+        }
 
         val stored = _state.value.pings
         val known = countries.count { stored.containsKey(it.code) }
@@ -760,53 +767,71 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             AppLog.Section.Connection,
             "Firefox VPN: verified through ${info.countryName} (relay ${info.localPort})"
         )
-        FirefoxVpnStore.saveSelectedCountry(getApplication(), countryCode)
-        FirefoxVpnStore.saveTunnel(getApplication(), info.localPort, countryCode, info.countryName)
+        val actualCountryCode = info.countryCode.ifBlank { countryCode }
+        FirefoxVpnStore.saveSelectedCountry(getApplication(), actualCountryCode)
+        FirefoxVpnStore.saveTunnel(getApplication(), info.localPort, actualCountryCode, info.countryName)
         return info
     }
 
-    /** Watches the tunnel while it is up, and opens a new one if it goes quiet. */
+    /**
+     * The daemon owns recovery so it keeps working after this screen is closed.
+     * This screen only reports the result and adopts a loopback port if the
+     * background guardian replaces a dead relay. It must not stop the core or
+     * start a second reconnect loop of its own.
+     */
     private fun startMonitor(localPort: Int) {
         monitor?.cancel()
         monitor = viewModelScope.launch {
-            var missed = 0
-            var stableChecks = 0
+            val context = getApplication<Application>()
+            var activePort = localPort
+            var lastFailureLogAt = 0L
             while (isActive) {
-                delay(25_000)
-                // Both halves are watched: the core carrying the phone's
-                // traffic, and the relay carrying it on.
-                val up = ServiceRuntimeState.isRunning(getApplication())
-                val ok = up && withContext(Dispatchers.IO) { FirefoxVpnCheck.through(localPort) }
-                if (!up) coreRefused = true
-                _state.update { it.copy(tested = ok) }
-                if (ok) {
-                    missed = 0
-                    stableChecks++
-                    // After sustained stability, reset reconnect budget so transient
-                    // drops hours apart don't exhaust recovery.
-                    if (stableChecks >= 3 && reconnects > 0) {
-                        reconnects = 0
-                        AppLog.info(AppLog.Section.Connection, "Firefox VPN: tunnel stable, reconnect budget reset")
+                delay(30_000)
+
+                val currentPort = FirefoxVpnStore.loadTunnelPort(context)
+                val selectedGuid = MmkvManager.getSelectServer()
+                val serviceUp = ServiceRuntimeState.isRunning(context)
+                if (currentPort <= 0 || (!serviceUp && selectedGuid != TUNNEL_GUID)) {
+                    // A stop from the main screen clears the port; a stop after
+                    // selecting another profile is identified by the stopped
+                    // service. Those are intentional disconnects, not failures
+                    // for the daemon to recover. Release this process's relay.
+                    FirefoxVpnRelay.stop()
+                    _state.update { it.copy(connectionInfo = null, tested = false, usage = null) }
+                    return@launch
+                }
+                if (currentPort != activePort) {
+                    // The daemon replaced the relay while this screen was open.
+                    // Stop this process's obsolete listener and follow the new port.
+                    FirefoxVpnRelay.stop()
+                    activePort = currentPort
+                    val country = FirefoxVpnStore.loadTunnelCountry(context).orEmpty()
+                    val name = FirefoxVpnStore.loadTunnelName(context).orEmpty().ifEmpty { country }
+                    _state.update { state ->
+                        state.copy(
+                            connectionInfo = state.connectionInfo?.copy(
+                                localPort = activePort,
+                                countryCode = country,
+                                countryName = name,
+                            ),
+                            selectedCountryCode = state.selectedCountryCode ?: country,
+                            tested = null,
+                        )
                     }
-                    continue
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: adopted the daemon's replacement relay on port $activePort")
                 }
-                stableChecks = 0
-                missed++
-                if (missed < 2) continue
-                AppLog.error(
-                    AppLog.Section.Connection,
-                    "Firefox VPN: the tunnel stopped carrying traffic"
-                )
-                stopTunnel()
-                _state.update { it.copy(connectionInfo = null, tested = false) }
-                if (reconnects < 4) {
-                    reconnects++
-                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: reconnecting on its own ($reconnects/4)")
-                    connect()
-                } else {
-                    _state.update { it.copy(error = "The tunnel kept dropping; try another country") }
+
+                val ok = activePort > 0 && serviceUp && withContext(Dispatchers.IO) {
+                    FirefoxVpnCheck.through(activePort)
                 }
-                return@launch
+                _state.update { it.copy(tested = ok) }
+                if (!ok && System.currentTimeMillis() - lastFailureLogAt >= 60_000L) {
+                    lastFailureLogAt = System.currentTimeMillis()
+                    AppLog.info(
+                        AppLog.Section.Connection,
+                        "Firefox VPN: screen check is waiting for the daemon's background recovery"
+                    )
+                }
             }
         }
     }

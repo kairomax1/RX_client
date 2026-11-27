@@ -58,4 +58,12 @@ class InstallableBuildTest {
             "useLegacyPackaging must stay true so installers accept the APK and binaries extract to nativeLibraryDir",
         )
     }
+
+    /** A VPN is an Android 14 system-exempted service, not an arbitrary special-use FGS. */
+    @Test
+    fun vpnForegroundServiceUsesThePlatformExemption() {
+        val manifest = read("src/main/AndroidManifest.xml")
+        assertTrue(manifest.contains("FOREGROUND_SERVICE_SYSTEM_EXEMPTED"))
+        assertTrue(manifest.contains("android:foregroundServiceType=\"systemExempted\""))
+    }
 }
