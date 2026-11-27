@@ -161,6 +161,10 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
 
+    /** Set when the location was chosen by hand rather than left on the default. */
+    @Volatile
+    private var pickedByHand: Boolean = false
+
     /** Kept in memory for the retry after a code or a picture check; never written down. */
     private var pendingPassword: String? = null
 
@@ -234,6 +238,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val accounts = FirefoxVpnStore.loadAccounts(getApplication())
         val activeId = FirefoxVpnStore.loadActiveAccountId(getApplication())
         val countryCode = FirefoxVpnStore.loadSelectedCountry(getApplication())
+        pickedByHand = FirefoxVpnStore.isSelectedCountryManuallySelected(getApplication())
         _state.update {
             it.copy(
                 accounts = accounts,
@@ -263,14 +268,10 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun selectCountry(code: String) {
-        FirefoxVpnStore.saveSelectedCountry(getApplication(), code)
         pickedByHand = true
+        FirefoxVpnStore.saveSelectedCountry(getApplication(), code, manuallySelected = true)
         _state.update { it.copy(selectedCountryCode = code) }
     }
-
-    /** Set when the location was chosen by hand rather than left on the default. */
-    @Volatile
-    private var pickedByHand: Boolean = false
 
     fun selectAccount(id: String) {
         FirefoxVpnStore.saveActiveAccountId(getApplication(), id)
@@ -645,21 +646,25 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
     /**
      * The locations worth trying, quickest first.
      *
-     * The order is measured, not guessed: whatever the last test left is
-     * reused, and the rest is timed once. A location that has been chosen by
-     * hand is tried first, because it was asked for; without a choice the
-     * quickest one is used, which is what keeps the delay low.
+     * The order is measured, not guessed: previous end-to-end tests are reused,
+     * and the rest are timed once. A location chosen by hand is exclusive; in
+     * automatic mode the quickest measured country is tried first, with bounded
+     * alternatives if that route does not carry a page.
      */
     private suspend fun candidates(pass: FirefoxVpnGuardian.ProxyPass): List<String> {
         val countries = _state.value.countries
-        if (countries.isEmpty()) {
-            return listOf(_state.value.selectedCountryCode?.takeIf { it.isNotBlank() }
-                ?: FirefoxVpnServers.RECOMMENDED_CODE)
-        }
-
         val stored = _state.value.pings
         val known = countries.count { stored.containsKey(it.code) }
         val chosen = _state.value.selectedCountryCode
+        if (countries.isEmpty()) {
+            return FirefoxVpnManager.countryCodesForUi(
+                countries = countries,
+                selectedCountryCode = chosen,
+                manuallySelected = pickedByHand,
+                measuredLatencies = stored,
+                limit = 4,
+            )
+        }
 
         // Nothing to go on, or only a little: time enough of them to have an
         // order. A test that was already run is not repeated on every connect.
@@ -687,20 +692,15 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             }
         }
 
-        val measured = _state.value.pings
-        val ordered = countries.sortedWith(
-            compareBy<FirefoxVpnServers.Country> { measured[it.code] == null }
-                .thenBy { measured[it.code] ?: Int.MAX_VALUE }
-                .thenBy { it.name }
-        ).map { it.code }
-        // A choice made by hand is honoured: only try the chosen country, so the
-        // user never ends up in a different country than they selected.
-        val first = if (pickedByHand && chosen != null) {
-            listOf(chosen)
-        } else {
-            ordered
-        }
-        return first.take(4)
+        // A choice made by hand is exclusive; automatic selection follows the measured
+        // end-to-end order and leaves unmeasured countries as last-resort candidates.
+        return FirefoxVpnManager.countryCodesForUi(
+            countries = countries,
+            selectedCountryCode = chosen,
+            manuallySelected = pickedByHand,
+            measuredLatencies = _state.value.pings,
+            limit = 4,
+        )
     }
 
     /** Builds one tunnel and asks it for a real page; null when it stays silent. */
@@ -768,7 +768,11 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
             "Firefox VPN: verified through ${info.countryName} (relay ${info.localPort})"
         )
         val actualCountryCode = info.countryCode.ifBlank { countryCode }
-        FirefoxVpnStore.saveSelectedCountry(getApplication(), actualCountryCode)
+        FirefoxVpnStore.saveSelectedCountry(
+            getApplication(),
+            actualCountryCode,
+            manuallySelected = pickedByHand,
+        )
         FirefoxVpnStore.saveTunnel(getApplication(), info.localPort, actualCountryCode, info.countryName)
         return info
     }

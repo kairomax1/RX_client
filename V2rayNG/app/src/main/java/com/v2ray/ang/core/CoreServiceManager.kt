@@ -472,7 +472,10 @@ object CoreServiceManager {
     }
 
     /** Rebuilds the local Mozilla relay and reloads the current core profile. */
-    private suspend fun recoverFirefoxTunnel(service: Service): Boolean {
+    private suspend fun recoverFirefoxTunnel(
+        service: Service,
+        expectedMonitor: NetworkMonitor? = null,
+    ): Boolean {
         val context = service.applicationContext
         if (MmkvManager.getSelectServer() != FIREFOX_VPN_GUID) return false
 
@@ -485,13 +488,27 @@ object CoreServiceManager {
         }
 
         val selectedCountry = FirefoxVpnStore.loadSelectedCountry(context)?.takeIf { it.isNotBlank() }
+        val manualCountryChoice = FirefoxVpnStore.isSelectedCountryManuallySelected(context)
+        if (manualCountryChoice && selectedCountry == null) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: manual recovery has no saved country to preserve")
+            return false
+        }
         val pass = FirefoxVpnManager.fetchPass(context, account)
         if (pass == null) {
             AppLog.error(AppLog.Section.Connection, "Firefox VPN: Mozilla did not issue a pass during background recovery")
             return false
         }
 
-        val result = FirefoxVpnManager.connectWithPass(context, account, pass, selectedCountry)
+        val result = if (manualCountryChoice) {
+            FirefoxVpnManager.connectWithPass(context, account, pass, selectedCountry)
+        } else {
+            FirefoxVpnManager.connectWithAutomaticFallback(
+                context,
+                account,
+                pass,
+                preferredCountryCode = selectedCountry,
+            )
+        }
         if (result is FirefoxVpnManager.ConnectResult.Error) {
             AppLog.error(AppLog.Section.Connection, "Firefox VPN: recovery relay failed: ${result.message}")
             return false
@@ -505,7 +522,9 @@ object CoreServiceManager {
 
         currentCoroutineContext().ensureActive()
         if (MmkvManager.getSelectServer() != FIREFOX_VPN_GUID ||
-            FirefoxVpnStore.loadSelectedCountry(context)?.takeIf { it.isNotBlank() } != selectedCountry
+            FirefoxVpnStore.loadSelectedCountry(context)?.takeIf { it.isNotBlank() } != selectedCountry ||
+            FirefoxVpnStore.isSelectedCountryManuallySelected(context) != manualCountryChoice ||
+            (expectedMonitor != null && networkMonitor !== expectedMonitor)
         ) {
             // A manual disconnect or country change won the race; do not overwrite it.
             FirefoxVpnRelay.stop()
@@ -521,9 +540,16 @@ object CoreServiceManager {
         )
         MmkvManager.encodeServerConfig(FIREFOX_VPN_GUID, profile)
         MmkvManager.setSelectServer(FIREFOX_VPN_GUID)
+        if (!manualCountryChoice) {
+            FirefoxVpnStore.saveSelectedCountry(context, countryCode, manuallySelected = false)
+        }
         FirefoxVpnStore.saveTunnel(context, info.localPort, countryCode, info.countryName)
 
         val restarted = if (isRunning()) {
+            if (expectedMonitor != null && (networkMonitor !== expectedMonitor || !isRunning())) {
+                FirefoxVpnRelay.stop()
+                return false
+            }
             reloadCore()
         } else {
             val started = LauncherManager.startService(context, guid = FIREFOX_VPN_GUID, quiet = true)
@@ -534,6 +560,49 @@ object CoreServiceManager {
             return false
         }
         return true
+    }
+
+    /**
+     * A network handover invalidates the relay's idle TLS sockets even when the
+     * core itself does not need to be rebuilt. Check one real request on the new
+     * path, and use the daemon's ordinary recovery if that request still fails.
+     */
+    private fun checkFirefoxAfterHandover(service: Service, sourceMonitor: NetworkMonitor) {
+        failoverScope.launch {
+            kotlinx.coroutines.delay(2_000L)
+            val context = service.applicationContext
+            if (networkMonitor !== sourceMonitor ||
+                MmkvManager.getSelectServer() != FIREFOX_VPN_GUID || isReloading
+            ) return@launch
+            if (!firefoxRecoveryInProgress.compareAndSet(false, true)) return@launch
+
+            try {
+                if (!phoneIsOnline(context)) return@launch
+                val localPort = FirefoxVpnStore.loadTunnelPort(context)
+                val carries = isRunning() && localPort > 0 &&
+                    FirefoxVpnCheck.waitUntilCarries(localPort, timeoutMillis = 8_000L)
+                if (carries) {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): relay passed its network-handover check")
+                    return@launch
+                }
+
+                if (networkMonitor !== sourceMonitor ||
+                    MmkvManager.getSelectServer() != FIREFOX_VPN_GUID || !phoneIsOnline(context)
+                ) return@launch
+                if (recoverFirefoxTunnel(service, expectedMonitor = sourceMonitor)) {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): recovered after network handover")
+                } else {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): handover recovery did not complete; background watcher remains active")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.error(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): handover check failed: ${e.message ?: e.javaClass.simpleName}")
+                LogUtil.e(AppConfig.TAG, "Firefox VPN ($FIREFOX_VPN_GUID) handover check failed", e)
+            } finally {
+                firefoxRecoveryInProgress.set(false)
+            }
+        }
     }
 
     /** Waits for a restarted core without blocking the daemon's main thread. */
@@ -607,11 +676,13 @@ object CoreServiceManager {
      */
     fun stopCoreLoop(): Boolean {
         connectionTestScope.coroutineContext.cancelChildren()
+        // Unregister first: the monitor must not launch a new handover child after
+        // failover work is cancelled or after its instance is cleared.
+        networkMonitor?.unregister()
+        networkMonitor = null
         failoverScope.coroutineContext.cancelChildren()
         val service = getService() ?: return false
 
-        networkMonitor?.unregister()
-        networkMonitor = null
         currentVpnInterface = null
 
         if (isRunning()) {
@@ -666,25 +737,44 @@ object CoreServiceManager {
         if (networkMonitor != null) return
 
         val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
-        networkMonitor = NetworkMonitor(
+        var monitorReference: NetworkMonitor? = null
+        val monitor = NetworkMonitor(
             connectivity = connectivity,
             onUnderlyingNetworksChanged = { networks -> serviceControl?.get()?.setUnderlyingNetworks(networks) },
             onHandover = {
-                val guid = MmkvManager.getSelectServer().orEmpty()
-                val cfg = MmkvManager.decodeServerConfig(guid)
-                val isLocalRelayProfile = guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(cfg)
-                if (isLocalRelayProfile) {
-                    LogUtil.i(AppConfig.TAG, "Network handover: local relay profile, skipping core reload")
-                } else {
-                    val now = System.currentTimeMillis()
-                    if (now - lastReloadAtMillis < 60_000L) {
-                        LogUtil.i(AppConfig.TAG, "Network handover: reload debounced")
-                    } else {
-                        reloadCore()
+                monitorReference?.let { sourceMonitor ->
+                    failoverScope.launch {
+                        if (networkMonitor !== sourceMonitor) return@launch
+                        val guid = MmkvManager.getSelectServer().orEmpty()
+                        val cfg = MmkvManager.decodeServerConfig(guid)
+                        val isLocalRelayProfile = guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(cfg)
+                        if (isLocalRelayProfile) {
+                            if (guid == FIREFOX_VPN_GUID) {
+                                if (networkMonitor !== sourceMonitor) return@launch
+                                FirefoxVpnRelay.onNetworkChanged()
+                                checkFirefoxAfterHandover(service, sourceMonitor)
+                            }
+                            LogUtil.i(AppConfig.TAG, "Network handover: local relay profile, skipping core reload")
+                        } else {
+                            val now = System.currentTimeMillis()
+                            if (now - lastReloadAtMillis < 60_000L) {
+                                LogUtil.i(AppConfig.TAG, "Network handover: reload debounced")
+                            } else {
+                                // A pending handover belongs to the monitor that observed it.
+                                // Do not reload after stop/replacement or while the core is down.
+                                if (networkMonitor !== sourceMonitor || !isRunning() ||
+                                    MmkvManager.getSelectServer().orEmpty() != guid
+                                ) return@launch
+                                reloadCore()
+                            }
+                        }
                     }
                 }
             },
-        ).also { it.register() }
+        )
+        monitorReference = monitor
+        networkMonitor = monitor
+        monitor.register()
     }
 
     /**

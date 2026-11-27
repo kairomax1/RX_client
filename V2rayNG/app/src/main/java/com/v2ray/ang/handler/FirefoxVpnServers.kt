@@ -233,22 +233,24 @@ object FirefoxVpnServers {
      */
     suspend fun nearestFirst(
         endpoints: List<FirefoxVpnRelay.Endpoint>,
-        timeoutMillis: Int = 2_500,
+        token: String,
+        timeoutMillis: Int = 4_000,
     ): List<FirefoxVpnRelay.Endpoint> = withContext(Dispatchers.IO) {
         if (endpoints.size < 2) return@withContext endpoints
         coroutineScope {
-            endpoints
-                .map { endpoint -> async { endpoint to reachMillis(endpoint, timeoutMillis) } }
-                .awaitAll()
-                .sortedBy { (_, millis) -> millis }
-                .map { (endpoint, _) -> endpoint }
+            endpoints.mapIndexed { index, endpoint ->
+                async { Triple(index, endpoint, FirefoxVpnRelay.measure(endpoint, token, timeoutMillis)) }
+            }.awaitAll()
+                // A TCP handshake alone can succeed while TLS or the authenticated
+                // proxy request is filtered. Rank only by a real page through the
+                // same Bearer CONNECT path; unmeasured routes remain as fallbacks.
+                .sortedWith(
+                    compareBy<Triple<Int, FirefoxVpnRelay.Endpoint, Int?>> { it.third == null }
+                        .thenBy { it.third ?: Int.MAX_VALUE }
+                        .thenBy { it.first }
+                )
+                .map { it.second }
         }
-    }
-
-    /** How long a connection to [endpoint] takes to be made; [Long.MAX_VALUE] when it never is. */
-    private fun reachMillis(endpoint: FirefoxVpnRelay.Endpoint, timeoutMillis: Int): Long {
-        val millis = SpeedtestManager.socketConnectTime(endpoint.host, endpoint.port, timeoutMillis)
-        return if (millis < 0L) Long.MAX_VALUE else millis
     }
 
     /** The first usable CONNECT endpoint of a country. */

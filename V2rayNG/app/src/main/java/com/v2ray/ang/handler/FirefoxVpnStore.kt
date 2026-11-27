@@ -164,6 +164,7 @@ object FirefoxVpnStore {
 
     private const val PREFS_NAME = "firefox_vpn_prefs"
     private const val KEY_SELECTED_COUNTRY = "rx_firefox_selected_country"
+    private const val KEY_SELECTED_COUNTRY_MANUAL = "rx_firefox_selected_country_manual"
     private const val KEY_ACTIVE_ACCOUNT = "rx_firefox_active_account"
     private const val KEY_TUNNEL_PORT = "rx_firefox_tunnel_port"
     private const val KEY_TUNNEL_COUNTRY = "rx_firefox_tunnel_country"
@@ -181,12 +182,21 @@ object FirefoxVpnStore {
         return legacy?.takeIf { it.isNotBlank() }
     }
 
-    fun saveSelectedCountry(context: Context, countryCode: String) {
+    fun saveSelectedCountry(
+        context: Context,
+        countryCode: String,
+        manuallySelected: Boolean = true,
+    ) {
         MmkvManager.encodeSettings(KEY_SELECTED_COUNTRY, countryCode)
+        MmkvManager.encodeSettings(KEY_SELECTED_COUNTRY_MANUAL, manuallySelected)
     }
 
     fun loadSelectedCountry(context: Context): String? =
         readString(context, KEY_SELECTED_COUNTRY, "selected_country")
+
+    /** Whether recovery must preserve the location explicitly chosen by the user. */
+    fun isSelectedCountryManuallySelected(context: Context): Boolean =
+        MmkvManager.decodeSettingsBool(KEY_SELECTED_COUNTRY_MANUAL, false)
 
     fun saveActiveAccountId(context: Context, accountId: String?) {
         MmkvManager.encodeSettings(KEY_ACTIVE_ACCOUNT, accountId.orEmpty())

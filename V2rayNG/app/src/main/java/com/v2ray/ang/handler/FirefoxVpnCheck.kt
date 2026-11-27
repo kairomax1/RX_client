@@ -28,15 +28,27 @@ object FirefoxVpnCheck {
     private val base = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        // Bound one censored/stalled destination so the next independent probe
+        // can still establish whether the route itself carries traffic.
+        .callTimeout(8, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .build()
 
     /** True when a real answer came back through the relay on [localPort]. */
-    fun through(localPort: Int): Boolean {
-        if (localPort <= 0) return false
+    fun through(localPort: Int, timeoutMillis: Long = 8_000L): Boolean {
+        if (localPort <= 0 || timeoutMillis <= 0L) return false
         val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", localPort))
-        val client = base.newBuilder().proxy(proxy).build()
-        for (url in CHECK_URLS) {
+        val deadlineNanos = System.nanoTime() + timeoutMillis * 1_000_000L
+        for ((index, url) in CHECK_URLS.withIndex()) {
+            val remainingNanos = deadlineNanos - System.nanoTime()
+            if (remainingNanos <= 0L) break
+            val remainingMillis = ((remainingNanos + 999_999L) / 1_000_000L).coerceAtLeast(1L)
+            val remainingTargets = CHECK_URLS.size - index
+            val callBudgetMillis = (remainingMillis / remainingTargets).coerceAtLeast(1L)
+            val client = base.newBuilder()
+                .proxy(proxy)
+                .callTimeout(callBudgetMillis, TimeUnit.MILLISECONDS)
+                .build()
             val ok = try {
                 val request = Request.Builder()
                     .url(url)
@@ -62,7 +74,10 @@ object FirefoxVpnCheck {
     suspend fun waitUntilCarries(localPort: Int, timeoutMillis: Long = 25_000): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMillis
         while (System.currentTimeMillis() < deadline) {
-            val ok = withContext(Dispatchers.IO) { through(localPort) }
+            val remaining = deadline - System.currentTimeMillis()
+            val ok = withContext(Dispatchers.IO) {
+                through(localPort, timeoutMillis = minOf(remaining, 8_000L))
+            }
             if (ok) return true
             delay(1_500)
         }

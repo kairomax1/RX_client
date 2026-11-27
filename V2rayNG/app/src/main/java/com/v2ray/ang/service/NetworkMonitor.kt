@@ -11,7 +11,38 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
+
+/** Tracks current-network events independently so handover ordering is deterministic and testable. */
+internal class NetworkHandoverState<N : Any> {
+    private var current: N? = null
+    private var hasSeenUpstream = false
+
+    /** Returns true when a previously observed upstream was replaced or restored after loss. */
+    fun onAvailable(network: N): Boolean {
+        val changed = hasSeenUpstream && current != network
+        current = network
+        hasSeenUpstream = true
+        return changed
+    }
+
+    /** A late loss from an old network must not clear the current one. */
+    fun onLost(network: N): Boolean {
+        if (current != network) return false
+        current = null
+        return true
+    }
+
+    fun isCurrent(network: N): Boolean = current == network
+
+    fun reset() {
+        current = null
+        hasSeenUpstream = false
+    }
+}
 
 /**
  * Watches the network that carries the tunnel and reports topology changes.
@@ -21,7 +52,7 @@ import kotlinx.coroutines.launch
  * connection. Deciding that a handover happened is what this class is for, acting on it is not.
  *
  * Only used from Android P and above, see CoreServiceManager.startNetworkMonitor().
- * [onHandover] is invoked on a background thread after the debounce window and may block.
+ * [onHandover] is invoked after the debounce window and must hand off long work to its owner scope.
  */
 class NetworkMonitor(
     private val connectivity: ConnectivityManager,
@@ -32,7 +63,9 @@ class NetworkMonitor(
         const val HANDOVER_DEBOUNCE_MS = 1500L
     }
 
-    private var upstream: Network? = null
+    private val stateLock = Any()
+    private val upstreamState = NetworkHandoverState<Network>()
+    private val handoverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var handoverJob: Job? = null
     private var registered = false
 
@@ -55,21 +88,39 @@ class NetworkMonitor(
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            val previous = upstream
-            upstream = network
-            onUnderlyingNetworksChanged(arrayOf(network))
-            if (previous != null && previous != network) {
-                scheduleHandover(network)
+            synchronized(stateLock) {
+                if (!registered) return@synchronized
+                val changed = upstreamState.onAvailable(network)
+                onUnderlyingNetworksChanged(arrayOf(network))
+                if (changed) scheduleHandoverLocked(network)
             }
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            // it's a good idea to refresh capabilities
-            onUnderlyingNetworksChanged(arrayOf(network))
+            synchronized(stateLock) {
+                // A late callback from a network already replaced must not restore it.
+                if (registered && upstreamState.isCurrent(network)) {
+                    onUnderlyingNetworksChanged(arrayOf(network))
+                }
+            }
         }
 
         override fun onLost(network: Network) {
-            onUnderlyingNetworksChanged(null)
+            val wasCurrent = synchronized(stateLock) {
+                if (!registered) {
+                    null
+                } else if (!upstreamState.onLost(network)) {
+                    false
+                } else {
+                    handoverJob?.cancel()
+                    handoverJob = null
+                    onUnderlyingNetworksChanged(null)
+                    true
+                }
+            }
+            if (wasCurrent == false) {
+                LogUtil.d(AppConfig.TAG, "NetworkMonitor: Ignoring loss of stale upstream $network")
+            }
         }
     }
 
@@ -77,11 +128,23 @@ class NetworkMonitor(
      * Starts watching. Safe to call more than once, only the first call registers.
      */
     fun register() {
-        if (registered) return
+        val shouldRegister = synchronized(stateLock) {
+            if (registered) false else {
+                registered = true
+                true
+            }
+        }
+        if (!shouldRegister) return
         try {
             connectivity.requestNetwork(request, callback)
-            registered = true
         } catch (e: Exception) {
+            synchronized(stateLock) {
+                registered = false
+                handoverJob?.cancel()
+                handoverJob = null
+                upstreamState.reset()
+                handoverScope.coroutineContext.cancelChildren()
+            }
             LogUtil.e(AppConfig.TAG, "NetworkMonitor: Failed to request network", e)
         }
     }
@@ -90,11 +153,16 @@ class NetworkMonitor(
      * Stops watching and drops the tracked state. Safe to call more than once.
      */
     fun unregister() {
-        handoverJob?.cancel()
-        handoverJob = null
-        upstream = null
-        if (!registered) return
-        registered = false
+        val shouldUnregister = synchronized(stateLock) {
+            val wasRegistered = registered
+            registered = false
+            handoverJob?.cancel()
+            handoverJob = null
+            upstreamState.reset()
+            handoverScope.coroutineContext.cancelChildren()
+            wasRegistered
+        }
+        if (!shouldUnregister) return
         try {
             connectivity.unregisterNetworkCallback(callback)
         } catch (e: Exception) {
@@ -102,13 +170,20 @@ class NetworkMonitor(
         }
     }
 
-    private fun scheduleHandover(network: Network) {
+    /** Must be called while holding [stateLock]. */
+    private fun scheduleHandoverLocked(network: Network) {
         LogUtil.i(AppConfig.TAG, "NetworkMonitor: Upstream is now $network")
         handoverJob?.cancel()
-        handoverJob = CoroutineScope(Dispatchers.IO).launch {
+        handoverJob = handoverScope.launch {
             try {
                 delay(HANDOVER_DEBOUNCE_MS)
-                onHandover()
+                val ownJob = currentCoroutineContext()[Job]
+                synchronized(stateLock) {
+                    if (registered && upstreamState.isCurrent(network) && handoverJob === ownJob) {
+                        handoverJob = null
+                        onHandover()
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

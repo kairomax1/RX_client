@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      draft_version_code:
+        description: "Optional Play Store APK versionCode when rebuilding a draft (for example 8000403); requires draft=true"
+        required: false
+        type: string
+        default: ""
   push:
     branches:
       - master
@@ -234,13 +239,33 @@ jobs:
           STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
           KEY_ALIAS: rxvpn
           KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
+          DRAFT_VERSION_CODE: ${{ inputs.draft_version_code }}
+          IS_DRAFT_BUILD: ${{ inputs.draft }}
         run: |
           cd V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           chmod +x gradlew
+          VERSION_CODE=$((4000004 + GITHUB_RUN_NUMBER))
+          if [ -n "${DRAFT_VERSION_CODE:-}" ]; then
+            if [ "$IS_DRAFT_BUILD" != "true" ]; then
+              echo "::error::draft_version_code is only allowed when draft=true."
+              exit 1
+            fi
+            if ! [[ "$DRAFT_VERSION_CODE" =~ ^[1-9][0-9]{6,9}$ ]]; then
+              echo "::error::draft_version_code must be a positive 7-10 digit APK versionCode."
+              exit 1
+            fi
+            if (( DRAFT_VERSION_CODE <= 4000004 || DRAFT_VERSION_CODE > 2147483647 )); then
+              echo "::error::draft_version_code must be greater than 4000004 and fit Android's versionCode limit."
+              exit 1
+            fi
+            # Play Store APK ABI outputs add 4,000,000 to the Gradle versionCode.
+            VERSION_CODE=$((DRAFT_VERSION_CODE - 4000000))
+          fi
+          echo "Building Play Store APKs with versionCode $((VERSION_CODE + 4000000))"
           # Build unsigned; sign below with jarsigner v1-only for maximum install compatibility.
           ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
-            -Prx.versionCode="$((4000004 + GITHUB_RUN_NUMBER))" \
+            -Prx.versionCode="$VERSION_CODE" \
             -Prx.versionName="1.2.1"
 
       - name: Show outputs
@@ -319,6 +344,8 @@ jobs:
 
       - name: Refuse an APK that a phone cannot update
         working-directory: V2rayNG/app/build/outputs/apk/playstore/release
+        env:
+          EXPECTED_DRAFT_VERSION_CODE: ${{ inputs.draft_version_code }}
         run: |
           # 4000004 is the highest versionCode any earlier build carries, so anything
           # above it is newer than everything that came before. A file at or below it
@@ -330,6 +357,10 @@ jobs:
             CODE=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
             NAME=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
             echo "$apk: versionCode=$CODE versionName=$NAME"
+            if [ -n "$EXPECTED_DRAFT_VERSION_CODE" ] && [ "$CODE" != "$EXPECTED_DRAFT_VERSION_CODE" ]; then
+              echo "::error::$apk carries versionCode $CODE, expected draft versionCode $EXPECTED_DRAFT_VERSION_CODE."
+              exit 1
+            fi
             if [ -z "$CODE" ] || [ "$CODE" -le 4000004 ]; then
               echo "::error::$apk carries versionCode ${CODE:-none}; it must be greater than 4000004 or a phone with RX VPN installed will not take it."
               exit 1

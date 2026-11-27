@@ -2,6 +2,11 @@ package com.v2ray.ang.handler
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -32,6 +37,36 @@ object FirefoxVpnManager {
         data class Success(val info: ConnectionInfo) : ConnectResult()
         data class Error(val message: String) : ConnectResult()
     }
+
+    /**
+     * UI connection candidates: a manual country is exclusive, while automatic
+     * selection follows measured end-to-end latency and leaves unmeasured routes last.
+     */
+    internal fun countryCodesForUi(
+        countries: List<FirefoxVpnServers.Country>,
+        selectedCountryCode: String?,
+        manuallySelected: Boolean,
+        measuredLatencies: Map<String, Int?>,
+        limit: Int = 4,
+    ): List<String> {
+        val selected = selectedCountryCode?.trim()?.takeIf { it.isNotEmpty() }
+        if (manuallySelected) return if (selected == null) emptyList() else listOf(selected)
+        if (countries.isEmpty()) return listOf(selected ?: FirefoxVpnServers.RECOMMENDED_CODE)
+        return countries.sortedWith(
+            compareBy<FirefoxVpnServers.Country> { measuredLatencies[it.code] == null }
+                .thenBy { measuredLatencies[it.code] ?: Int.MAX_VALUE }
+                .thenBy { it.name }
+        ).take(limit.coerceAtLeast(0)).map { it.code }
+    }
+
+    /** Keeps the remembered automatic location first, then the measured alternatives. */
+    internal fun automaticFallbackOrder(
+        preferredCountry: FirefoxVpnServers.Country?,
+        rankedAlternatives: List<FirefoxVpnServers.Country>,
+        maxCountries: Int,
+    ): List<FirefoxVpnServers.Country> =
+        (listOfNotNull(preferredCountry) + rankedAlternatives.filterNot { it.code == preferredCountry?.code })
+            .take(maxCountries.coerceAtLeast(0))
 
     /**
      * Ensures the account has a valid access token, refreshing if needed.
@@ -112,39 +147,145 @@ object FirefoxVpnManager {
         pass: FirefoxVpnGuardian.ProxyPass,
         countryCode: String?
     ): ConnectResult = withContext(Dispatchers.IO) {
+        connectWithPassFromList(
+            context = context,
+            pass = pass,
+            countryCode = countryCode,
+            countries = FirefoxVpnServers.fetchServerList(),
+        )
+    }
+
+    /**
+     * Background recovery uses the remembered location first, then—only when
+     * the user did not pin a country—tries the quickest other locations whose
+     * authenticated path carries an actual page. The old relay is closed after
+     * each failed probe so no later route can inherit its stale sockets.
+     */
+    suspend fun connectWithAutomaticFallback(
+        context: Context,
+        account: FirefoxVpnStore.StoredAccount,
+        pass: FirefoxVpnGuardian.ProxyPass,
+        preferredCountryCode: String?,
+        maxCountries: Int = 4,
+    ): ConnectResult = withContext(Dispatchers.IO) {
         val countries = FirefoxVpnServers.fetchServerList()
-        // A location that was chosen is the location that is used. The list is
-        // fetched again here, and the code that was saved a moment ago used to be
-        // matched against it loosely enough that a missing entry fell back to the
-        // recommended one — so choosing a country could land anywhere, which is
-        // exactly what was reported. A code that is not in the list is an error to
-        // be said out loud, not a reason to pick another one.
+        if (countries.isEmpty()) {
+            val single = connectWithPassFromList(context, pass, null, countries)
+            if (single is ConnectResult.Success &&
+                FirefoxVpnCheck.waitUntilCarries(single.info.localPort, timeoutMillis = 8_000L)
+            ) {
+                return@withContext single
+            }
+            FirefoxVpnRelay.stop()
+            return@withContext ConnectResult.Error("no-working-route")
+        }
+
+        val preferred = countries.firstOrNull { it.code == preferredCountryCode }
+        val alternatives = countries.filterNot { it.code == preferred?.code }
+        val attemptLimit = maxCountries.coerceIn(1, countries.size)
+        var attempts = 0
+        var lastError: ConnectResult.Error = ConnectResult.Error("no-working-route")
+
+        suspend fun tryCountry(country: FirefoxVpnServers.Country): ConnectResult.Success? {
+            attempts++
+            val result = connectWithPassFromList(context, pass, country.code, countries)
+            if (result is ConnectResult.Error) {
+                lastError = result
+                return null
+            }
+            val success = result as ConnectResult.Success
+            val hasRoute = FirefoxVpnRelay.problem == null ||
+                FirefoxVpnCloudflare.relayAddressOrNull(context) != null
+            if (hasRoute && FirefoxVpnCheck.waitUntilCarries(success.info.localPort, timeoutMillis = 8_000L)) {
+                if (country.code != preferred?.code) {
+                    AppLog.info(
+                        AppLog.Section.Connection,
+                        "Firefox VPN: automatic recovery selected ${country.name} after the previous route failed"
+                    )
+                }
+                return success
+            }
+
+            lastError = ConnectResult.Error(
+                "route-did-not-carry:${country.code}:${FirefoxVpnRelay.problem ?: "probe timed out"}"
+            )
+            AppLog.info(
+                AppLog.Section.Connection,
+                "Firefox VPN: ${country.name} did not carry a recovery probe; trying another route"
+            )
+            FirefoxVpnRelay.stop()
+            return null
+        }
+
+        // Preserve the currently working location first; only spend time ranking
+        // alternatives after it has actually failed an end-to-end page check.
+        if (preferred != null) {
+            tryCountry(preferred)?.let { return@withContext it }
+        }
+        val remaining = (attemptLimit - attempts).coerceAtLeast(0)
+        if (remaining > 0) {
+            val ranked = rankFallbackCountries(alternatives, pass.token)
+            val order = automaticFallbackOrder(preferred, ranked, attemptLimit)
+            for (country in order.drop(attempts).take(remaining)) {
+                tryCountry(country)?.let { return@withContext it }
+            }
+        }
+        FirefoxVpnRelay.stop()
+        lastError
+    }
+
+    private suspend fun rankFallbackCountries(
+        countries: List<FirefoxVpnServers.Country>,
+        token: String,
+        sampleSize: Int = 8,
+        timeoutMillis: Int = 2_500,
+    ): List<FirefoxVpnServers.Country> = coroutineScope {
+        if (countries.size < 2) return@coroutineScope countries
+        val sample = countries.take(sampleSize)
+        val gate = Semaphore(4)
+        val measured = sample.mapIndexed { index, country ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    Triple(index, country, FirefoxVpnServers.ping(country, token, timeoutMillis))
+                }
+            }
+        }.awaitAll()
+        val orderedSample = measured.sortedWith(
+            compareBy<Triple<Int, FirefoxVpnServers.Country, Int?>> { it.third == null }
+                .thenBy { it.third ?: Int.MAX_VALUE }
+                .thenBy { it.first }
+        ).map { it.second }
+        orderedSample + countries.drop(sample.size)
+    }
+
+    private suspend fun connectWithPassFromList(
+        context: Context,
+        pass: FirefoxVpnGuardian.ProxyPass,
+        countryCode: String?,
+        countries: List<FirefoxVpnServers.Country>,
+    ): ConnectResult {
+        // A location that was chosen is the location that is used. A missing
+        // code is an explicit error, not a silent move to the recommended one.
         val requestedCountry = countryCode?.trim()?.takeIf { it.isNotEmpty() }
         val country = countries.firstOrNull { it.code == requestedCountry }
         if (requestedCountry != null && requestedCountry != FirefoxVpnServers.RECOMMENDED_CODE && country == null) {
-            return@withContext ConnectResult.Error("no-such-country:$requestedCountry")
+            return ConnectResult.Error("no-such-country:$requestedCountry")
         }
         val chosenCountry = country ?: FirefoxVpnServers.pickRecommended(countries)
         val countryName = chosenCountry?.name ?: "Recommended"
 
-        // Nearest first: the list names several addresses for one location and
-        // does not say which of them is close, so the tunnel used to be given
-        // whichever came first. The relay still falls back down the list.
-        val endpoints = FirefoxVpnServers.nearestFirst(endpointsOf(countries, chosenCountry, pass))
-        if (endpoints.isEmpty()) {
-            return@withContext ConnectResult.Error("no-address")
-        }
+        val endpoints = FirefoxVpnServers.nearestFirst(
+            endpoints = endpointsOf(countries, chosenCountry, pass),
+            token = pass.token,
+        )
+        if (endpoints.isEmpty()) return ConnectResult.Error("no-address")
 
-        // The core cannot send a Bearer header itself; the relay in front of
-        // it does, and the core talks plain HTTP to the loopback. When the
-        // proxy cannot be reached from this phone, the pipe is carried by the
-        // user's own Cloudflare Worker instead.
         FirefoxVpnRelay.attachContext(context)
         val relayAddress = FirefoxVpnCloudflare.relayAddressOrNull(context)
         val localPort = FirefoxVpnRelay.start(endpoints, pass.token, relayAddress)
         val chosen = FirefoxVpnRelay.endpoint() ?: endpoints.first()
 
-        ConnectResult.Success(
+        return ConnectResult.Success(
             ConnectionInfo(
                 proxyHost = chosen.host,
                 proxyPort = chosen.port,

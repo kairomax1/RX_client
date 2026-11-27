@@ -38,6 +38,16 @@ class InstallableBuildTest {
         assertTrue(workflow.contains("4000004"), "the floor is the highest number any earlier build carries")
     }
 
+    /** A draft can reuse its explicitly requested Play Store versionCode without changing CI's default sequence. */
+    @Test
+    fun onlyDraftBuildsMayPinTheApkVersionCode() {
+        val workflow = read("../../.github/workflows/build.yml")
+        assertTrue(workflow.contains("draft_version_code"))
+        assertTrue(workflow.contains("is only allowed when draft=true"))
+        assertTrue(workflow.contains("DRAFT_VERSION_CODE - 4000000"))
+        assertTrue(workflow.contains("EXPECTED_DRAFT_VERSION_CODE"))
+    }
+
     /** The installed copy's signature has to be readable in the log when an install fails. */
     @Test
     fun theSignatureOfTheInstalledCopyIsRecorded() {
