@@ -1,10 +1,26 @@
 package com.v2ray.ang.service
 
+import android.net.NetworkCapabilities
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class NetworkHandoverStateTest {
+
+    @Test
+    fun underlayRequestExcludesVpnOverlays() {
+        assertTrue(NETWORK_MONITOR_REQUIRED_CAPABILITIES.contains(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))
+        assertTrue(NETWORK_MONITOR_REQUIRED_CAPABILITIES.contains(NetworkCapabilities.NET_CAPABILITY_INTERNET))
+        assertTrue(NETWORK_MONITOR_REQUIRED_CAPABILITIES.contains(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED))
+    }
+
+    @Test
+    fun onlyAnUnrestrictedPhysicalInternetNetworkCanBeAnUpstream() {
+        assertTrue(isEligibleUpstream(hasNotVpn = true, hasInternet = true, hasNotRestricted = true))
+        assertFalse(isEligibleUpstream(hasNotVpn = false, hasInternet = true, hasNotRestricted = true))
+        assertFalse(isEligibleUpstream(hasNotVpn = true, hasInternet = false, hasNotRestricted = true))
+        assertFalse(isEligibleUpstream(hasNotVpn = true, hasInternet = true, hasNotRestricted = false))
+    }
 
     @Test
     fun lossOfPreviousNetworkDoesNotClearTheNewUpstream() {

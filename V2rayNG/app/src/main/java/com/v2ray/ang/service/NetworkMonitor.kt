@@ -16,6 +16,17 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 
+/** The VPN's underlay must be a physical, unrestricted Internet network, never another VPN. */
+internal val NETWORK_MONITOR_REQUIRED_CAPABILITIES = setOf(
+    NetworkCapabilities.NET_CAPABILITY_NOT_VPN,
+    NetworkCapabilities.NET_CAPABILITY_INTERNET,
+    NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED,
+)
+
+/** Only an unrestricted physical Internet network is safe to set as the VPN's own underlay. */
+internal fun isEligibleUpstream(hasNotVpn: Boolean, hasInternet: Boolean, hasNotRestricted: Boolean): Boolean =
+    hasNotVpn && hasInternet && hasNotRestricted
+
 /** Tracks current-network events independently so handover ordering is deterministic and testable. */
 internal class NetworkHandoverState<N : Any> {
     private var current: N? = null
@@ -80,18 +91,20 @@ class NetworkMonitor(
      * Source: https://android.googlesource.com/platform/frameworks/base/+/2df4c7d/services/core/java/com/android/server/ConnectivityService.java#887
      */
     private val request by lazy {
-        NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
-            .build()
+        NetworkRequest.Builder().apply {
+            // This callback runs from inside the VPN service. Excluding VPN overlays prevents the
+            // app from selecting its own TUN as the physical underlay and routing the tunnel into itself.
+            NETWORK_MONITOR_REQUIRED_CAPABILITIES.forEach { addCapability(it) }
+        }.build()
     }
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             synchronized(stateLock) {
                 if (!registered) return@synchronized
+                // requestNetwork only reports networks matching NETWORK_MONITOR_REQUIRED_CAPABILITIES.
+                // Track the callback order now; wait for capabilities before setting the underlay.
                 val changed = upstreamState.onAvailable(network)
-                onUnderlyingNetworksChanged(arrayOf(network))
                 if (changed) scheduleHandoverLocked(network)
             }
         }
@@ -99,9 +112,17 @@ class NetworkMonitor(
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
             synchronized(stateLock) {
                 // A late callback from a network already replaced must not restore it.
-                if (registered && upstreamState.isCurrent(network)) {
-                    onUnderlyingNetworksChanged(arrayOf(network))
+                if (!registered || !upstreamState.isCurrent(network)) return@synchronized
+                val eligible = isEligibleUpstream(
+                    hasNotVpn = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN),
+                    hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                    hasNotRestricted = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED),
+                )
+                if (!eligible) {
+                    LogUtil.d(AppConfig.TAG, "NetworkMonitor: Ignoring non-physical or restricted network $network")
+                    return@synchronized
                 }
+                onUnderlyingNetworksChanged(arrayOf(network))
             }
         }
 
