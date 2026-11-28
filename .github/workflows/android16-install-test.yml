@@ -1,11 +1,11 @@
-name: Test Android 17 APK installation
+name: Test Android 16 APK installation
 
 on:
   push:
     branches:
       - "arena/**"
     paths:
-      - ".github/workflows/android17-install-test.yml"
+      - ".github/workflows/android16-install-test.yml"
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   android17:
-    name: Fresh install and in-place update on Android 17 emulator
+    name: Fresh install and in-place update on Android 16 emulator
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -52,7 +52,7 @@ jobs:
       - name: Install fresh and update without removing user data
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 37
+          api-level: 36
           target: google_apis
           arch: x86_64
           disable-animations: true
@@ -64,7 +64,7 @@ jobs:
             SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
             ABI=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
             echo "Android API $SDK; ABIs: $ABI"
-            [ "$SDK" = "37" ] || { echo "Expected API 37, got $SDK"; exit 1; }
+            [ "$SDK" = "36" ] || { echo "Expected API 36, got $SDK"; exit 1; }
 
             echo 'Fresh-install test (universal APK)'
             adb install "$APK"
