@@ -263,58 +263,46 @@ jobs:
             VERSION_CODE=$((DRAFT_VERSION_CODE - 4000000))
           fi
           echo "Building Play Store APKs with versionCode $((VERSION_CODE + 4000000))"
-          # Build unsigned; sign below with jarsigner v1-only for maximum install compatibility.
+          # Let Gradle sign directly with the release keystore and the configured v1/v2/v3 schemes.
+          # Re-signing after Gradle can strip the JAR (v1) signature that some device installers need.
           ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
             -Prx.versionCode="$VERSION_CODE" \
-            -Prx.versionName="1.2.1"
+            -Prx.versionName="1.2.1" \
+            -Prx.storeFile="$KEYSTORE_PATH" \
+            -Prx.storePassword="$STORE_PASSWORD" \
+            -Prx.keyAlias="$KEY_ALIAS" \
+            -Prx.keyPassword="$KEY_PASSWORD"
 
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
-      - name: Sign APKs (v1+v2+v3)
-        env:
-          STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: rxvpn
-          KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
+      - name: Verify APK signatures (v1+v2+v3)
         run: |
-          # Broad install/update compatibility: sign with v1+v2+v3.
-          # apksigner skips v1 when manifest minSdk>=24; override min-sdk to 21 so
-          # v1 is included while keeping v2/v3 for modern Android.
-          # Order for apksigner: zipalign first, then sign.
+          # Gradle signed these outputs with the configured release key. Do not rewrite them
+          # here: post-build zip/sign operations can invalidate or remove the v1 JAR signature.
           set -euo pipefail
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
-            echo "== sign $apk"
-            zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' 'META-INF/*.MF' 2>/dev/null || true
-            ZA_OUT=$("$ZIPALIGN" -f -p 4 "$apk" "$apk.aligned" 2>&1) || {
-              echo "$ZA_OUT"
-              echo "::error::zipalign failed for $apk: ${ZA_OUT//$'\n'/ }"
+            echo "== verify $apk"
+            VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || {
+              echo "$VERIFY"
+              echo "::error::apksigner verification failed for $apk"
               exit 1
             }
-            mv "$apk.aligned" "$apk"
-            "$APKSIGNER" sign \
-              --v1-signing-enabled true \
-              --v2-signing-enabled true \
-              --v3-signing-enabled true \
-              --ks "$KEYSTORE_PATH" \
-              --ks-pass "pass:$STORE_PASSWORD" \
-              --ks-key-alias "$KEY_ALIAS" \
-              --key-pass "pass:$KEY_PASSWORD" \
-              "$apk"
-            VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || true
             echo "$VERIFY" | head -20
-            # minSdk is 24 (Android 7.0+), which supports v2; v2+v3 are required.
-            # apksigner may skip v1 for minSdk>=24, which is acceptable.
-            for scheme in "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
+            for scheme in "v1 scheme (JAR signing): true" \
+                          "v2 scheme (APK Signature Scheme v2): true" \
+                          "v3 scheme (APK Signature Scheme v3): true"; do
               echo "$VERIFY" | grep -q "$scheme" || {
                 DETAIL=$(echo "$VERIFY" | head -12 | tr '\n' ' ' | sed 's/"/'\''/g')
                 echo "::error::$apk missing $scheme: $DETAIL"
                 exit 1
               }
             done
+            "$ZIPALIGN" -c -v 4 "$apk" > /dev/null
           done
 
       - name: Verify signing certificate
@@ -401,9 +389,11 @@ jobs:
           SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
-          # v2+v3 required. minSdk is 24 so v1 is not required for supported devices.
+          # Keep the v1 JAR signature as well as v2/v3 for OEM installer compatibility.
           VERIFY_ALL=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1)
-          for scheme in "v2 scheme (APK Signature Scheme v2): true" "v3 scheme (APK Signature Scheme v3): true"; do
+          for scheme in "v1 scheme (JAR signing): true" \
+                        "v2 scheme (APK Signature Scheme v2): true" \
+                        "v3 scheme (APK Signature Scheme v3): true"; do
             echo "$VERIFY_ALL" | grep -q "$scheme" || {
               echo "::error::$SAMPLE missing $scheme"
               exit 1

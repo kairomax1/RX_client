@@ -85,6 +85,7 @@ android {
             val storePath = (project.findProperty("rx.storeFile") as String?)?.takeIf { it.isNotBlank() }
             if (storePath != null) {
                 storeFile = file(storePath)
+                storeType = "PKCS12"
                 storePassword = project.findProperty("rx.storePassword") as String?
                 keyAlias = project.findProperty("rx.keyAlias") as String?
                 keyPassword = project.findProperty("rx.keyPassword") as String?
