@@ -100,11 +100,15 @@ data class V2rayConfig(
             var reserved: List<Int>? = null,
             var mtu: Int? = null,
             var remoteDNS: List<String>? = null,
+            /** WireGuard only: which address family the endpoint is reached over. */
+            var domainStrategy: String? = null,
         ) {
             data class WireGuardBean(
                 var publicKey: String = "",
                 var preSharedKey: String? = null,
-                var endpoint: String = ""
+                var endpoint: String = "",
+                /** Seconds between keep-alive packets; null leaves the core's default (none). */
+                var keepAlive: Int? = null
             )
         }
 
@@ -195,6 +199,7 @@ data class V2rayConfig(
             data class SockoptBean(
                 var TcpNoDelay: Boolean? = null,
                 var tcpKeepAliveIdle: Int? = null,
+                var tcpKeepAliveInterval: Int? = null,
                 var tcpFastOpen: Boolean? = null,
                 var tproxy: String? = null,
                 var mark: Int? = null,
@@ -354,6 +359,7 @@ data class V2rayConfig(
             val clientIp: String? = null,
             val skipFallback: Boolean? = null,
             val tag: String? = null,
+            val timeoutMs: Long? = null,
         )
     }
 

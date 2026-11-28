@@ -1,5 +1,13 @@
 package com.v2ray.ang.core
 
+import com.v2ray.ang.handler.Failover
+import com.v2ray.ang.handler.GamingMode
+import com.v2ray.ang.handler.AppLog
+import com.v2ray.ang.handler.FirefoxVpnCheck
+import com.v2ray.ang.handler.FirefoxVpnManager
+import com.v2ray.ang.handler.FirefoxVpnRelay
+import com.v2ray.ang.handler.FirefoxVpnServers
+import com.v2ray.ang.handler.FirefoxVpnStore
 import android.app.Activity
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -18,6 +26,7 @@ import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.OutboundTrafficStat
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.BrowserDialerMode
+import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.MmkvManager
@@ -36,7 +45,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
@@ -44,19 +55,76 @@ import libv2ray.CoreController
 import libv2ray.ProcessFinder
 import java.lang.ref.SoftReference
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicBoolean
 
 object CoreServiceManager {
 
+    /** How often the tunnel is asked, quietly, whether it still carries anything. */
+    private const val WATCH_EVERY_MILLIS = 60_000L
+
+    /** Mozilla's relay needs a shorter, process-independent health check. */
+    private const val FIREFOX_WATCH_EVERY_MILLIS = 45_000L
+    private const val FIREFOX_MISSES_BEFORE_RECOVERY = 2
+    private const val FIREFOX_RECOVERY_RETRY_BASE_MILLIS = 15_000L
+    private const val FIREFOX_RECOVERY_RETRY_MAX_MILLIS = 120_000L
+
+    /**
+     * How many empty answers in a row are answered by taking another config.
+     *
+     * A phone that loses its signal for a moment, or a network that is merely
+     * slow, must not be answered by tearing the tunnel down. The threshold is
+     * deliberately tolerant; a single in-place reload is attempted before moving.
+     *
+     * A question the phone could not ask at all — because the phone itself has
+     * no connection, or because the tunnel was being rebuilt — is not counted:
+     * it says nothing about the config, and a config was being thrown away for
+     * the state of the phone.
+     */
+    private const val WATCH_MISSES_BEFORE_RELOAD = 3
+    private const val WATCH_MISSES_BEFORE_MOVING = 5
+
+    /**
+     * The addresses the watch asks through the tunnel. Any one of them
+     * answering means the config carries traffic, so a single site being
+     * blocked on this line — which is the ordinary state of affairs on the
+     * lines this app is for — is not mistaken for a dead config. A 204 answer
+     * is small enough to cost nothing every few minutes.
+     */
+    private val WATCH_PROBES = listOf(
+        "https://www.google.com/generate_204",
+        "https://www.gstatic.com/generate_204",
+        "https://connectivitycheck.gstatic.com/generate_204",
+        "https://detectportal.firefox.com/success.txt",
+        "https://www.apple.com/library/test/success.html",
+    )
+
+    /** A short rest before a moved-to config is raised, so the old tunnel is really gone. */
+    private const val RESTART_AFTER_MILLIS = 1_200L
+
+    /** The built-in Mozilla tunnel's place in the config list; not a config to fall back on. */
+    private const val FIREFOX_VPN_GUID = "firefox-vpn"
+
     private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
     private val mMsgReceive = ReceiveMessageHandler()
+    /** Avoid duplicate registration when a stopped core is rebuilt in the same Service instance. */
+    private var registeredReceiverService: Service? = null
     private var currentConfig: ProfileItem? = null
     private var processFinder: XrayProcessFinder? = null
     private var browserDialer: IDialerService? = null
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val failoverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val firefoxRecoveryInProgress = AtomicBoolean(false)
+
+    /** The config the watcher moved to on its own, so the next start is not taken for a new round. */
+    @Volatile
+    private var autoMovedTo: String? = null
 
     @Volatile
     private var isReloading = false
+
+    @Volatile
+    private var lastReloadAtMillis: Long = 0L
 
     /** Tun descriptor the core was started with, null in the proxy only and root run modes. */
     private var currentVpnInterface: ParcelFileDescriptor? = null
@@ -77,6 +145,9 @@ object CoreServiceManager {
      * @return True if the service is running, false otherwise.
      */
     fun isRunning() = coreController.isRunning
+
+    fun measureDelayDirect(url: String): Long =
+        runCatching { coreController.measureDelay(url) }.getOrDefault(-1L)
 
     /**
      * Gets the name of the currently running server.
@@ -116,11 +187,14 @@ object CoreServiceManager {
 
     @Throws(Exception::class)
     private fun doStartCoreLoop(service: Service, vpnInterface: ParcelFileDescriptor?) {
-        val mFilter = IntentFilter(AppConfig.BROADCAST_ACTION_SERVICE)
-        mFilter.addAction(Intent.ACTION_SCREEN_ON)
-        mFilter.addAction(Intent.ACTION_SCREEN_OFF)
-        mFilter.addAction(Intent.ACTION_USER_PRESENT)
-        ContextCompat.registerReceiver(service, mMsgReceive, mFilter, Utils.receiverFlags())
+        if (registeredReceiverService !== service) {
+            val mFilter = IntentFilter(AppConfig.BROADCAST_ACTION_SERVICE)
+            mFilter.addAction(Intent.ACTION_SCREEN_ON)
+            mFilter.addAction(Intent.ACTION_SCREEN_OFF)
+            mFilter.addAction(Intent.ACTION_USER_PRESENT)
+            ContextCompat.registerReceiver(service, mMsgReceive, mFilter, Utils.receiverFlags())
+            registeredReceiverService = service
+        }
 
         currentVpnInterface = vpnInterface
         launchCore(service, vpnInterface)
@@ -131,11 +205,28 @@ object CoreServiceManager {
     private fun launchCore(service: Service, vpnInterface: ParcelFileDescriptor?, isReload: Boolean = false) {
         val guid = MmkvManager.getSelectServer() ?: error("No server selected")
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
+        if (guid != FIREFOX_VPN_GUID && FirefoxVpnStore.loadTunnelPort(service.applicationContext) > 0) {
+            // A different profile has actually taken over. The selected GUID can
+            // change before its service starts, so clear Firefox's cross-process
+            // status here, when the core really changes profile.
+            FirefoxVpnStore.clearTunnel(service.applicationContext)
+            FirefoxVpnRelay.stop()
+        }
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+        AppLog.info(
+            AppLog.Section.Connection,
+            "Starting with config '${config.remarks}' (${config.configType.name})" +
+                (if (isReload) ", reload after a network change" else "") +
+                (if (GamingMode.isEnabled()) ", DNS mode on" else ""),
+        )
+        // The Aether profile is only a pointer to the engine's local port; the engine itself
+        // has to be running behind it. Fragment VPN always runs directly on the user's own IP.
+        if (AetherEngine.isAetherProfile(config)) AetherEngine.start(service) else AetherEngine.stop()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
+            AppLog.error(AppLog.Section.Core, "The config could not be turned into core settings: ${result.errorMessage}")
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }
 
@@ -158,6 +249,16 @@ object CoreServiceManager {
         coreController.startLoop(result.content, tunFd)
 
         if (!isRunning()) {
+            // The core keeps the reason to itself — it only says no — so the parts of the
+            // profile that it most often refuses are written down here. A core version that
+            // drops a setting (it stopped accepting "allowInsecure", for one) shows up as a
+            // connection that never opens, and the reason has to be findable.
+            AppLog.error(
+                AppLog.Section.Core,
+                "The core would not take the config: security ${config.security ?: "none"}, " +
+                    "network ${config.network ?: "none"}, " +
+                    (if (config.insecure == true) "certificate check off" else "certificate checked")
+            )
             error("Core failed to start")
         }
 
@@ -182,9 +283,390 @@ object CoreServiceManager {
         if (!isReload) {
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
         }
+        // The rules were written; whether they are obeyed is another matter, and it is
+        // the one that decides whether an advert is fetched and where a site at home is
+        // answered from. The tunnel is asked a moment after it settles.
+        CoroutineScope(Dispatchers.IO).launch {
+            kotlinx.coroutines.delay(3000)
+            if (isRunning()) {
+                runCatching { RoutingSelfTest.run() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Routing test could not be run", it) }
+            }
+        }
         ServiceRuntimeState.markRunning(true)
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
+        // An in-place reload belongs to the same health-check round. Restarting
+        // the watcher here reset its miss counter after every reload, which made
+        // the automatic move to a healthy public config unreachable.
+        if (!isReload) watchConfig(service, guid)
+    }
+
+    /**
+     * Configs die, whichever group they belong to: a free public server often,
+     * a private one often enough. While one of them is the running config, a
+     * request is sent through the tunnel now and then; when nothing comes back a
+     * few times in a row another config of the same group is taken and the
+     * service starts again with it, without asking and without a word.
+     *
+     * Nothing is said on the way because a move is not a failure: it is the
+     * connection being kept. Only when there is nothing left to take is the
+     * tunnel left alone, which is what the owner then sees.
+     */
+    private fun watchConfig(service: Service, guid: String) {
+        failoverScope.coroutineContext.cancelChildren()
+        // Mozilla uses a local relay rather than a regular public config. It
+        // still needs a daemon-owned watcher: the Activity's ViewModel vanishes
+        // when its screen/process is gone, which left this tunnel unmonitored.
+        if (guid == FIREFOX_VPN_GUID) {
+            watchFirefoxTunnel(service)
+            return
+        }
+        // Aether manages its own engine lifecycle; moving away from it would
+        // change what the phone is doing, not only where it does it.
+        if (AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(guid))) return
+        // Asked for, this is; imposed, it is not. The switch in the settings is
+        // there for a phone or a network where a config is better left alone.
+        if (!SettingsManager.isAutoFailoverEnabled()) {
+            Failover.reset()
+            return
+        }
+        // A start the owner asked for opens a new round; a start that came out of
+        // a move continues the one that is running.
+        if (guid != autoMovedTo) Failover.reset()
+        autoMovedTo = null
+        failoverScope.launch {
+            val watch = TunnelWatchCounter(WATCH_MISSES_BEFORE_RELOAD, WATCH_MISSES_BEFORE_MOVING)
+            while (isActive) {
+                kotlinx.coroutines.delay(WATCH_EVERY_MILLIS)
+                if (isReloading) continue
+                // Without a connection of its own the phone cannot ask anything,
+                // and a silence now would be the phone's, not the config's.
+                if (!phoneIsOnline(service)) continue
+                if (!isRunning()) {
+                    AppLog.error(AppLog.Section.Connection, "Core stopped while its service was still active; starting it again")
+                    if (LauncherManager.startService(service, guid = guid, quiet = true)) {
+                        waitForCore(30_000L)
+                    }
+                    continue
+                }
+                val verdict = askThroughTunnel(service)
+                val decision = watch.observe(
+                    carries = verdict == Verdict.Carries,
+                    reachableToAsk = verdict != Verdict.Unreachable,
+                )
+                if (decision == TunnelWatchCounter.Decision.CARRIES) {
+                    Failover.settle()
+                    continue
+                }
+                if (decision == TunnelWatchCounter.Decision.WAIT) continue
+                if (decision == TunnelWatchCounter.Decision.RELOAD) {
+                    // Try one quiet in-place recovery before failing over or dropping:
+                    // for WireGuard, escalate MTU/noise anti-DPI if carrier started dropping data.
+                    if (currentConfig?.configType == EConfigType.WIREGUARD) {
+                        CoreOutboundBuilder.nextWgFallbackMode(guid)?.let { nextWg ->
+                            CoreOutboundBuilder.rememberWgMode(guid, nextWg)
+                            AppLog.info(AppLog.Section.Connection, "WireGuard tunnel stalled; stepping up to ${nextWg.key}")
+                        }
+                    }
+                    AppLog.info(AppLog.Section.Connection, "Tunnel silent for ${watch.misses} checks; trying in-place core reload")
+                    reloadCore()
+                    continue
+                }
+                if (decision != TunnelWatchCounter.Decision.MOVE) continue
+                // The config answered nothing for the full round while the phone itself
+                // was online: try another of the same group, or keep reloading a one-server
+                // group with a small failure streak so we can recover without a tight loop.
+                val next = nextConfigAfter(guid)
+                if (next == null) {
+                    AppLog.info(AppLog.Section.Connection, "Config stalled and no alternative in group; keeping tunnel alive and reloading")
+                    watch.retainOneMiss()
+                    reloadCore()
+                    continue
+                }
+                AppLog.info(AppLog.Section.Connection, "The config stopped answering; another one of its group is taken")
+                Failover.moved(next)
+                autoMovedTo = next
+                MmkvManager.setSelectServer(next)
+                val control = serviceControl?.get() ?: return@launch
+                // Stopping cancels this watcher, so the restart runs on its own.
+                CoroutineScope(Dispatchers.Default).launch {
+                    control.stopService()
+                    kotlinx.coroutines.delay(RESTART_AFTER_MILLIS)
+                    LauncherManager.startService(service)
+                }
+                return@launch
+            }
+        }
+    }
+
+    /**
+     * Keeps the Mozilla relay alive independently of the Firefox screen. The
+     * previous health loop lived in an Activity ViewModel, so closing/killing
+     * the UI stopped recovery while the VPN service itself remained up.
+     */
+    private fun watchFirefoxTunnel(service: Service) {
+        failoverScope.launch {
+            var misses = 0
+            var recoveryFailures = 0
+            while (isActive) {
+                kotlinx.coroutines.delay(FIREFOX_WATCH_EVERY_MILLIS)
+                if (MmkvManager.getSelectServer() != FIREFOX_VPN_GUID) return@launch
+                if (isReloading) continue
+                if (!phoneIsOnline(service)) {
+                    // No connection on the phone says nothing about Mozilla's relay.
+                    misses = 0
+                    continue
+                }
+
+                if (isRunning()) {
+                    when (askThroughTunnel(service)) {
+                        Verdict.Carries -> {
+                            misses = 0
+                            recoveryFailures = 0
+                            continue
+                        }
+                        Verdict.Unreachable -> {
+                            misses = 0
+                            continue
+                        }
+                        Verdict.Silent -> misses++
+                    }
+                    if (misses < FIREFOX_MISSES_BEFORE_RECOVERY) continue
+                } else {
+                    AppLog.error(AppLog.Section.Connection, "Firefox VPN: core stopped; daemon recovery is starting")
+                    misses = FIREFOX_MISSES_BEFORE_RECOVERY
+                }
+
+                if (!firefoxRecoveryInProgress.compareAndSet(false, true)) continue
+                val recovered = try {
+                    recoverFirefoxTunnel(service)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val message = "Firefox VPN: background recovery failed: ${e.message ?: e.javaClass.simpleName}"
+                    AppLog.error(AppLog.Section.Connection, message)
+                    LogUtil.e(AppConfig.TAG, message, e)
+                    false
+                } finally {
+                    firefoxRecoveryInProgress.set(false)
+                }
+
+                if (recovered) {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: daemon restored the tunnel")
+                    misses = 0
+                    recoveryFailures = 0
+                } else {
+                    // Require another failed health check before trying again; a failed
+                    // auth request or a brief loss of signal must not spin the relay.
+                    misses = FIREFOX_MISSES_BEFORE_RECOVERY - 1
+                    recoveryFailures++
+                    val multiplier = 1L shl (recoveryFailures - 1).coerceIn(0, 3)
+                    val backoff = (FIREFOX_RECOVERY_RETRY_BASE_MILLIS * multiplier)
+                        .coerceAtMost(FIREFOX_RECOVERY_RETRY_MAX_MILLIS)
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN: retrying background recovery after ${backoff / 1000}s")
+                    kotlinx.coroutines.delay(backoff)
+                }
+            }
+        }
+    }
+
+    /** Rebuilds the local Mozilla relay and reloads the current core profile. */
+    private suspend fun recoverFirefoxTunnel(
+        service: Service,
+        expectedMonitor: NetworkMonitor? = null,
+    ): Boolean {
+        val context = service.applicationContext
+        if (MmkvManager.getSelectServer() != FIREFOX_VPN_GUID) return false
+
+        val accounts = FirefoxVpnStore.loadAccounts(context)
+        val activeId = FirefoxVpnStore.loadActiveAccountId(context)
+        val account = accounts.firstOrNull { it.id == activeId } ?: accounts.firstOrNull()
+        if (account == null) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: background recovery has no saved account")
+            return false
+        }
+
+        val selectedCountry = FirefoxVpnStore.loadSelectedCountry(context)?.takeIf { it.isNotBlank() }
+        val manualCountryChoice = FirefoxVpnStore.isSelectedCountryManuallySelected(context)
+        if (manualCountryChoice && selectedCountry == null) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: manual recovery has no saved country to preserve")
+            return false
+        }
+        val pass = FirefoxVpnManager.fetchPass(context, account)
+        if (pass == null) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: Mozilla did not issue a pass during background recovery")
+            return false
+        }
+
+        val result = if (manualCountryChoice) {
+            FirefoxVpnManager.connectWithPass(context, account, pass, selectedCountry)
+        } else {
+            FirefoxVpnManager.connectWithAutomaticFallback(
+                context,
+                account,
+                pass,
+                preferredCountryCode = selectedCountry,
+            )
+        }
+        if (result is FirefoxVpnManager.ConnectResult.Error) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: recovery relay failed: ${result.message}")
+            return false
+        }
+        val info = (result as FirefoxVpnManager.ConnectResult.Success).info
+        if (!FirefoxVpnCheck.waitUntilCarries(info.localPort, timeoutMillis = 20_000)) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: replacement relay did not carry a test page")
+            FirefoxVpnRelay.stop()
+            return false
+        }
+
+        currentCoroutineContext().ensureActive()
+        if (MmkvManager.getSelectServer() != FIREFOX_VPN_GUID ||
+            FirefoxVpnStore.loadSelectedCountry(context)?.takeIf { it.isNotBlank() } != selectedCountry ||
+            FirefoxVpnStore.isSelectedCountryManuallySelected(context) != manualCountryChoice ||
+            (expectedMonitor != null && networkMonitor !== expectedMonitor)
+        ) {
+            // A manual disconnect or country change won the race; do not overwrite it.
+            FirefoxVpnRelay.stop()
+            return false
+        }
+
+        val countryCode = info.countryCode.ifBlank { selectedCountry ?: FirefoxVpnServers.RECOMMENDED_CODE }
+        val profile = ProfileItem(
+            configType = EConfigType.HTTP,
+            remarks = "Mozilla (${info.countryName})",
+            server = "127.0.0.1",
+            serverPort = info.localPort.toString(),
+        )
+        MmkvManager.encodeServerConfig(FIREFOX_VPN_GUID, profile)
+        MmkvManager.setSelectServer(FIREFOX_VPN_GUID)
+        if (!manualCountryChoice) {
+            FirefoxVpnStore.saveSelectedCountry(context, countryCode, manuallySelected = false)
+        }
+        FirefoxVpnStore.saveTunnel(context, info.localPort, countryCode, info.countryName)
+
+        val restarted = if (isRunning()) {
+            if (expectedMonitor != null && (networkMonitor !== expectedMonitor || !isRunning())) {
+                FirefoxVpnRelay.stop()
+                return false
+            }
+            reloadCore()
+        } else {
+            val started = LauncherManager.startService(context, guid = FIREFOX_VPN_GUID, quiet = true)
+            started && waitForCore(FIREFOX_RECOVERY_RETRY_MAX_MILLIS)
+        }
+        if (!restarted) {
+            AppLog.error(AppLog.Section.Connection, "Firefox VPN: replacement relay was ready, but the core did not restart")
+            return false
+        }
+        return true
+    }
+
+    /**
+     * A network handover invalidates the relay's idle TLS sockets even when the
+     * core itself does not need to be rebuilt. Check one real request on the new
+     * path, and use the daemon's ordinary recovery if that request still fails.
+     */
+    private fun checkFirefoxAfterHandover(service: Service, sourceMonitor: NetworkMonitor) {
+        failoverScope.launch {
+            kotlinx.coroutines.delay(2_000L)
+            val context = service.applicationContext
+            if (networkMonitor !== sourceMonitor ||
+                MmkvManager.getSelectServer() != FIREFOX_VPN_GUID || isReloading
+            ) return@launch
+            if (!firefoxRecoveryInProgress.compareAndSet(false, true)) return@launch
+
+            try {
+                if (!phoneIsOnline(context)) return@launch
+                val localPort = FirefoxVpnStore.loadTunnelPort(context)
+                val carries = isRunning() && localPort > 0 &&
+                    FirefoxVpnCheck.waitUntilCarries(localPort, timeoutMillis = 8_000L)
+                if (carries) {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): relay passed its network-handover check")
+                    return@launch
+                }
+
+                if (networkMonitor !== sourceMonitor ||
+                    MmkvManager.getSelectServer() != FIREFOX_VPN_GUID || !phoneIsOnline(context)
+                ) return@launch
+                if (recoverFirefoxTunnel(service, expectedMonitor = sourceMonitor)) {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): recovered after network handover")
+                } else {
+                    AppLog.info(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): handover recovery did not complete; background watcher remains active")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.error(AppLog.Section.Connection, "Firefox VPN ($FIREFOX_VPN_GUID): handover check failed: ${e.message ?: e.javaClass.simpleName}")
+                LogUtil.e(AppConfig.TAG, "Firefox VPN ($FIREFOX_VPN_GUID) handover check failed", e)
+            } finally {
+                firefoxRecoveryInProgress.set(false)
+            }
+        }
+    }
+
+    /** Waits for a restarted core without blocking the daemon's main thread. */
+    private suspend fun waitForCore(timeoutMillis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (isRunning()) return true
+            kotlinx.coroutines.delay(300)
+        }
+        return isRunning()
+    }
+
+    /** What one question through the tunnel came back with. */
+    private enum class Verdict { Carries, Silent, Unreachable }
+
+    /**
+     * Asks every address in [WATCH_PROBES] through the tunnel and stops at the
+     * first that answers. A phone with no connection of its own is reported as
+     * [Verdict.Unreachable] rather than as a silent config, because the two are
+     * different failures with different answers and only one of them is the
+     * config's.
+     */
+    private suspend fun askThroughTunnel(context: Context?): Verdict {
+        var asked = false
+        for (address in WATCH_PROBES) {
+            if (!phoneIsOnline(context)) return Verdict.Unreachable
+            val millis = runCatching { coreController.measureDelay(address) }.getOrDefault(-1L)
+            if (millis >= 0L) return Verdict.Carries
+            // -1 was the old "nothing came back", and the core also throws when it
+            // was never asked; both are a silence of some kind, and the caller
+            // decides whether it counts.
+            asked = true
+        }
+        return if (asked) Verdict.Silent else Verdict.Unreachable
+    }
+
+    /**
+     * True when the phone has a network of its own. Asked of the system rather
+     * than guessed from a failure, so a dropped signal never spends a move.
+     */
+    private fun phoneIsOnline(context: Context?): Boolean = try {
+        val manager = context?.getSystemService(android.net.ConnectivityManager::class.java)
+        val network = manager?.activeNetwork ?: return true
+        val caps = manager.getNetworkCapabilities(network) ?: return true
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Exception) {
+        // Nothing to ask: do not let a system call decide the config's fate.
+        true
+    }
+
+    /**
+     * Another config of the group the running one belongs to: the quickest of
+     * those whose latency is known, and none that was already taken in this
+     * round. The app's own ways of reaching the internet are left out, since
+     * taking one of them would change what the phone is doing, not only where.
+     */
+    private fun nextConfigAfter(guid: String): String? {
+        val group = currentConfig?.subscriptionId.orEmpty()
+        val guids = (if (group.isEmpty()) MmkvManager.decodeAllServerList() else MmkvManager.decodeServerList(group))
+            .filter {
+                it != FIREFOX_VPN_GUID &&
+                    !AetherEngine.isAetherProfile(MmkvManager.decodeServerConfig(it))
+            }
+        return Failover.next(guid, guids) { MmkvManager.decodeServerAffiliationInfo(it)?.testDelayMillis ?: 0L }
     }
 
     /**
@@ -194,10 +676,13 @@ object CoreServiceManager {
      */
     fun stopCoreLoop(): Boolean {
         connectionTestScope.coroutineContext.cancelChildren()
-        val service = getService() ?: return false
-
+        // Unregister first: the monitor must not launch a new handover child after
+        // failover work is cancelled or after its instance is cleared.
         networkMonitor?.unregister()
         networkMonitor = null
+        failoverScope.coroutineContext.cancelChildren()
+        val service = getService() ?: return false
+
         currentVpnInterface = null
 
         if (isRunning()) {
@@ -216,15 +701,27 @@ object CoreServiceManager {
             browserDialer!!.stop()
             browserDialer = null
         }
+        AetherEngine.stop()
+        AppLog.info(AppLog.Section.Connection, "Service stopped")
 
         ServiceRuntimeState.markRunning(false)
+        if (MmkvManager.getSelectServer() == FIREFOX_VPN_GUID) {
+            // A relay created by the daemon belongs to this process and must not
+            // leave warm TLS sockets/listeners behind after an explicit stop.
+            FirefoxVpnRelay.stop()
+            FirefoxVpnStore.clearTunnel(service.applicationContext)
+        }
         MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")
         NotificationManager.cancelNotification()
 
-        try {
-            service.unregisterReceiver(mMsgReceive)
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to unregister receiver", e)
+        if (registeredReceiverService === service) {
+            try {
+                service.unregisterReceiver(mMsgReceive)
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to unregister receiver", e)
+            } finally {
+                registeredReceiverService = null
+            }
         }
 
         return true
@@ -240,11 +737,44 @@ object CoreServiceManager {
         if (networkMonitor != null) return
 
         val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
-        networkMonitor = NetworkMonitor(
+        var monitorReference: NetworkMonitor? = null
+        val monitor = NetworkMonitor(
             connectivity = connectivity,
             onUnderlyingNetworksChanged = { networks -> serviceControl?.get()?.setUnderlyingNetworks(networks) },
-            onHandover = { reloadCore() },
-        ).also { it.register() }
+            onHandover = {
+                monitorReference?.let { sourceMonitor ->
+                    failoverScope.launch {
+                        if (networkMonitor !== sourceMonitor) return@launch
+                        val guid = MmkvManager.getSelectServer().orEmpty()
+                        val cfg = MmkvManager.decodeServerConfig(guid)
+                        val isLocalRelayProfile = guid == FIREFOX_VPN_GUID || AetherEngine.isAetherProfile(cfg)
+                        if (isLocalRelayProfile) {
+                            if (guid == FIREFOX_VPN_GUID) {
+                                if (networkMonitor !== sourceMonitor) return@launch
+                                FirefoxVpnRelay.onNetworkChanged()
+                                checkFirefoxAfterHandover(service, sourceMonitor)
+                            }
+                            LogUtil.i(AppConfig.TAG, "Network handover: local relay profile, skipping core reload")
+                        } else {
+                            val now = System.currentTimeMillis()
+                            if (now - lastReloadAtMillis < 60_000L) {
+                                LogUtil.i(AppConfig.TAG, "Network handover: reload debounced")
+                            } else {
+                                // A pending handover belongs to the monitor that observed it.
+                                // Do not reload after stop/replacement or while the core is down.
+                                if (networkMonitor !== sourceMonitor || !isRunning() ||
+                                    MmkvManager.getSelectServer().orEmpty() != guid
+                                ) return@launch
+                                reloadCore()
+                            }
+                        }
+                    }
+                }
+            },
+        )
+        monitorReference = monitor
+        networkMonitor = monitor
+        monitor.register()
     }
 
     /**
@@ -265,11 +795,29 @@ object CoreServiceManager {
             val tunFd = currentVpnInterface
 
             isReloading = true
+            lastReloadAtMillis = System.currentTimeMillis()
             connectionTestScope.coroutineContext.cancelChildren()
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload start...")
 
             coreController.stopLoop()
-            launchCore(service, tunFd, isReload = true)
+            // Allow Xray to release its local SOCKS port (10808) cleanly before rebinding.
+            Thread.sleep(250L)
+
+            val retryDelays = longArrayOf(0L, 1_200L, 2_000L, 3_000L)
+            var lastError: Exception? = null
+            for (delayMs in retryDelays) {
+                if (serviceControl?.get() == null) break
+                if (delayMs > 0L) Thread.sleep(delayMs)
+                try {
+                    launchCore(service, tunFd, isReload = true)
+                    lastError = null
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                    LogUtil.w(AppConfig.TAG, "StartCore-Manager: Reload attempt failed (${e.message}), retrying...")
+                }
+            }
+            if (lastError != null) throw lastError
 
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload finished")
             true
@@ -350,6 +898,11 @@ object CoreServiceManager {
 
             ensureActive()
             val endpoint = if (time >= 0) SpeedtestManager.getRemoteIPInfo() else null
+            if (time >= 0) {
+                AppLog.info(AppLog.Section.Test, "Connection test passed: $time ms")
+            } else {
+                AppLog.error(AppLog.Section.Test, "Connection test failed: ${errorStr.ifBlank { "no answer through the tunnel" }}")
+            }
             val result = ConnectionTestResult(
                 delayMillis = time,
                 errorMessage = errorStr,

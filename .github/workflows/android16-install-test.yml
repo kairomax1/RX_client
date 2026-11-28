@@ -1,0 +1,107 @@
+name: Test Android 16 ARM64 APK installation
+
+on:
+  push:
+    branches:
+      - "arena/**"
+    paths:
+      - ".github/workflows/android16-install-test.yml"
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful build run that contains the RXVPN-apk artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  android16-arm64:
+    name: Fresh install and in-place update on Android 16 ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download candidate APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: RXVPN-apk
+          path: apks/new
+          run-id: ${{ github.event.inputs.artifact_run_id || '46127785552' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download the previous public ARM64 release for upgrade testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p apks/old
+          gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" \
+            --pattern RXVPN_1.0.1_arm64-v8a.apk --dir apks/old
+          ls -lh apks/new apks/old
+
+      - name: Enable emulator acceleration
+        run: |
+          uname -a
+          if [ -e /dev/kvm ]; then
+            ls -l /dev/kvm
+            sudo chmod a+rw /dev/kvm
+          else
+            echo '::warning::ARM runner has no /dev/kvm; emulator acceleration may be unavailable'
+          fi
+
+      - name: Install fresh and update without removing user data
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: arm64-v8a
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -eu
+            APK=apks/new/RXVPN_1.2.1_arm64-v8a.apk
+            OLD=apks/old/RXVPN_1.0.1_arm64-v8a.apk
+            SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+            ABI=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
+            echo "::notice title=Emulator::Android API $SDK; ABIs: $ABI"
+            [ "$SDK" = "36" ] || { echo "Expected API 36, got $SDK"; exit 1; }
+
+            install_apk() {
+              label=$1
+              apk=$2
+              if output=$(adb install "$apk" 2>&1); then
+                printf '%s\n' "$output"
+              else
+                result=$?
+                flat=$(printf '%s' "$output" | tr '\n' ' ')
+                echo "::error title=APK install::$label failed (adb exit $result): $flat"
+                exit "$result"
+              fi
+            }
+            update_apk() {
+              label=$1
+              apk=$2
+              if output=$(adb install -r "$apk" 2>&1); then
+                printf '%s\n' "$output"
+              else
+                result=$?
+                flat=$(printf '%s' "$output" | tr '\n' ' ')
+                echo "::error title=APK update::$label failed (adb exit $result): $flat"
+                exit "$result"
+              fi
+            }
+
+            echo 'Fresh-install test: candidate arm64 APK'
+            install_apk 'fresh arm64 install' "$APK"
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb uninstall com.mobix.vpn
+
+            echo 'Upgrade test: install public 1.0.1, then update in place'
+            install_apk 'baseline 1.0.1 install' "$OLD"
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            update_apk 'candidate arm64 update' "$APK"
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb shell pm path com.mobix.vpn

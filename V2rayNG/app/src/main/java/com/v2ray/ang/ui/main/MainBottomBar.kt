@@ -29,6 +29,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,6 +51,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
@@ -65,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import java.util.Locale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -156,36 +160,44 @@ fun MainBottomBar(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // The design pins this row left to right in every locale.
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    DockSideButton(
-                        onClick = onOpenQuickSheet,
-                        contentDescription = stringResource(R.string.quick_sheet_open),
-                        modifier = Modifier.size(DOCK_BUTTON_HEIGHT),
+            // The design pins this row left to right in every locale. On a narrow
+            // phone or with large system text, shrink side controls before allowing
+            // the connect label to run off the edge.
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val compact = maxWidth < 370.dp || LocalDensity.current.fontScale >= 1.2f
+                val sideSize = if (compact) 54.dp else DOCK_BUTTON_HEIGHT
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_grid_24dp),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
+                        DockSideButton(
+                            onClick = onOpenQuickSheet,
+                            contentDescription = stringResource(R.string.quick_sheet_open),
+                            modifier = Modifier.width(sideSize).height(DOCK_BUTTON_HEIGHT),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_grid_24dp),
+                                contentDescription = null,
+                                modifier = Modifier.size(if (compact) 22.dp else 24.dp),
+                            )
+                        }
+                        PingButton(
+                            enabled = connected && !isTesting,
+                            isTesting = isTesting && connected,
+                            pingMillis = pingMillis.takeIf { connected },
+                            compact = compact,
+                            onClick = { onAction(MainAction.TestCurrentServer) },
+                        )
+                        ConnectButton(
+                            phase = phase,
+                            failureTick = failureTick,
+                            enabled = canConnect || phase != ConnectPhase.Idle,
+                            compact = compact,
+                            onClick = { onAction(MainAction.ToggleService) },
+                            modifier = Modifier.weight(1f).height(DOCK_BUTTON_HEIGHT),
                         )
                     }
-                    PingButton(
-                        enabled = connected && !isTesting,
-                        isTesting = isTesting && connected,
-                        pingMillis = pingMillis.takeIf { connected },
-                        onClick = { onAction(MainAction.TestCurrentServer) },
-                    )
-                    ConnectButton(
-                        phase = phase,
-                        failureTick = failureTick,
-                        enabled = canConnect || phase != ConnectPhase.Idle,
-                        onClick = { onAction(MainAction.ToggleService) },
-                        modifier = Modifier.weight(1f).height(DOCK_BUTTON_HEIGHT),
-                    )
                 }
             }
             if (phase == ConnectPhase.Idle && !canConnect) {
@@ -251,10 +263,16 @@ private fun ExitAddressText(ip: String?, country: String?) {
     val countryUnits = remember(countryText) { MainExitAddress.typingUnits(countryText) }
     val ipProgress = remember { Animatable(0f) }
     val countryProgress = remember { Animatable(0f) }
+    // The address is typed out the first time it appears. After that a new address
+    // simply takes the place of the one before it: a config whose exit address
+    // moves would otherwise begin from an empty line again and again, and reading
+    // it would take longer than the connection did.
+    var typedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(ipText, countryText, animate) {
-        if (!animate) {
+        if (!animate || typedOnce) {
             ipProgress.snapTo(ipUnits.size.toFloat())
             countryProgress.snapTo(countryUnits.size.toFloat())
+            typedOnce = true
             return@LaunchedEffect
         }
         ipProgress.snapTo(0f)
@@ -270,17 +288,24 @@ private fun ExitAddressText(ip: String?, country: String?) {
                 tween(MainExitAddress.typingMillis(countryUnits.size), easing = LinearEasing),
             )
         }
+        typedOnce = true
     }
-    // Handed on as a State and read only while drawing: the blink does not recompose the line.
-    val caret = rememberInfiniteTransition(label = "caret").animateFloat(
-        initialValue = 1f,
-        targetValue = 0.15f,
-        animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
-        label = "caretAlpha",
-    )
     val ink = rxLiveColor()
     val typingIp = ipProgress.value < ipUnits.size
     val typingCountry = !typingIp && countryUnits.isNotEmpty() && countryProgress.value < countryUnits.size
+    // Handed on as a State and read only while drawing: the blink does not recompose the
+    // line. The loop itself only runs while something is actually being typed, so the
+    // bottom bar stays still once the address has settled.
+    val caret = if (animate && (typingIp || typingCountry)) {
+        rememberInfiniteTransition(label = "caret").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.15f,
+            animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
+            label = "caretAlpha",
+        )
+    } else {
+        null
+    }
     // Addresses are Latin: keep the pair left to right inside a right-to-left status line.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -290,18 +315,21 @@ private fun ExitAddressText(ip: String?, country: String?) {
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (animate && typingIp) TypingCaret(ink, caret)
+            if (caret != null && typingIp) TypingCaret(ink, caret)
             if (countryProgress.value > 0f || typingCountry) {
                 Text(
                     text = typedText(countryUnits, countryProgress.value, ink),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 10.dp),
                 )
-                if (animate && typingCountry) TypingCaret(ink, caret)
+                if (caret != null && typingCountry) TypingCaret(ink, caret)
             }
         }
     }
@@ -342,13 +370,14 @@ private fun PingButton(
     enabled: Boolean,
     isTesting: Boolean,
     pingMillis: Long?,
+    compact: Boolean,
     onClick: () -> Unit,
 ) {
     DockSideButton(
         onClick = onClick,
         enabled = enabled,
         contentDescription = stringResource(R.string.connection_test_pending),
-        modifier = Modifier.width(72.dp).height(DOCK_BUTTON_HEIGHT),
+        modifier = Modifier.width(if (compact) 58.dp else 72.dp).height(DOCK_BUTTON_HEIGHT),
     ) {
         val label = when {
             isTesting -> "…"
@@ -403,6 +432,7 @@ private fun ConnectButton(
     phase: ConnectPhase,
     failureTick: Int,
     enabled: Boolean,
+    compact: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -435,19 +465,30 @@ private fun ConnectButton(
         )
     }
 
-    val infinite = rememberInfiniteTransition(label = "connect")
-    val stripeShift by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
-        label = "stripes",
-    )
-    val sheen by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
-        label = "sheen",
-    )
+    // The bottom bar is on screen in every state, so these loops must not run while the
+    // button is idle: an infinite transition redraws the layer every frame. Stripes only
+    // while connecting, the sheen only while connected; idle and failed stay static.
+    // Kept as States and read only inside drawWithContent, so they never recompose.
+    val stripeShift: State<Float>?
+    val sheen: State<Float>?
+    if (animate && (connecting || connected)) {
+        val infinite = rememberInfiniteTransition(label = "connect")
+        stripeShift = infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
+            label = "stripes",
+        )
+        sheen = infinite.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Restart),
+            label = "sheen",
+        )
+    } else {
+        stripeShift = null
+        sheen = null
+    }
     val glow by animateFloatAsState(if (connected) 1f else 0f, tween(600), label = "glow")
     val red by animateFloatAsState(if (failed) 1f else 0f, tween(260), label = "red")
 
@@ -474,7 +515,7 @@ private fun ConnectButton(
                         val band = 14.dp.toPx()
                         val period = band * 2f
                         val slant = size.height / tan(Math.toRadians(70.0)).toFloat()
-                        var x = -period - slant + stripeShift * period
+                        var x = -period - slant + (stripeShift?.value ?: 0f) * period
                         while (x < size.width + slant) {
                             drawLine(
                                 color = Color.Black.copy(alpha = 0.10f),
@@ -484,10 +525,10 @@ private fun ConnectButton(
                             )
                             x += period
                         }
-                    } else if (!failed) {
+                    } else if (connected) {
                         // A band of light gliding across, most of the cycle off screen.
                         val travel = size.width * 2.6f
-                        val centre = -size.width * 0.8f + travel * sheen
+                        val centre = -size.width * 0.8f + travel * (sheen?.value ?: 0f)
                         drawRect(
                             Brush.linearGradient(
                                 colors = listOf(
@@ -521,24 +562,29 @@ private fun ConnectButton(
         AnimatedContent(
             targetState = label,
             transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = if (compact) 6.dp else 10.dp),
             label = "connectLabel",
         ) { text ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_power_24dp),
                     contentDescription = null,
                     tint = contentColor,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(if (compact) 20.dp else 22.dp),
                 )
                 Text(
                     text = text,
                     color = contentColor,
-                    fontSize = 17.sp,
+                    fontSize = if (compact) 15.sp else 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
             }
         }

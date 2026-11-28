@@ -1,7 +1,7 @@
 package com.v2ray.ang.ui.compose
 
+import android.app.ActivityManager
 import androidx.compose.runtime.LongState
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -10,9 +10,18 @@ import androidx.compose.ui.graphics.drawscope.scale
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -40,7 +49,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
@@ -69,6 +77,13 @@ fun rxFloatingBorder(): BorderStroke {
 fun rememberAnimationsEnabled(): Boolean {
     val context = LocalContext.current
     return remember(context) {
+        val lowMemoryPhone = try {
+            val manager = context.getSystemService(ActivityManager::class.java)
+            manager?.isLowRamDevice == true || (manager?.memoryClass ?: Int.MAX_VALUE) <= 128
+        } catch (e: Exception) {
+            false
+        }
+        if (lowMemoryPhone) return@remember false
         try {
             Settings.Global.getFloat(
                 context.contentResolver,
@@ -118,9 +133,9 @@ private class DustField {
         height = size.height
         val widthDp = width / density
         val heightDp = height / density
-        // Denser and a little larger than the web mock, where a phone screen got about two dozen
-        // specks that vanished behind the list.
-        count = min(110f, widthDp * heightDp / 3600f).toInt().coerceAtLeast(0)
+        // Enough to read as dust behind the list, few enough that a weak phone does not spend
+        // its frame budget on decoration. The list and the bars always come first.
+        count = min(44f, widthDp * heightDp / 9000f).toInt().coerceAtLeast(0)
         x = FloatArray(count) { Random.nextFloat() * width }
         y = FloatArray(count) { Random.nextFloat() * height }
         radius = FloatArray(count) { (0.5f + Random.nextFloat() * 1.5f) * density }
@@ -149,9 +164,9 @@ private class DustField {
 }
 
 /**
- * The live wallpaper: dust drifting upward and twinkling, over two soft lights that wander
- * slowly. Drawn in the draw phase only, so it never recomposes the screen above it. Silver dust on
- * the dark theme, graphite dust on the light one, so the screen is alive in both.
+ * The live wallpaper: dust drifting upward and twinkling. Drawn in the draw phase only, so it
+ * never recomposes the screen above it. Silver dust on the dark theme, graphite dust on the light
+ * one, so the screen is alive in both.
  */
 @Composable
 fun RxDustBackground(modifier: Modifier = Modifier) {
@@ -159,30 +174,14 @@ fun RxDustBackground(modifier: Modifier = Modifier) {
     val animate = rememberAnimationsEnabled()
     val field = remember { DustField() }
     val frameNanos by rememberFrameClock(animate, DUST_FRAME_NANOS)
-    val lights = remember(dark) { DustLights() }
     val speck = if (dark) Color(0xFFD7E1F5) else Color(0xFF39465A)
     val speckGain = if (dark) 1f else 0.62f
-    val firstLight = if (dark) Color(0x2E8A9CC8) else Color(0x3D9DB2D6)
-    val secondLight = if (dark) Color(0x1FB8C4DC) else Color(0x66FFFFFF)
     // Its own layer: a new wallpaper frame repaints the wallpaper alone, instead of making the
     // whole screen above it (list, bars, text) be recorded again on every frame.
     Canvas(modifier.fillMaxSize().graphicsLayer()) {
         field.ensure(size, density)
         field.step(frameNanos)
         val t = field.seconds
-        // Two wide, faint lights on slow, different orbits. Each gradient is built once per
-        // size and moved into place, instead of a new shader on every frame.
-        lights.ensure(size, firstLight, secondLight)
-        val firstX = size.width * (0.5f + 0.32f * sin(t * 0.11f))
-        val firstY = size.height * (0.36f + 0.10f * cos(t * 0.09f))
-        translate(firstX, firstY) {
-            drawRect(lights.first!!, topLeft = Offset(-firstX, -firstY), size = size)
-        }
-        val secondX = size.width * (0.5f - 0.36f * sin(t * 0.07f + 1.3f))
-        val secondY = size.height * (0.78f + 0.08f * sin(t * 0.13f))
-        translate(secondX, secondY) {
-            drawRect(lights.second!!, topLeft = Offset(-secondX, -secondY), size = size)
-        }
         for (i in 0 until field.count) {
             val twinkle = 0.65f + 0.35f * sin(t * 1.4f + field.phase[i])
             drawCircle(
@@ -261,24 +260,6 @@ private class FogBanks {
     }
 }
 
-/** The two wallpaper lights, rebuilt only when the screen size or the colours change. */
-private class DustLights {
-    var first: Brush? = null
-    var second: Brush? = null
-    private var size = Size.Unspecified
-    private var firstColor = Color.Unspecified
-    private var secondColor = Color.Unspecified
-
-    fun ensure(canvas: Size, a: Color, b: Color) {
-        if (canvas == size && a == firstColor && b == secondColor && first != null) return
-        size = canvas
-        firstColor = a
-        secondColor = b
-        first = Brush.radialGradient(listOf(a, Color.Transparent), Offset.Zero, (canvas.height * 0.55f).coerceAtLeast(1f))
-        second = Brush.radialGradient(listOf(b, Color.Transparent), Offset.Zero, (canvas.height * 0.42f).coerceAtLeast(1f))
-    }
-}
-
 /**
  * Frame time for the decorative layers. It only ticks while [active] and while the screen is
  * actually on show: in the background, or with the display off, no frame is requested at all.
@@ -299,11 +280,13 @@ private fun rememberFrameClock(active: Boolean, minFrameNanos: Long = 0L): LongS
     return state
 }
 
-private const val FOG_BANKS = 5
+private const val FOG_BANKS = 3
 
-// Just under the nominal frame time, so a display running at exactly that rate skips nothing.
-private const val DUST_FRAME_NANOS = 15_000_000L // at most ~60 frames a second
-private const val FOG_FRAME_NANOS = 30_000_000L // at most ~30: fog drifts far too slowly to show it
+// Decoration runs well below the display rate: dust at ~24 frames a second and fog at ~20.
+// The list, the bars and the text are what the user actually reads, and on a weak phone every
+// frame spent on a background is a frame taken from them.
+private const val DUST_FRAME_NANOS = 42_000_000L // at most ~24 frames a second
+private const val FOG_FRAME_NANOS = 50_000_000L // at most ~20: fog drifts far too slowly to show it
 
 /** Dropdown with the app's floating surface: own background, thin border, round corners, shadow. */
 @Composable
@@ -323,6 +306,104 @@ fun RxDropdownMenu(
         shadowElevation = 14.dp,
         border = rxFloatingBorder(),
         content = content,
+    )
+}
+
+/**
+ * A menu that opens by unfolding: the body tips down out of the button it hangs from and
+ * settles, and each row then swings in from the side, one after the next. Everything else
+ * about it is the app's own floating surface.
+ */
+@Composable
+fun RxFanDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        // The body is drawn below, so it can be folded while it opens.
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        RxUnfoldSurface(content = content)
+    }
+}
+
+/** The surface of [RxFanDropdownMenu]: hinged on its top edge, and folded back while closed. */
+@Composable
+private fun RxUnfoldSurface(content: @Composable ColumnScope.() -> Unit) {
+    val animate = rememberAnimationsEnabled()
+    val open = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (!animate) return@LaunchedEffect
+        open.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 520f))
+    }
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = Modifier
+            .graphicsLayer {
+                val shown = open.value
+                // Tipped back while closed, so it looks like a flap let down from the button.
+                rotationX = -38f * (1f - shown)
+                scaleX = 0.94f + 0.06f * shown
+                scaleY = 0.82f + 0.18f * shown
+                alpha = shown.coerceIn(0f, 1f)
+                transformOrigin = TransformOrigin(0.5f, 0f)
+            }
+            .shadow(14.dp, shape)
+            .clip(shape)
+            .background(rxFloatingColor())
+            .border(rxFloatingBorder(), shape),
+        content = content,
+    )
+}
+
+/** A row of [RxFanDropdownMenu]: it swings in from the side, a little after the row above it. */
+@Composable
+fun RxFanMenuItem(
+    index: Int,
+    text: String,
+    onClick: () -> Unit,
+    iconRes: Int? = null,
+    /** Red: for the entries that throw configs away. */
+    danger: Boolean = false,
+) {
+    val animate = rememberAnimationsEnabled()
+    val progress = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (!animate) return@LaunchedEffect
+        delay(70L + index * 42L)
+        progress.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 400f))
+    }
+    val tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    val leadingIcon: (@Composable () -> Unit)? = if (iconRes != null) {
+        {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = tint,
+            )
+        }
+    } else {
+        null
+    }
+    DropdownMenuItem(
+        text = { Text(text = text, style = MaterialTheme.typography.bodyMedium, color = tint) },
+        onClick = onClick,
+        leadingIcon = leadingIcon,
+        modifier = Modifier.graphicsLayer {
+            val shown = progress.value
+            alpha = shown.coerceIn(0f, 1f)
+            translationX = (1f - shown) * 24.dp.toPx()
+            scaleX = 0.96f + 0.04f * shown
+        },
     )
 }
 

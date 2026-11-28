@@ -2,11 +2,7 @@ package com.v2ray.ang.ui.main
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -17,7 +13,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,8 +29,8 @@ import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.ui.compose.rememberAnimationsEnabled
 
 /**
- * The title a config earned in the automatic test. It pops in once and then a soft light keeps
- * crossing it. The light is read only while drawing, so it costs no recomposition.
+ * The title a config earned in the automatic test. It pops in once and a soft light glides
+ * across it a single time. The light is read only while drawing, so it costs no recomposition.
  */
 @Composable
 internal fun ConfigBadgeChip(badge: ConfigBadge, modifier: Modifier = Modifier) {
@@ -49,14 +44,15 @@ internal fun ConfigBadgeChip(badge: ConfigBadge, modifier: Modifier = Modifier) 
     LaunchedEffect(badge) {
         if (pop.value < 1f) pop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow))
     }
-    val sheen: State<Float>? = if (animate) {
-        rememberInfiniteTransition(label = "badge").animateFloat(
-            initialValue = -0.6f,
-            targetValue = 1.6f,
-            animationSpec = infiniteRepeatable(tween(2600, delayMillis = 1400, easing = LinearEasing), RepeatMode.Restart),
-            label = "badgeSheen",
-        )
-    } else null
+    // One glide after the pop-in, not a loop: chips sit in list rows, and an infinite
+    // sheen would redraw every visible chip for most of each cycle. Read only while
+    // drawing, so the glide costs no recomposition.
+    val sheen = remember(badge) { Animatable(if (animate) -0.6f else 1.6f) }
+    LaunchedEffect(badge, animate) {
+        if (animate) {
+            sheen.animateTo(1.6f, tween(2600, delayMillis = 1400, easing = LinearEasing))
+        }
+    }
     val shape = RoundedCornerShape(9.dp)
     Text(
         text = stringResource(label),
@@ -76,7 +72,7 @@ internal fun ConfigBadgeChip(badge: ConfigBadge, modifier: Modifier = Modifier) 
             .border(1.dp, Color.White.copy(alpha = 0.35f), shape)
             .drawWithContent {
                 drawContent()
-                val position = sheen?.value ?: return@drawWithContent
+                val position = sheen.value
                 val x = size.width * position
                 drawRect(
                     Brush.linearGradient(

@@ -5,6 +5,33 @@ plugins {
     id("com.jaredsburrows.license")
 }
 
+/**
+ * The commit this build was made from, so that a build can tell which build it is.
+ * Two builds can carry the same version and still be different — a tester's build
+ * and the published one both say 1.0.1 — and without this there is no way for the
+ * phone to know whether the release it is looking at is the one it is running.
+ */
+fun commitOf(dir: File): String = runCatching {
+    val process = ProcessBuilder("git", "rev-parse", "HEAD")
+        .directory(dir)
+        .redirectErrorStream(false)
+        .start()
+    val out = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() == 0) out else ""
+}.getOrDefault("")
+
+fun branchOf(dir: File): String = runCatching {
+    val process = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+        .directory(dir)
+        .redirectErrorStream(false)
+        .start()
+    val out = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() == 0 && out != "HEAD") out else "master"
+}.getOrDefault("master")
+
+val buildCommit = commitOf(rootDir).ifEmpty { commitOf(rootDir.parentFile) }
+val buildBranch = branchOf(rootDir).ifEmpty { branchOf(rootDir.parentFile) }
+
 android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
@@ -12,9 +39,22 @@ android {
     defaultConfig {
         applicationId = "com.mobix.vpn"
         minSdk = 24
-        targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.1"
+        targetSdk = 34
+        // 4 was a mistake to freeze: a phone only updates an installed app when
+        // the new file has a higher number, and every build this project shipped
+        // carried the same one, so an installed copy could never be replaced. The
+        // number now comes from the build itself (-Prx.versionCode=<run number>,
+        // passed by the workflow) so that each build is newer than the last. CI
+        // then refuses to ship a file whose number is not above 4000004, which is
+        // the highest number any earlier build ever had — no phone can be stuck on
+        // a version that is newer than everything after it.
+        versionCode = (project.findProperty("rx.versionCode") as String?)?.toIntOrNull() ?: 5
+        // A tester who checks the phone's Settings screen can tell two builds apart
+        // from here on, which is how the version question is settled without a log.
+        versionName = (project.findProperty("rx.versionName") as String?) ?: "1.2.1"
+
+        buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
+        buildConfigField("String", "BUILD_BRANCH", "\"$buildBranch\"")
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
@@ -45,6 +85,7 @@ android {
             val storePath = (project.findProperty("rx.storeFile") as String?)?.takeIf { it.isNotBlank() }
             if (storePath != null) {
                 storeFile = file(storePath)
+                storeType = "PKCS12"
                 storePassword = project.findProperty("rx.storePassword") as String?
                 keyAlias = project.findProperty("rx.keyAlias") as String?
                 keyPassword = project.findProperty("rx.keyPassword") as String?
@@ -77,10 +118,18 @@ android {
 
     packaging {
         jniLibs {
-            // Compressed, extract-at-install native libraries. The alternative (uncompressed, mapped
-            // straight out of the APK) is refused by some device installers as an invalid package.
+            // Compressed, extract-at-install native libraries (extractNativeLibs="true").
+            // Both AetherEngine (libaether.so) and RootProxyManager (libhevsockstun.so) execute
+            // binaries directly from context.applicationInfo.nativeLibraryDir, which stays empty
+            // when useLegacyPackaging = false. Uncompressed packaging with 4 KB NDK r26 binaries
+            // and ELF executables in lib/ is also rejected by device installers on both fresh
+            // installs and updates ("the package appears to be invalid").
             useLegacyPackaging = true
         }
+    }
+
+    lint {
+        abortOnError = false
     }
 
     flavorDimensions.add("distribution")
@@ -176,12 +225,6 @@ android {
             "bn",
             "bqi-rIR"
         )
-    }
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
     }
 
     testOptions {

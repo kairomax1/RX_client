@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.main
 
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.AutoConfigTest
 import com.v2ray.ang.handler.ConfigBadge
 import com.v2ray.ang.handler.ConfigBadges
@@ -22,6 +23,8 @@ import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.extension.serializable
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.core.AetherEngine
+import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
@@ -33,6 +36,21 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import java.util.concurrent.atomic.AtomicBoolean
+
+/** Keeps service-owned profiles out of the ordinary server groups without removing their records. */
+internal object MainGroupVisibility {
+
+    fun visibleGuids(
+        guids: List<String>,
+        profileFor: (String) -> ProfileItem?,
+    ): List<String> = guids.filterNot { guid ->
+        guid == AppConfig.FIREFOX_VPN_PROFILE_ID || AetherEngine.isAetherProfile(profileFor(guid))
+    }
+
+    /** Empty user groups remain usable; only groups made non-empty solely by hidden profiles vanish. */
+    fun shouldExposeGroup(storedGuids: List<String>, visibleGuids: List<String>): Boolean =
+        storedGuids.isEmpty() || visibleGuids.isNotEmpty()
+}
 
 class MainRepository(
     private val app: AngApplication
@@ -152,19 +170,40 @@ class MainRepository(
                 }
             )
         }
-        result += MmkvManager.decodeSubscriptions()
+        // decodeSubscriptions already leaves out the groups the app keeps for
+        // itself, so the tab list cannot inherit "rx public pending" again.
+        // Aether and Mozilla profiles are implementation details, not config tabs. If a local
+        // group contains only those profiles, suppress that otherwise empty-looking group too.
+        result += MmkvManager.decodeSubscriptions().filter { subscription ->
+            val stored = MmkvManager.decodeServerList(subscription.guid)
+            val visible = MainGroupVisibility.visibleGuids(stored, MmkvManager::decodeServerConfig)
+            MainGroupVisibility.shouldExposeGroup(stored, visible)
+        }
         return result
     }
 
     override fun getSubscriptionItem(id: String): SubscriptionItem? =
         MmkvManager.decodeSubscription(id)
 
-    override fun getServerGuidList(groupId: String): List<String> =
-        if (groupId.isEmpty()) {
+    override fun isAetherSelected(): Boolean =
+        AetherEngine.isAetherProfile(MmkvManager.getSelectServer()?.let { MmkvManager.decodeServerConfig(it) })
+
+    override fun aetherStatus(notBefore: Long): AetherEngine.Status? = AetherEngine.readStatus(app, notBefore)
+
+    override fun ensureAetherProfile(): String? =
+        if (AetherEngine.isAvailable(app)) AetherEngine.ensureProfile() else null
+
+    override fun getTestDelayMillis(guid: String): Long =
+        MmkvManager.decodeServerAffiliationInfo(guid)?.testDelayMillis?.let(::cleanTestDelay) ?: 0L
+
+    override fun getServerGuidList(groupId: String): List<String> {
+        val stored = if (groupId.isEmpty()) {
             MmkvManager.decodeAllServerList()
         } else {
             MmkvManager.decodeServerList(groupId)
         }
+        return MainGroupVisibility.visibleGuids(stored, MmkvManager::decodeServerConfig)
+    }
 
     override fun decodeServerConfig(guid: String): ProfileItem? =
         MmkvManager.decodeServerConfig(guid)
@@ -233,6 +272,14 @@ class MainRepository(
     override fun share2Clipboard(guid: String): Boolean =
         AngConfigManager.share2Clipboard(app, guid) == 0
 
+    override fun isAutoFailoverEnabled(): Boolean = SettingsManager.isAutoFailoverEnabled()
+
+    override fun startService() {
+        LauncherManager.restartServiceOrStart(app) {
+            LauncherManager.startService(app, quiet = true)
+        }
+    }
+
     override fun sendMsg2Service(msgId: Int, content: String) =
         MessageHelper.sendMsg2Service(app, msgId, content)
 
@@ -253,6 +300,25 @@ class MainRepository(
 
     override fun syncSubscriptions() {
         SubscriptionUpdater.sync(app)
+    }
+
+    override fun renewPublicConfigs(connected: Boolean): Int {
+        // Background auto-renewal is opt-in through the remote-control flag (off by
+        // default): without this check the app re-arms a 15-minute download worker and
+        // probes public configs every time the main screen opens, which is the
+        // "lag + freeze + downloads by itself" users see. Manual refresh from the
+        // Public Configs screen is unaffected.
+        if (!com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.publicConfigs }) return 0
+        PublicConfigs.schedule(app)
+        // refreshIfDue renews the group itself when due (including daily 24h updates and
+        // initial population when the group is empty).
+        if (PublicConfigs.refreshIfDue(app)) return PublicConfigs.savedOptions().count
+        // New lists are waiting: rebuild the group unless a tunnel is up (candidates
+        // must be measured on the bare connection).
+        if (connected || (!PublicConfigs.fresh.value && PublicConfigs.hasGroup())) return 0
+        val options = PublicConfigs.savedOptions()
+        val outcome = PublicConfigs.collect(app, options, java.util.concurrent.atomic.AtomicBoolean(false)) {}
+        return if (outcome.added > 0) options.count else 0
     }
 
     override fun initAssets() {

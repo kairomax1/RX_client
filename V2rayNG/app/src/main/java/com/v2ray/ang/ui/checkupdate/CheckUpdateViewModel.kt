@@ -98,7 +98,12 @@ class CheckUpdateViewModel(application: Application) : BaseViewModel(application
         downloadJob = viewModelScope.launch {
             try {
                 val apk = UpdateDownloader.download(
-                    getApplication<Application>(), version, url, result.downloadSize, result.sha256,
+                    context = getApplication<Application>(),
+                    version = version,
+                    url = url,
+                    size = result.downloadSize,
+                    sha256 = result.sha256,
+                    headers = result.downloadHeaders,
                 ) { progress -> _download.value = DownloadState.Running(progress) }
                 if (apk != null) {
                     _download.value = DownloadState.Ready(apk)

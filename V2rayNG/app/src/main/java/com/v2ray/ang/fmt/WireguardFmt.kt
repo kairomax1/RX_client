@@ -86,13 +86,14 @@ object WireguardFmt : FmtBase() {
         config.remoteDNS = interfaceParams["dns"] ?: AppConfig.WIREGUARD_LOCAL_REMOTE_DNS
         config.publicKey = peerParams["publickey"].orEmpty()
         config.preSharedKey = peerParams["presharedkey"]?.nullIfBlank()
-        val endpoint = peerParams["endpoint"].orEmpty()
-        val endpointParts = endpoint.split(":", limit = 2)
-        if (endpointParts.size == 2) {
-            config.server = endpointParts[0]
-            config.serverPort = endpointParts[1]
+        val endpoint = peerParams["endpoint"].orEmpty().trim()
+        val lastColon = endpoint.lastIndexOf(':')
+        val closeBracket = endpoint.lastIndexOf(']')
+        if (lastColon > 0 && (closeBracket < 0 || lastColon > closeBracket)) {
+            config.server = endpoint.substring(0, lastColon).trim().removeSurrounding("[", "]")
+            config.serverPort = endpoint.substring(lastColon + 1).trim()
         } else {
-            config.server = endpoint
+            config.server = endpoint.removeSurrounding("[", "]")
             config.serverPort = ""
         }
         config.reserved = peerParams["reserved"] ?: "0,0,0"

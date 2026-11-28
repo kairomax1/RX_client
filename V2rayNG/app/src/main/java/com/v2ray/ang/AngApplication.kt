@@ -10,6 +10,7 @@ import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.PublicConfigs
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.compose.ThemeManager
 
@@ -50,8 +51,10 @@ class AngApplication : Application() {
         // Initialize theme state from MMKV
         ThemeManager.refresh()
 
-        // Keep the daily maintenance job in sync with the preference
+        // Daily public-config refresh is explicitly requested by the owner. Other list/asset
+        // auto-sync remains opt-in so it does not add unrelated background work.
         DailyMaintenance.sync(this)
+        PublicConfigs.scheduleDaily(this)
         UpdateNotifier.scheduleWatch(this)
     }
 }

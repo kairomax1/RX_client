@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import libv2ray.CoreCallbackHandler
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,11 +38,29 @@ object AutoConfigTest {
     const val STORAGE_ID = "RX_AUTO_TEST"
     private val storage by lazy { MMKV.mmkvWithID(STORAGE_ID, MMKV.MULTI_PROCESS_MODE) }
 
-    private const val PAYLOAD_BYTES = 600_000
-    private const val MAX_DOWNLOAD_MS = 6_000L
+    // What decides a config is whether bytes come through, not how many. A small
+    // download is enough to tell a working tunnel from a dead one, and asking for
+    // a large one only added waiting to every candidate on a slow but working
+    // line: at 4 kbit/s — which is what one of hers really carried — a sixth of a
+    // megabyte is two minutes, so the measurement gave up on a config that was
+    // in fact carrying. The floor and the window are both smaller now, and the
+    // window is shorter than the deadline the caller gives the whole probe.
+    private const val PAYLOAD_BYTES = 300_000
+    private const val FAST_PAYLOAD_BYTES = 32_768
+    private const val MAX_DOWNLOAD_MS = 3_500L
+    private const val FAST_MAX_DOWNLOAD_MS = 1_600L
     private val PAYLOAD_URLS = listOf(
-        "https://speed.cloudflare.com/__down?bytes=$PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
+        "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
+    )
+    private val FAST_PAYLOAD_URLS = listOf(
+        "https://cachefly.cachefly.net/1mb.test",
+        "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
+        "https://github.githubassets.com/favicons/favicon.png",
+    )
+    private val REACHABILITY_URLS = listOf(
+        "https://www.gstatic.com/generate_204",
+        "https://www.google.com/generate_204",
     )
 
     private data class Stored(val pingMs: Long = 0L, val speedKbps: Int? = null)
@@ -80,12 +99,41 @@ object AutoConfigTest {
         ConfigBadges.Score(guid, ping, parts.getOrNull(1)?.toIntOrNull())
     }
 
+    fun record(guid: String, pingMs: Long, speedKbps: Int?) {
+        save(guid, Stored(pingMs = pingMs, speedKbps = speedKbps))
+    }
+
     private fun save(guid: String, value: Stored) {
         storage.encode(guid, "${value.pingMs},${value.speedKbps ?: ""}")
     }
 
+    /**
+     * Carries real bytes through this config right now, and says how quickly.
+     *
+     * A ping is only a handshake: a UDP sort — WireGuard above all — answers a
+     * handshake and then moves no data at all when its MTU is wrong or its
+     * carrier's NAT entry is gone, which is exactly the state that was reported
+     * as "it pings and does not work". Only a download can tell the difference,
+     * so this is what decides whether a config is offered to anybody.
+     *
+     * @return kbit/s measured, or null when nothing came through in [timeoutMillis].
+     */
+    suspend fun probe(context: Context, guid: String, timeoutMillis: Long = 14_000L): Int? =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMillis) { measureSpeed(context, guid) }?.takeIf { it > 0 }
+        }
+
+    /**
+     * Fast real-byte transfer check for bulk candidate verification after a
+     * proxy has already passed an Xray round-trip probe.
+     */
+    suspend fun probeFast(context: Context, guid: String, timeoutMillis: Long = 5_000L): Int? =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMillis) { measureSpeed(context, guid, fast = true) }?.takeIf { it > 0 }
+        }
+
     /** Download speed of one config in kbit/s, or null when nothing could be measured. */
-    private suspend fun measureSpeed(context: Context, guid: String): Int? = withContext(Dispatchers.IO) {
+    private suspend fun measureSpeed(context: Context, guid: String, fast: Boolean = false): Int? = withContext(Dispatchers.IO) {
         val port = runCatching { ServerSocket(0).use { it.localPort } }.getOrNull() ?: return@withContext null
         val config = probeConfig(context, guid, port) ?: return@withContext null
         val controller = try {
@@ -98,8 +146,8 @@ object AutoConfigTest {
         try {
             controller.startLoop(config, 0)
             if (!controller.isRunning) return@withContext null
-            delay(250) // let the local door open
-            download(port)
+            delay(if (fast) 100L else 250L) // let the local door open
+            download(port, fast)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -125,17 +173,38 @@ object AutoConfigTest {
         return json.toString()
     }
 
-    private fun download(port: Int): Int? {
+    private fun download(port: Int, fast: Boolean = false): Int? {
+        val payloadBytes = if (fast) FAST_PAYLOAD_BYTES else PAYLOAD_BYTES
+        val maxDownloadMs = if (fast) FAST_MAX_DOWNLOAD_MS else MAX_DOWNLOAD_MS
+        val urls = if (fast) FAST_PAYLOAD_URLS else PAYLOAD_URLS
         val client = OkHttpClient.Builder()
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port)))
-            .connectTimeout(4, TimeUnit.SECONDS)
-            .readTimeout(4, TimeUnit.SECONDS)
-            .callTimeout(MAX_DOWNLOAD_MS + 5_000L, TimeUnit.MILLISECONDS)
+            // Two seconds to the local door, and a read that only has to be
+            // alive rather than fast: a slow line sends a few bytes at a time and
+            // is still a working config. The whole call is bounded so that a
+            // candidate can never hold the round for longer than its share.
+            .connectTimeout(if (fast) 1500L else 2000L, TimeUnit.MILLISECONDS)
+            .readTimeout(if (fast) 1600L else 4000L, TimeUnit.MILLISECONDS)
+            .callTimeout(maxDownloadMs + (if (fast) 600L else 1_500L), TimeUnit.MILLISECONDS)
             .build()
         try {
-            for (url in PAYLOAD_URLS) {
-                val speed = runCatching { downloadOnce(client, url) }.getOrNull()
-                if (speed != null) return speed
+            for (url in urls) {
+                val attempt = try {
+                    downloadOnce(client, url, payloadBytes, maxDownloadMs, minBytes = if (fast) 1_024L else 4_000L)
+                } catch (_: Throwable) {
+                    null
+                }
+                if (attempt != null) return attempt
+            }
+            if (fast) {
+                for (url in REACHABILITY_URLS) {
+                    val ok = try {
+                        confirmHttp204(client, url)
+                    } catch (_: Throwable) {
+                        false
+                    }
+                    if (ok) return 1
+                }
             }
             return null
         } finally {
@@ -144,7 +213,20 @@ object AutoConfigTest {
         }
     }
 
-    private fun downloadOnce(client: OkHttpClient, url: String): Int? {
+    private fun confirmHttp204(client: OkHttpClient, url: String): Boolean {
+        val request = Request.Builder().url(url).header("Cache-Control", "no-cache").build()
+        client.newCall(request).execute().use { response ->
+            return response.code in 200..299
+        }
+    }
+
+    private fun downloadOnce(
+        client: OkHttpClient,
+        url: String,
+        payloadBytes: Int,
+        maxDownloadMs: Long,
+        minBytes: Long = 4_000L,
+    ): Int? {
         val request = Request.Builder().url(url).header("Cache-Control", "no-cache").build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
@@ -153,14 +235,16 @@ object AutoConfigTest {
             var total = 0L
             // The clock starts at the first byte so the handshake does not count as slowness.
             val started = System.nanoTime()
-            while (total < PAYLOAD_BYTES) {
+            while (total < payloadBytes) {
                 val read = input.read(buffer)
                 if (read < 0) break
                 total += read
-                if ((System.nanoTime() - started) / 1_000_000 > MAX_DOWNLOAD_MS) break
+                if ((System.nanoTime() - started) / 1_000_000 > maxDownloadMs) break
             }
             val millis = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
-            if (total < 20_000) return null
+            // Enough bytes to prove the tunnel moves data, small enough that a slow line or
+            // lightweight fallback asset is not rejected as dead.
+            if (total < minBytes) return null
             return (total * 8 / millis).toInt().coerceAtLeast(1) // bits per millisecond = kbit/s
         }
     }

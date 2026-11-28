@@ -1,92 +1,64 @@
-# RX client v1.2
+# RX VPN
 
-بعد از یه مدت طولانی، **RX client** برگشت — این بار با نسخهٔ **1.2** و یک مشت قابلیت تازه. یکی‌یکی می‌رویم سراغشان:
+**RX VPN** یک برنامهٔ اندرویدی رایگان و متن‌باز برای اتصال امن به اینترنت است. تمرکزش روی سه چیز است: سادگی، ظاهر آرام و مصرف کم.
 
-## ۱. 🦊 موزیلا — وصل شدن از داخل خود برنامه
+## سازنده
 
-موزیلا به برنامه اضافه شده: مستقیم داخل برنامه، به‌صورت وب ثبت‌نام می‌کنید و وصل می‌شوید. پشت این متد، تمام پروتکل‌ها و MTU، fragment و کلی موارد دیگه به‌صورت خودکار روی اینترنت شما اعمال می‌شود تا بهترین سرعت را بگیرید و لذت ببرید.
+این برنامه را **Aimobix** ساخته و نگه‌داری می‌کند.
 
-## ۲. 🎮 حالت گیمینگ
+- تلگرام: [t.me/aimobix](https://t.me/aimobix)
+- یوتیوب: [youtube.com/@aimobixnet](https://youtube.com/@aimobixnet)
+- گیت‌هاب: [github.com/kairomax1](https://github.com/kairomax1)
 
-خبر خوش برای گیمرهای عزیز! از این به بعد می‌توانید با متدها و کانفیگ‌های داخل برنامه برای گیم استفاده کنید. حواستان باشد همه‌چیز به کانفیگ شما بستگی دارد؛ پس اگر کند بود، پینگ بالا داشت یا هر مشکل دیگری داشت، از کانفیگ شماست. هر مشکلی هم بود، بروید تو کانال تلگرامی مطرح کنید تا در نسخه‌های بعدی حل و عملی شود.
+خبر نسخه‌های تازه و آموزش‌ها در همین کانال‌ها گذاشته می‌شود.
 
-## ۳. 🌐 اسکنر DNS
+## آخرین نسخه: 1.2.1
 
-این متد برای کسانی است که مشکل ورود یا لاگین در کنسول ایکس‌باکس دارند. واقعاً آدم دردش می‌آید که برود تو اینترنت کلی بگردد و هیچ DNS‌ای هم جواب ندهد. حدود **۱۰۰ هزار** DNS داخل برنامه هست که می‌توانید استفاده کنید.
+رفع چند مشکل و باگ گزارش‌شده در نسخه‌های قبلی.
 
-## ۴. ⚙️ انتخاب خودکار fragment و mux
+1. **ناپایداری و قطع/وصل کانفیگ‌های عمومی و موزیلا**
+   - افزایش تحمل watchdog اتصال و کاهش reconnectهای غیرضروری روی شبکه‌های ناپایدار.
+   - بهبود keepalive اتصال‌ها (`tcpKeepAliveIdle/tcpKeepAliveInterval`) برای پایداری بیشتر.
+   - کاهش قطع/وصل موزیلا در زمان تغییر شبکه (handover) با حذف reload مزاحم برای پروفایل‌های local relay.
+   - افزایش timeoutهای اتصال/پروب در Firefox relay برای شبکه‌های کند.
 
-در بخش تنظیمات، یک بخش برای fragment و mux اضافه شده به اسم **«اعمال بهترین حالت»**. کمک می‌کند در شرایط سخت اینترنت، بهترین اعمال روی fragment و mux را برای اینترنت خودتان داشته باشید.
+2. **بهبود حالت گیمینگ**
+   - سخت‌گیری بیشتر در `EXIT_CONFIG` برای جلوگیری از نشت مسیر: تونل کامل، مسدودسازی اتصال‌های خارج از VPN، و فیلتر DNS داخلی.
+   - جلوگیری از نشت IPv6 در حالت گیمینگ با گرفتن ترافیک IPv6 داخل تونل.
+   - در حالت گیمینگ strict، قوانین per-app bypass/allow نادیده گرفته می‌شوند تا ترافیک از VPN بیرون نزند.
 
-## ۵. 🆓 کانفیگ رایگان عمومی
+3. **بهبود Fragment و Mux**
+   - بهبود اندازه‌گیری/اعمال خودکار روی اینترنت کند یا محدود (timeout بالاتر، قبول موفقیت جزئی).
+   - در صورت fail شدن کامل probeها، به‌جای علامت‌گذاری نامناسب کانفیگ، preset محافظه‌کارانه اعمال می‌شود.
+   - اعمال تنظیمات fragment/mux/sockopt keepalive روی کانفیگ‌های custom تا تنظیمات فقط نمایشی نباشند.
 
-در برنامه می‌توانید از کانفیگ رایگان عمومی استفاده کنید. با توجه به شرایط اینترنت کشور، کانفیگ‌ها به‌صورت منطقه‌ای کار می‌کنند؛ ممکن است برای یک نفر خوب باشد و برای یک نفر بد یا ضعیف — بستگی به منطقهٔ شما دارد. در نسخه‌های بعدی سعی می‌کنیم این مشکل را حل کنیم.
+📦 [دانلود نسخه 1.2.1](https://github.com/kairomax1/RX_client/releases/tag/v1.2.1)
 
----
+## طراحی
 
-امیدواریم **RX client** برایتان مفید باشد. برای حمایت می‌توانید به پروژه **استار** بدهید یا در کانال تلگرام و یوتیوب عضو شوید تا از خبرها جا نمانید.
+- ظاهر مشکی و نقره‌ای، با پس‌زمینهٔ زنده (غبار و مهِ متحرک) و حرکت‌های نرم.
+- یک دکمهٔ اتصال بزرگ پایین صفحه؛ وضعیت اتصال، آی‌پی و کشور خروجی همان‌جا نشان داده می‌شود.
+- کارت‌هایی که از پایین بالا می‌آیند و با زبان ساده می‌پرسند چه می‌خواهی، به‌جای پنجره‌های خشک.
+- حالت روشن و تیره.
+- ۱۰ زبان، از جمله فارسی، انگلیسی، عربی، روسی و چینی.
 
-مخلص شما، تیم **Aimobix**
+## هسته و پروتکل‌ها
 
----
+- هستهٔ **Xray** برای اتصال، همراه با **hev-socks5-tunnel** (tun2socks) برای عبور دادن ترافیک گوشی.
+- پروتکل‌ها: VLESS، VMess، Trojan، Shadowsocks، WireGuard، Hysteria2، SOCKS و HTTP.
+- کانفیگ سفارشی (JSON)، گروه‌بندی کانفیگ‌ها و اتصال زنجیره‌ای.
+- اشتراک (Subscription) با به‌روزرسانی خودکار.
 
-# RX client v1.2 — English
+## برای چه کارهایی بهینه شده
 
-After a long break, **RX client** is back with **v1.2** and a fresh set of features. Here they are, one by one:
+- **پیدا کردن بهترین کانفیگ:** بعد از اضافه کردن کانفیگ، برنامه خودش پینگ و سرعت را می‌سنجد، بهترین‌ها را با برچسب «پیشنهادی»، «کم پینگ ترین» و «پرسرعت ترین» علامت می‌زند و بالای لیست می‌آورد.
+- **اتصال واقعی، نه نمایشی:** «وصل شد» فقط وقتی نشان داده می‌شود که اینترنت واقعاً از داخل تونل جواب بدهد.
+- **مصرف باتری کم:** انیمیشن‌ها وقتی صفحه دیده نمی‌شود کاملاً می‌ایستند.
+- **شبکه‌های سخت:** آپدیت برنامه از داخل خود برنامه دانلود می‌شود، از چند مسیر، چندتکه، و اگر قطع شد از همان‌جا ادامه می‌دهد.
+- **پشتیبان امن:** از همهٔ کانفیگ‌ها و تنظیمات یک فایل رمزدار می‌سازد که فقط با رمز خودت باز می‌شود.
+- **بدون سرویس‌های گوگل:** روی گوشی‌های بدون Google Play هم کامل کار می‌کند.
 
-## 1. 🦊 Mozilla — connect from inside the app
+## مشخصات
 
-Mozilla has been added to the app: you register and connect through a web flow without leaving it. Behind this method, all protocols, MTU, fragmentation and a bunch of other settings are applied automatically to your connection, so you get the best possible speed.
-
-## 2. 🎮 Gaming mode
-
-Good news for gamers: you can now use the app's methods and configs for gaming. Keep in mind that everything depends on your config — if it's slow, high-ping or misbehaving in any way, it's your config. If you hit a problem, join the Telegram channel and report it so we can address it in upcoming releases.
-
-## 3. 🌐 DNS scanner
-
-This one is for people who can't sign in or log in on an Xbox console. It genuinely hurts to crawl the internet looking for a DNS that actually answers. The app ships with roughly **100,000** DNS servers you can use.
-
-## 4. ⚙️ Auto-select fragment and mux
-
-Settings now has a fragment/mux section called **"Apply best mode"**. It helps you get the best fragment and mux settings for your own connection when the network is difficult.
-
-## 5. 🆓 Free public configs
-
-You can use free public configs inside the app. Because of the country's network conditions, these configs work regionally: one may be fine for one person and weak for another, depending on your region. We're working on improving this in future releases.
-
----
-
-We hope **RX client** is useful for you. To support the project, give it a **star**, or join the Telegram channel and YouTube so you don't miss the news.
-
-— The **Aimobix** team
-
----
-
-## 📥 دانلود و نصب / Download & install
-
-| فایل / File | برای / For |
-| --- | --- |
-| `RXVPN_1.2_arm64-v8a.apk` | اکثر گوشی‌های اندرویدی (۶۴ بیت) — **پیشنهادی** / most Android phones (64-bit) — **recommended** |
-| `RXVPN_1.2_armeabi-v7a.apk` | گوشی‌های قدیمی ۳۲ بیتی / older 32-bit devices |
-| `RXVPN_1.2_x86_64.apk` | امولاتورها / emulators |
-| `RXVPN_1.2_x86.apk` | دستگاه‌های x86 قدیمی / legacy x86 devices |
-| `RXVPN_1.2_universal.apk` | همهٔ پردازنده‌ها (حجم بیشتر) / all ABIs (larger download) |
-
-- اندروید ۷ به بالا / Android 7.0+ (API 24)
-- روی نسخهٔ قبلی نصب می‌شود، بدون نیاز به حذف / installs over the previous version — no uninstall needed
-- اگر از بیلد F-Droid می‌آیید، اول حذف کنید (امضای متفاوت) / coming from an F-Droid build requires an uninstall (different signature)
-
-
-## 🔗 لینک‌ها / Links
-
-- کد منبع / Source: https://github.com/kairomax1/RX_client
-- لایسنس / License: **GPL-3.0**
-- سیاست حریم خصوصی / Privacy policy: `CR.md`
-- تلگرام / Telegram: https://t.me/aimobix
-- یوتیوب / YouTube: https://youtube.com/@aimobixnet
-
-بیلدشده از کامیت / Built from commit `b0447107f4835e5e650987b5f653d160d92049ba`
-
----
-
-## 
+- اندروید ۷ به بالا.
+- نسخه‌های جدا برای پردازنده‌های مختلف (`arm64-v8a`، `armeabi-v7a`، `x86`، `x86_64`) و یک نسخهٔ همگانی.

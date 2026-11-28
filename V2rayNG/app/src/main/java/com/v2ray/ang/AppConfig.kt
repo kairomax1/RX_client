@@ -19,6 +19,9 @@ object AppConfig {
     // Default subscription ID for ungrouped servers
     const val DEFAULT_SUBSCRIPTION_ID = "__default_subscription__"
 
+    /** Internal Mozilla tunnel profile; it must never appear as an ordinary server row. */
+    const val FIREFOX_VPN_PROFILE_ID = "firefox-vpn"
+
     /** Preferences mapped to MMKV storage. */
     const val PREF_SNIFFING_ENABLED = "pref_sniffing_enabled"
     const val PREF_ROUTE_ONLY_ENABLED = "pref_route_only_enabled"
@@ -44,6 +47,8 @@ object AppConfig {
     const val PREF_FRAGMENT_LENGTH = "pref_fragment_length"
     const val PREF_FRAGMENT_INTERVAL = "pref_fragment_interval"
     const val PREF_FRAGMENT_MAXSPLIT = "pref_fragment_maxsplit"
+    const val PREF_RX_FRAGMENT_ENABLED = "pref_rx_fragment_enabled"
+    const val PREF_RX_MUX_ENABLED = "pref_rx_mux_enabled"
     const val PREF_OBSERVATORY_LEAST_PING_INTERVAL = "pref_observatory_least_ping_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_INTERVAL = "pref_observatory_least_load_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_METHOD = "pref_observatory_least_load_method"
@@ -83,17 +88,10 @@ object AppConfig {
     const val PREF_IS_BOOTED = "pref_is_booted"
     const val PREF_CHECK_UPDATE_PRE_RELEASE = "pref_check_update_pre_release"
     const val PREF_DAILY_MAINTENANCE = "pref_daily_maintenance"
-    const val PREF_CLOUDFLARE_AUTO = "pref_cloudflare_auto"
-
-    /** GUID of the local group that holds the configs the Cloudflare tools produce. */
-    const val PREF_CLOUDFLARE_GROUP = "pref_cloudflare_group"
-
-    /** Maps a source profile to the Cloudflare copy made from it, so a repair refreshes it. */
-    const val PREF_CLOUDFLARE_COPY_PREFIX = "pref_cloudflare_copy_"
     const val PREF_SERVICE_RUNNING = "pref_service_running"
-    const val PREF_BENCHMARK_PREFIX = "pref_benchmark_"
     const val PREF_GEO_FILES_SOURCES = "pref_geo_files_sources"
     const val PREF_USE_HEV_TUNNEL = "pref_use_hev_tunnel_v2"
+    const val PREF_AUTO_FAILOVER = "pref_auto_failover"
     const val PREF_HEV_TUNNEL_LOGLEVEL = "pref_hev_tunnel_loglevel"
     const val PREF_HEV_TUNNEL_RW_TIMEOUT = "pref_hev_tunnel_rw_timeout_v2"
     const val PREF_UPDATE_SUBSCRIPTION = "pref_update_subscription"
@@ -141,6 +139,17 @@ object AppConfig {
     const val ANDROID_PACKAGE_NAME_LIST_URL = "$GITHUB_RAW_URL/2dust/androidpackagenamelist/master/proxy.txt"
     const val APP_URL = "$GITHUB_URL/kairomax1/RX_client"
     const val APP_API_URL = "https://api.github.com/repos/kairomax1/RX_client/releases"
+
+    /**
+     * A key the owner makes once, in GitHub, that lets this phone read the releases
+     * no one else can see. A release kept as a draft is invisible to anybody who is
+     * not signed in, and an app cannot sign in, so without this the phone simply
+     * never hears of the build that was made for it.
+     */
+    const val PREF_GITHUB_TOKEN = "pref_rx_github_token"
+
+    /** The assets of a release are fetched from the API, which is the only door a key opens. */
+    const val GITHUB_ASSET_URL = "https://api.github.com/repos/kairomax1/RX_client/releases/assets/%d"
     const val MAKER_GITHUB_URL = "$GITHUB_URL/kairomax1"
     const val MAKER_TELEGRAM_URL = "https://t.me/aimobix"
     const val MAKER_YOUTUBE_URL = "https://youtube.com/@aimobixnet"
@@ -154,13 +163,12 @@ object AppConfig {
     const val OBSERVATORY_LEAST_LOAD_SAMPLING = "2"
     const val OBSERVATORY_LEAST_LOAD_TIMEOUT = "30s"
 
-    //    const val IP_API_URL = "https://speed.cloudflare.com/meta"
     const val IP_API_URL = "https://api.ip.sb/geoip"
 
     /** DNS server addresses. */
-    const val DNS_PROXY = "https://cloudflare-dns.com/dns-query"
+    const val DNS_PROXY = "https://dns.google/dns-query"
     const val DNS_DIRECT = "223.5.5.5"
-    const val DNS_VPN = "1.1.1.1"
+    const val DNS_VPN = "8.8.8.8"
     const val GEOSITE_PRIVATE = "geosite:private"
     const val GEOSITE_CN = "geosite:cn"
     const val GEOIP_PRIVATE = "geoip:private"
@@ -176,9 +184,9 @@ object AppConfig {
     const val PORT_LOCAL_DNS = "10853"
     const val PORT_SOCKS = "10808"
     const val WIREGUARD_LOCAL_ADDRESS_V4 = "172.16.0.2/32"
-    const val WIREGUARD_LOCAL_ADDRESS_V6 = "2606:4700:110:8f81:d551:a0:532e:a2b3/128"
+    const val WIREGUARD_LOCAL_ADDRESS_V6 = "fd00:0:0:1::2/128"
     const val WIREGUARD_LOCAL_MTU = "1420"
-    const val WIREGUARD_LOCAL_REMOTE_DNS = "1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001"
+    const val WIREGUARD_LOCAL_REMOTE_DNS = "8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
     const val LOOPBACK = "127.0.0.1"
 
     /** Shared defaults for settings shown in the UI and consumed by config generation. */
@@ -256,11 +264,11 @@ object AppConfig {
     const val ROOT_V6_CHAIN = "CORE6_FILTER"       // ip6tables filter/OUTPUT chain: blackhole native IPv6 when it isn't tunneled
     const val ROOT_V6_FWD_CHAIN = "CORE6_FWD" // ip6tables FORWARD chain: route or reject tethered clients' native IPv6
     const val ROOT_V6_PRE_CHAIN = "CORE6_PRE" // ip6tables mangle/PREROUTING chain: mark forwarded clients' IPv6 into the tun
-    const val ROOT_LAN_DNS = "1.1.1.1"          // fallback resolver for tethered clients when no plain-IPv4 DNS is configured
+    const val ROOT_LAN_DNS = "8.8.8.8"          // fallback resolver for tethered clients when no plain-IPv4 DNS is configured
     const val ROOT_OOM_SCORE = "-1000"          // oom_score_adj that makes the LMK never kill us
 
     /** hev-sock5-tunnel read-write-timeout value */
-    const val HEVTUN_RW_TIMEOUT = "300,60"
+    const val HEVTUN_RW_TIMEOUT = "600,180"
 
     // Google API rule constants
     const val GOOGLEAPIS_CN_DOMAIN = "domain:googleapis.cn"
@@ -270,11 +278,6 @@ object AppConfig {
     const val DNS_ALIDNS_DOMAIN = "dns.alidns.com"
     const val DNS_CISCO_SSE_DOMAIN = "dns.sse.cisco.com"
     const val DNS_CISCO_UMBRELLA_DOMAIN = "dns.umbrella.com"
-    const val DNS_CLOUDFLARE_ONE_DOMAIN = "one.one.one.one"
-    const val DNS_CLOUDFLARE_ONEDOT_DNS_DOMAIN = "1dot1dot1dot1.cloudflare-dns.com"
-    const val DNS_CLOUDFLARE_DNS_COM_DOMAIN = "dns.cloudflare.com"
-    const val DNS_CLOUDFLARE_DNS_DOMAIN = "cloudflare-dns.com"
-    const val DNS_CLOUDFLARE_WARP_DOMAIN = "engage.cloudflareclient.com"
     const val DNS_DNSPOD_DOH_DOMAIN = "doh.pub"
     const val DNS_DNSPOD_DOT_DOMAIN = "dot.pub"
     const val DNS_GOOGLE_DOMAIN = "dns.google"
@@ -295,11 +298,6 @@ object AppConfig {
     val DNS_ALIDNS_ADDRESSES = arrayListOf("223.5.5.5", "223.6.6.6", "2400:3200::1", "2400:3200:baba::1")
     val DNS_CISCO_SSE_ADDRESSES = arrayListOf("208.67.220.220", "208.67.222.222", "2620:119:35::35", "2620:119:53::53")
     val DNS_CISCO_UMBRELLA_ADDRESSES = arrayListOf("208.67.220.220", "208.67.222.222", "2620:119:35::35", "2620:119:53::53")
-    val DNS_CLOUDFLARE_ONE_ADDRESSES = arrayListOf("1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001")
-    val DNS_CLOUDFLARE_ONEDOT_DNS_ADDRESSES = arrayListOf("1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001")
-    val DNS_CLOUDFLARE_DNS_COM_ADDRESSES = arrayListOf("162.159.61.8", "172.64.41.8", "2a06:98c1:52::8", "2803:f800:53::8")
-    val DNS_CLOUDFLARE_DNS_ADDRESSES = arrayListOf("104.16.248.249", "104.16.249.249", "2606:4700::6810:f8f9", "2606:4700::6810:f9f9")
-    val DNS_CLOUDFLARE_WARP_ADDRESSES = arrayListOf("162.159.192.1", "2606:4700:d0::a29f:c001")
     val DNS_DNSPOD_DOH_ADDRESSES = arrayListOf("1.12.12.12", "120.53.53.53")
     val DNS_DNSPOD_DOT_ADDRESSES = arrayListOf("1.12.12.12", "120.53.53.53")
     val DNS_GOOGLE_ADDRESSES = arrayListOf("8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844")

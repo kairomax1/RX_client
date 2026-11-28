@@ -24,4 +24,30 @@ class MainConnectionPolicyTest {
         assertTrue(MainConnectionPolicy.canConnect(false, "profile", PerAppRoutingMode.ONLY_SELECTED, 1))
         assertTrue(MainConnectionPolicy.canConnect(true, null, PerAppRoutingMode.ONLY_SELECTED, 0))
     }
+
+    @Test
+    fun staleFirefoxLoopbackProfileUsesTheDedicatedReconnectScreen() {
+        assertTrue(
+            MainConnectionPolicy.shouldOpenFirefoxVpnScreen(
+                com.v2ray.ang.AppConfig.FIREFOX_VPN_PROFILE_ID,
+                serviceRunning = false,
+                tunnelPort = 0,
+            )
+        )
+        assertTrue(
+            MainConnectionPolicy.shouldOpenFirefoxVpnScreen(
+                com.v2ray.ang.AppConfig.FIREFOX_VPN_PROFILE_ID,
+                serviceRunning = true,
+                tunnelPort = 0,
+            )
+        )
+        assertFalse(
+            MainConnectionPolicy.shouldOpenFirefoxVpnScreen(
+                com.v2ray.ang.AppConfig.FIREFOX_VPN_PROFILE_ID,
+                serviceRunning = true,
+                tunnelPort = 42941,
+            )
+        )
+        assertFalse(MainConnectionPolicy.shouldOpenFirefoxVpnScreen("normal-profile", false, 0))
+    }
 }

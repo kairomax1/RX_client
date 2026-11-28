@@ -15,14 +15,11 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.BuildConfig
-import com.v2ray.ang.R
 import com.v2ray.ang.dto.SubscriptionUpdateMessage
 import com.v2ray.ang.dto.UrlContentRequest
-import com.v2ray.ang.handler.CloudflareAssistant
 import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.handler.MmkvManager
-import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.handler.UpdateCheckerManager
 import com.v2ray.ang.handler.UpdateNotifier
@@ -64,8 +61,40 @@ class DailyMaintenanceWorker(
         runCatching { refreshSubscriptions() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: subscription refresh failed", it) }
 
-        runCatching { repairCloudflareConfig() }
-            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Cloudflare repair failed", it) }
+        // Only when there is a line to fetch it over: offline, the request would sit
+        // on its timeout and hold up everything after it. Every list refresh below is
+        // additionally gated by its RemoteControl feature flag, and those flags default
+        // to off, so the daily pass never downloads anything unless the owner explicitly
+        // re-enables a feature in rx-control.json.
+        if (isOnline()) {
+            runCatching { com.v2ray.ang.handler.RemoteControl.refreshIfDue() }
+                .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: remote control failed", it) }
+
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.publicConfigs }) {
+                runCatching {
+                    com.v2ray.ang.handler.PublicConfigs.refreshSourcesDaily(applicationContext)
+                    com.v2ray.ang.handler.PublicConfigs.refreshIfDue(applicationContext)
+                }.onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: public config lists failed", it) }
+            }
+
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.mozillaVpn }) {
+                runCatching { com.v2ray.ang.handler.FirefoxVpnServers.refreshDailyIfDue() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Mozilla server list failed", it) }
+            }
+
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.dnsScanner }) {
+                runCatching { com.v2ray.ang.handler.XboxDns.refreshDailyIfDue(applicationContext) }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: DNS scanner list failed", it) }
+            }
+
+            if (com.v2ray.ang.handler.RemoteControl.isFeatureEnabled { it.adBlock }) {
+                runCatching { com.v2ray.ang.handler.SiteLists.refreshIfDue() }
+                    .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: advert list failed", it) }
+            }
+        }
+
+        runCatching { tuneGamingExit() }
+            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: gaming exit failed", it) }
 
         runCatching { tidyLocalData() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: local tidy-up failed", it) }
@@ -116,29 +145,20 @@ class DailyMaintenanceWorker(
         LogUtil.i(AppConfig.TAG, "Daily maintenance: refreshing ${subIds.size} subscription(s)")
     }
 
+    /**
+     * Points the selected config at the exit that answers soonest, so a game is played through
+     * the fastest address the config can reach rather than whichever one it happened to keep.
+     * Only runs while gaming mode is on, and only moves the config when the new exit is clearly
+     * sooner — a daily nudge that measures the same twice changes nothing.
+     */
+    private suspend fun tuneGamingExit() {
+        if (!com.v2ray.ang.handler.GamingMode.isEnabled()) return
+        com.v2ray.ang.handler.GamingExitTuner.tune(context = applicationContext)
+    }
+
     // -------------------------------------------------------------------------
     // 3. Local, no network needed
     // -------------------------------------------------------------------------
-
-    /** Repairs the selected Cloudflare config when it stopped answering; no-op otherwise. */
-    private suspend fun repairCloudflareConfig() {
-        if (!CloudflareAssistant.isAutoEnabled()) return
-        val report = CloudflareAssistant.autoRepair(
-            context = applicationContext,
-            groupName = applicationContext.getString(R.string.cloudflare_group_name),
-            remarksSuffix = applicationContext.getString(R.string.cloudflare_copy_suffix),
-        )
-        if (!report.isCloudflare) return
-        // A repair leaves the user's own profile alone and writes a Cloudflare copy, so the tab has
-        // to be rebuilt for the new entry to show up.
-        if (report.newConfigGuid != null) SettingsChangeManager.makeSetupGroupTab()
-        LogUtil.i(
-            AppConfig.TAG,
-            "Daily maintenance: Cloudflare latency=${report.latencyMs} " +
-                    "unblocked=${report.unblocked} address=${report.switchedAddress} " +
-                    "copy=${report.newConfigName}"
-        )
-    }
 
     private fun tidyLocalData() {
         MmkvManager.removeOrphanedServerProfiles()

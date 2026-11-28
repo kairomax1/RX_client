@@ -1,0 +1,84 @@
+# name|primary|secondary|kind  (kind: sanction = anti-sanction service, isp, global)
+Shecan|178.22.122.100|185.51.200.2|sanction
+Radar Game|10.202.10.10|10.202.10.11|sanction
+Electro|78.157.42.100|78.157.42.101|sanction
+Begzar (Server 1)|185.55.226.26|185.55.225.25|sanction
+Begzar (Server 2)|185.55.224.24|185.55.225.25|sanction
+403 Online|10.202.10.202|10.202.10.102|sanction
+Vanilla|10.139.177.21|10.139.177.22|sanction
+HostIran (Server 1)|172.29.0.100|172.29.2.100|sanction
+HostIran (Server 2)|172.28.2.100|172.29.0.100|sanction
+Shelter|94.103.125.157|94.103.125.158|sanction
+Beshkan|181.41.194.177|181.41.194.186|sanction
+Google Main|8.8.8.8|8.8.4.4|global
+Google / Level3|4.2.2.4|4.2.2.2|global
+OpenDNS (Cisco)|208.67.222.222|208.67.220.220|global
+Quad9|9.9.9.9|149.112.112.112|global
+NTT Asia|129.250.35.250|129.250.35.251|global
+Level3 Main|209.244.0.3|209.244.0.4|global
+AdGuard Public|94.140.14.14|94.140.15.15|global
+Control D|76.76.2.0|76.76.10.0|global
+Comodo Secure|8.26.56.26|8.20.247.20|global
+DNS.WATCH|84.200.69.80|84.200.70.40|global
+Alternate DNS|76.76.19.19|76.76.20.20|global
+Yandex Basic|77.88.8.8|77.88.8.1|global
+CleanBrowsing Security|185.228.168.9|185.228.169.9|global
+Pishgaman ISP|5.202.100.100|5.202.100.101|isp
+Shatel ADSL|85.15.1.14|85.15.1.15|isp
+Pars Online|91.99.101.12||sanction
+AbrBaran IDC|172.16.1.100|172.16.2.100|sanction
+AsiaTech ISP|194.36.174.161|178.22.122.100|isp
+UncensoredDNS|91.239.100.100|89.233.43.71|global
+LibreDNS|116.202.176.26||global
+DNS.SB|185.222.222.222|45.11.45.11|global
+AdGuard Non-filtering|94.140.14.140|94.140.14.141|global
+OpenDNS FamilyShield|208.67.222.123|208.67.220.123|global
+AdGuard Family|94.140.14.15|94.140.15.16|global
+Quad9 No-Filter|9.9.9.10|149.112.112.10|global
+Yandex Safe|77.88.8.88|77.88.8.2|global
+Yandex Family|77.88.8.7|77.88.8.3|global
+CleanBrowsing Family|185.228.168.168|185.228.169.168|global
+KT Korea|168.126.63.1|168.126.63.2|global
+Hurricane Electric|74.82.42.42||global
+Verisign / UltraDNS|64.6.64.6|64.6.65.6|global
+Neustar UltraDNS|156.154.70.1|156.154.71.1|global
+Shecan Pro|178.22.122.101|185.51.200.1|sanction
+Xbox-DNS.ru|111.88.96.50|111.88.96.51|sanction
+Xbox-DNS.ru (2)|111.88.96.55||sanction
+Fly Xbox|37.220.84.124|85.234.106.202|sanction
+Xbox RU|176.99.11.77|80.78.247.254|sanction
+Xbox RU (2)|45.90.33.120|212.220.116.30|sanction
+GeoHide|45.155.204.190|37.230.192.51|sanction
+GeoHide (2)|193.233.112.67|193.233.112.68|sanction
+GeoHide (3)|217.60.245.219|217.60.245.233|sanction
+GeoHide (4)|46.8.158.6|31.25.239.132|sanction
+GeoHide (5)|143.20.64.192|2.27.118.34|sanction
+Comss.one|83.220.169.155|212.109.195.93|sanction
+Comss.one (2)|195.133.25.16|95.217.205.213|sanction
+Malw.link|80.253.249.40|193.23.209.189|sanction
+Malw.link (2)|84.21.189.133|64.188.98.242|sanction
+Malw.link (3)|185.31.40.18||sanction
+Mafioznik|103.27.157.38|103.27.157.100|sanction
+DNS-AI|194.87.196.13|45.151.102.219|sanction
+AstraCat|85.209.2.112||sanction
+Server.ir|194.104.158.48|194.104.158.78|sanction
+Server.ir (2)|65.109.209.224|65.109.177.244|sanction
+DynX|10.70.95.150|10.70.95.162|sanction
+DynX (2)|10.139.177.18|10.139.177.16|sanction
+Zeus|37.32.5.60|37.32.5.61|sanction
+DNS Pro|87.107.110.109|87.107.110.110|sanction
+DNS Pro (2)|185.105.236.236|185.105.238.238|sanction
+Shelter (2)|91.92.255.160|91.92.255.242|sanction
+Shelter (3)|91.92.251.5|91.92.250.178|sanction
+Shelter (4)|2.189.86.5|2.189.86.6|sanction
+Shelter (5)|185.86.136.241|185.86.136.242|sanction
+Bertina|193.186.32.32||sanction
+Electro (2)|78.157.108.21|78.157.108.22|sanction
+SabaGame|5.200.200.1|5.200.200.2|sanction
+Vanilla (2)|194.146.68.68|194.146.68.40|sanction
+Vanilla (3)|10.202.10.100|10.202.10.101|sanction
+Radar Game (2)|10.201.201.201|10.201.201.202|sanction
+HostIran (3)|185.141.168.130|185.141.168.131|sanction
+Begzar (3)|185.55.226.25|185.55.225.26|sanction
+Shecan (3)|185.51.200.25|185.51.200.4|sanction
+Gaming DNS|185.108.22.133|185.108.22.134|sanction

@@ -106,11 +106,6 @@ object LauncherManager {
             Utils.setClipboard(context, context.getString(R.string.toast_allow_insecure_deprecated))
         }
 
-        // Connecting is silent; only the open-proxy warning remains because it is a safety notice.
-        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PROXY_SHARING)) {
-            context.toast(R.string.toast_warning_pref_proxysharing_short)
-        }
-
         val isRootMode = SettingsManager.isRootMode()
         if (isRootMode && !RootManager.isRootAvailable()) {
             LogUtil.e(AppConfig.TAG, "LauncherManager: root mode requires root but none available")

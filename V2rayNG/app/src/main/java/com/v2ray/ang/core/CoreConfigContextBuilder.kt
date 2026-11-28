@@ -9,6 +9,7 @@ import com.v2ray.ang.enums.CoreResolvedType
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.handler.GamingMode
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.LogUtil
@@ -99,7 +100,7 @@ object CoreConfigContextBuilder {
      * Invalid or empty targets are skipped and handled by fallback logic later.
      */
     private fun resolveRoutingOutbounds(): List<CoreConfigContext.ResolvedOutbound> {
-        val rulesetItems = MmkvManager.decodeRoutingRulesets() ?: return emptyList()
+        val rulesetItems = GamingMode.effectiveRulesets() ?: return emptyList()
         val resolvedOutbounds = mutableListOf<CoreConfigContext.ResolvedOutbound>()
         val processedTags = mutableSetOf<String>()
 
@@ -185,7 +186,7 @@ object CoreConfigContextBuilder {
         try {
             return config.proxyChainProfiles.orEmpty().split(",")
                 .asSequence()
-                .mapNotNull { remark -> SettingsManager.getServerViaRemarks(remark) }
+                .mapNotNull { remark -> SettingsManager.getServerViaRemarks(remark, config.subscriptionId) }
                 .filter { it.server.isNotNullEmpty() }
                 .filter { Utils.isPureIpAddress(it.server!!) || Utils.isValidUrl(it.server!!) }
                 .filter { !it.configType.isComplexType() }
@@ -210,9 +211,9 @@ object CoreConfigContextBuilder {
         try {
             val subItem = MmkvManager.decodeSubscription(config.subscriptionId) ?: return listOf(config)
             val resolved = mutableListOf<ProfileItem>()
-            SettingsManager.getServerViaRemarks(subItem.nextProfile)?.let { resolved.add(it) }
+            SettingsManager.getServerViaRemarks(subItem.nextProfile, config.subscriptionId)?.let { resolved.add(it) }
             resolved.add(config)
-            SettingsManager.getServerViaRemarks(subItem.prevProfile)?.let { resolved.add(it) }
+            SettingsManager.getServerViaRemarks(subItem.prevProfile, config.subscriptionId)?.let { resolved.add(it) }
             return resolved
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to resolve proxy chain from group for '${config.remarks}'", e)
@@ -226,7 +227,7 @@ object CoreConfigContextBuilder {
      * outbounds are normalized into three tags only: proxy / direct / block.
      */
     private fun collectRoutingDomainRulesForDns(): List<CoreConfigContext.RoutingDomainRule> {
-        val rulesetItems = MmkvManager.decodeRoutingRulesets() ?: return emptyList()
+        val rulesetItems = GamingMode.effectiveRulesets() ?: return emptyList()
         val result = mutableListOf<CoreConfigContext.RoutingDomainRule>()
 
         rulesetItems
