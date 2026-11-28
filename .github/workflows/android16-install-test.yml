@@ -18,7 +18,7 @@ permissions:
   actions: read
 
 jobs:
-  android17:
+  android16:
     name: Fresh install and in-place update on Android 16 emulator
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -58,37 +58,63 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
-            set -euo pipefail
+            set -eu
             APK=apks/new/RXVPN_1.2.1_universal.apk
             OLD=apks/old/RXVPN_1.0.1_universal.apk
             SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
             ABI=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
-            echo "Android API $SDK; ABIs: $ABI"
+            echo "::notice title=Emulator::Android API $SDK; ABIs: $ABI"
             [ "$SDK" = "36" ] || { echo "Expected API 36, got $SDK"; exit 1; }
 
+            install_apk() {
+              label=$1
+              apk=$2
+              if output=$(adb install "$apk" 2>&1); then
+                printf '%s\n' "$output"
+              else
+                result=$?
+                flat=$(printf '%s' "$output" | tr '\n' ' ')
+                echo "::error title=APK install::$label failed (adb exit $result): $flat"
+                exit "$result"
+              fi
+            }
+            update_apk() {
+              label=$1
+              apk=$2
+              if output=$(adb install -r "$apk" 2>&1); then
+                printf '%s\n' "$output"
+              else
+                result=$?
+                flat=$(printf '%s' "$output" | tr '\n' ' ')
+                echo "::error title=APK update::$label failed (adb exit $result): $flat"
+                exit "$result"
+              fi
+            }
+
             echo 'Fresh-install test (universal APK)'
-            adb install "$APK"
+            install_apk 'fresh universal install' "$APK"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb uninstall com.mobix.vpn
 
             echo 'Upgrade test: install public 1.0.1, then update in place'
-            adb install "$OLD"
+            install_apk 'baseline 1.0.1 install' "$OLD"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-            adb install -r "$APK"
+            update_apk 'universal 1.2.1 update' "$APK"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb shell pm path com.mobix.vpn
 
-            if echo "$ABI" | grep -q 'arm64-v8a'; then
-              ARM64=apks/new/RXVPN_1.2.1_arm64-v8a.apk
-              OLD_ARM64=apks/old/RXVPN_1.0.1_arm64-v8a.apk
-              echo 'This emulator supports ARM64; also test the exact arm64-v8a APK'
-              adb uninstall com.mobix.vpn
-              adb install "$ARM64"
-              adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-              adb uninstall com.mobix.vpn
-              adb install "$OLD_ARM64"
-              adb install -r "$ARM64"
-              adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-            else
-              echo '::warning::Emulator has no ARM64 native bridge; only the universal APK was installed'
-            fi
+            case ",$ABI," in
+              *,arm64-v8a,*)
+                ARM64=apks/new/RXVPN_1.2.1_arm64-v8a.apk
+                OLD_ARM64=apks/old/RXVPN_1.0.1_arm64-v8a.apk
+                echo 'This emulator supports ARM64; also test the exact arm64-v8a APK'
+                adb uninstall com.mobix.vpn
+                install_apk 'fresh arm64 install' "$ARM64"
+                adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+                adb uninstall com.mobix.vpn
+                install_apk 'baseline arm64 1.0.1 install' "$OLD_ARM64"
+                update_apk 'arm64 1.2.1 update' "$ARM64"
+                adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+                ;;
+              *) echo '::warning::Emulator has no ARM64 native bridge; only the universal APK was installed' ;;
+            esac
