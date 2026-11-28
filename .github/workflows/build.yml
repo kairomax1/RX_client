@@ -263,8 +263,8 @@ jobs:
             VERSION_CODE=$((DRAFT_VERSION_CODE - 4000000))
           fi
           echo "Building Play Store APKs with versionCode $((VERSION_CODE + 4000000))"
-          # Let Gradle sign directly with the release keystore and the configured v1/v2/v3 schemes.
-          # Re-signing after Gradle can strip the JAR (v1) signature that some device installers need.
+          # Gradle signs with the release key and v2/v3 schemes. The following step patches
+          # minSdk in the sideload artifacts and signs v1+v2+v3 for OEM installer compatibility.
           ./gradlew --no-daemon assemblePlaystoreRelease :app:assemblePlaystoreDebug \
             -Prx.versionCode="$VERSION_CODE" \
             -Prx.versionName="1.2.1" \
@@ -276,17 +276,36 @@ jobs:
       - name: Show outputs
         run: find V2rayNG/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
-      - name: Verify APK signatures (v1+v2+v3)
+      - name: Add compatibility JAR signature to APKs
+        env:
+          STORE_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: rxvpn
+          KEY_PASSWORD: ${{ secrets.APP_KEYSTORE_PASSWORD }}
         run: |
-          # Gradle signed these outputs with the configured release key. Do not rewrite them
-          # here: post-build zip/sign operations can invalidate or remove the v1 JAR signature.
+          # The release variant is compiled at minSdk 24. Android's apksigner omits
+          # the v1/JAR block for minSdk>=24; a small number of OEM installers reject
+          # v2/v3-only APKs. Lower only the final sideload manifest value to 23, then
+          # align and sign all three schemes. Keep the Gradle minSdk at 24.
           set -euo pipefail
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
           for apk in V2rayNG/app/build/outputs/apk/playstore/release/*.apk \
                      V2rayNG/app/build/outputs/apk/playstore/debug/*.apk; do
-            echo "== verify $apk"
+            echo "== prepare and sign $apk"
+            python3 "$GITHUB_WORKSPACE/.github/scripts/patch_apk_minsdk.py" "$apk" 24 23
+            "$ZIPALIGN" -f -p 4 "$apk" "$apk.aligned"
+            mv "$apk.aligned" "$apk"
+            "${APKSIGNER}" sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-pass "env:STORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "env:KEY_PASSWORD" \
+              --min-sdk-version 23 \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              "$apk"
             VERIFY=$("$APKSIGNER" verify --verbose --print-certs "$apk" 2>&1) || {
               echo "$VERIFY"
               echo "::error::apksigner verification failed for $apk"
@@ -389,7 +408,7 @@ jobs:
           SIG_SUMMARY=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1 \
             | grep -E "Verified using|Signer #1 certificate SHA-256" | tr '\n' ';')
           echo "::notice title=signature::$SIG_SUMMARY"
-          # Keep the v1 JAR signature as well as v2/v3 for OEM installer compatibility.
+          # All schemes must remain intact in the final APK distributed to users.
           VERIFY_ALL=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$SAMPLE" 2>&1)
           for scheme in "v1 scheme (JAR signing): true" \
                         "v2 scheme (APK Signature Scheme v2): true" \
