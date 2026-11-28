@@ -1,4 +1,4 @@
-name: Test Android 17 ARM64 APK installation
+name: Test Android 17 APK installation
 
 on:
   push:
@@ -18,9 +18,9 @@ permissions:
   actions: read
 
 jobs:
-  android17-arm64:
-    name: Fresh install and in-place update on Android 17 ARM64
-    runs-on: ubuntu-24.04-arm
+  android17:
+    name: Fresh install and in-place update on Android 17 emulator
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -39,43 +39,56 @@ jobs:
         run: |
           mkdir -p apks/old
           gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" \
-            --pattern RXVPN_1.0.1_arm64-v8a.apk --dir apks/old
+            --pattern RXVPN_1.0.1_universal.apk --pattern RXVPN_1.0.1_arm64-v8a.apk \
+            --dir apks/old
           ls -lh apks/new apks/old
 
       - name: Enable emulator acceleration
         run: |
-          if [ -e /dev/kvm ]; then
-            sudo chmod a+rw /dev/kvm
-            ls -l /dev/kvm
-          else
-            echo '::warning::No /dev/kvm; Android 17 ARM64 emulator may be slow'
-          fi
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
       - name: Install fresh and update without removing user data
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 37
           target: google_apis
-          arch: arm64-v8a
+          arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             set -euo pipefail
-            APK=apks/new/RXVPN_1.2.1_arm64-v8a.apk
-            OLD=apks/old/RXVPN_1.0.1_arm64-v8a.apk
+            APK=apks/new/RXVPN_1.2.1_universal.apk
+            OLD=apks/old/RXVPN_1.0.1_universal.apk
             SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
             ABI=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
             echo "Android API $SDK; ABIs: $ABI"
             [ "$SDK" = "37" ] || { echo "Expected API 37, got $SDK"; exit 1; }
 
-            echo 'Fresh-install test'
+            echo 'Fresh-install test (universal APK)'
             adb install "$APK"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb uninstall com.mobix.vpn
 
-            echo 'Upgrade test: install the public 1.0.1 build, then replace it in place'
+            echo 'Upgrade test: install public 1.0.1, then update in place'
             adb install "$OLD"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb install -r "$APK"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb shell pm path com.mobix.vpn
+
+            if echo "$ABI" | grep -q 'arm64-v8a'; then
+              ARM64=apks/new/RXVPN_1.2.1_arm64-v8a.apk
+              OLD_ARM64=apks/old/RXVPN_1.0.1_arm64-v8a.apk
+              echo 'This emulator supports ARM64; also test the exact arm64-v8a APK'
+              adb uninstall com.mobix.vpn
+              adb install "$ARM64"
+              adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+              adb uninstall com.mobix.vpn
+              adb install "$OLD_ARM64"
+              adb install -r "$ARM64"
+              adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            else
+              echo '::warning::Emulator has no ARM64 native bridge; only the universal APK was installed'
+            fi
