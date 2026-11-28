@@ -116,7 +116,8 @@ What changed and where:
 - "Delete failed configs" pings the current group first (`PingThenRemoveInvalid`), then removes.
 - Group tab long-press (0.7 s fill) opens a per-group menu: `MainGroupTab.kt`.
 - Grid button opens `MainQuickSheet` (subscriptions, per-app, routing, settings). The drawer keeps
-  update check, backup and About. Cloudflare and SpeedTest screens still exist but have no entry.
+  update check, backup and About. The standalone Cloudflare and Test/suggestions screens were removed;
+  the separate automatic config ping/speed-test flow remains.
 - Settings: technical entries are hidden, not reset (list in `SettingsActivity.kt`'s comment).
 - Updates: `handler/UpdateNotifier.kt`. Official releases only. Checked on app open (at most every
   6 h) and by the daily worker; red dot via `UpdateNotifier.pending`; the notification opens
@@ -176,7 +177,7 @@ Nine items, delivered together.
 - **Persian UI**: the built-in group is stored as "Default" and is shown as «کانفیگ های عادی» (`group_default_name`) at display time, only while the user has not renamed it. Config names, names sent by a subscription server and protocol names are left alone.
 - **Conversational prompts** (`ui/compose/RxPrompt.kt`): one family of cards that rise from the bottom of the screen, written in the Lalezar display face (SIL OFL, `res/font/lalezar_regular.ttf`, licence in `assets/lalezar_OFL.txt`). Used for the subscription name question, the single-config delete check and every backup/restore step. Their texts are the owner's wording, marked `translatable="false"` and shown in Persian in every language; do not edit them.
 - **Subscription name**: asked only when the clipboard holds exactly one subscription link that is not stored yet. No, empty or back gives «اشتراک ها», then «اشتراک ها ۲», «۳» (`MainSubscriptionNaming.kt`).
-- **Automatic test** (`handler/AutoConfigTest.kt`): after an import or a subscription update every new config is pinged, then the five lowest pings are speed-tested with a 600 KB download. A config that is not connected has no tunnel, so each speed test starts a private core for that config with a local HTTP inbound and stops it again; the running VPN is untouched. Numbers are kept in their own storage (`RX_AUTO_TEST`).
+- **Automatic test** (`handler/AutoConfigTest.kt`): after an import or a subscription update every new config is pinged, then the five lowest pings are speed-tested with up to 300 KB from CacheFly (Google and GitHub assets are fallbacks). Reachability checks use Google endpoints. A config that is not connected has no tunnel, so each speed test starts a private core for that config with a local HTTP inbound and stops it again; the running VPN is untouched. Numbers are kept in their own storage (`RX_AUTO_TEST`).
 - **Badges** (`handler/ConfigBadges.kt`, rules covered by tests): per group, one config per badge. Winner of both ping and speed is «پیشنهادی» and the titles go to the runners-up; with different winners each keeps its title and the best all-rounder of the rest is recommended.
 - **Battery**, with no visible change: decorative frame loops run only while the screen is on show; the drawer fog asks for no frames while the drawer is closed; wallpaper lights and fog banks reuse their gradients instead of building shaders every frame; the update dot no longer recomposes each frame; backups are built off the main thread.
 - **Config list settings**: the two-column and "all" tab switches are gone (fixed off); speed display and delete confirmation default to on.

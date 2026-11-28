@@ -210,7 +210,7 @@ class SettingsViewModel(application: Application) : BaseViewModel(application) {
     }
 
     private fun probeDirectTlsMillis(): Long? {
-        val targets = listOf("cp.cloudflare.com" to 443, "www.gstatic.com" to 443)
+        val targets = listOf("www.google.com" to 443, "www.gstatic.com" to 443)
         val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
         for ((host, port) in targets) {
             val start = System.currentTimeMillis()

@@ -43,7 +43,7 @@ object FirefoxVpnRelay {
     /** Small collection window lets concurrently healthy endpoints be ranked, without serial waits. */
     private const val PROBE_SETTLE_MILLIS = 250L
     private const val PROBE_TARGET = "www.gstatic.com:443"
-    private const val FALLBACK_PROBE_TARGET = "cp.cloudflare.com:443"
+    private const val FALLBACK_PROBE_TARGET = "www.google.com:443"
     private const val FIREFOX_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0"
     private const val MAX_HEADER_BYTES = 16 * 1024
@@ -134,14 +134,6 @@ object FirefoxVpnRelay {
     private val warmed = AtomicInteger(0)
     private val dialed = AtomicInteger(0)
 
-    /** Only the Worker's pipe needs it, to read this install's key. */
-    @Volatile
-    private var appContext: android.content.Context? = null
-
-    fun attachContext(context: android.content.Context) {
-        appContext = context.applicationContext
-    }
-
     @Volatile
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
@@ -172,14 +164,6 @@ object FirefoxVpnRelay {
 
     @Volatile
     private var bearerToken: String = ""
-
-    /** Configured Cloudflare Worker, retained as an alternate route if direct access fails. */
-    @Volatile
-    private var cloudflareAddress: String? = null
-
-    /** The route currently used for new tunnels; direct is preferred when it probes healthy. */
-    @Volatile
-    private var cloudflareActive = false
 
     /** Why the last tunnel was refused; null while tunnels are being accepted. */
     @Volatile
@@ -215,22 +199,15 @@ object FirefoxVpnRelay {
         open = openSockets.size,
     )
 
-    /**
-     * Starts the relay and returns the loopback port the core should use.
-     * [cloudflareAddress] is an optional fallback: direct proxy access is
-     * preferred when its authenticated probe succeeds.
-     */
+    /** Starts the relay and returns the loopback port the core should use. */
     @Synchronized
     fun start(
         endpoints: List<Endpoint>,
         token: String,
-        cloudflareAddress: String? = null
     ): Int {
         stop()
         this.endpoints = endpoints
         this.bearerToken = token
-        this.cloudflareAddress = cloudflareAddress?.trim()?.takeIf { it.isNotEmpty() }
-        this.cloudflareActive = false
         this.activeEndpoint = endpoints.firstOrNull()
         this.verifiedRoutes = emptyList()
         this.shape = SHAPES[0]
@@ -257,19 +234,9 @@ object FirefoxVpnRelay {
             }
         }
 
-        // Direct access avoids an extra WebSocket hop, so prefer it whenever
-        // the authenticated proxy probe succeeds. The Worker is a real fallback
-        // for networks that cannot reach Mozilla's proxy from the phone.
-        val directReady = endpoints.isNotEmpty() && resolve()
-        if (!directReady && this.cloudflareAddress != null) {
-            cloudflareActive = true
-            problem = null
-            AppLog.info(
-                AppLog.Section.Connection,
-                "Firefox VPN: direct proxy probe failed; using the configured relay"
-            )
-        }
-        if (!cloudflareActive) keepWarm()
+        // Only the authenticated direct Mozilla proxy route is supported.
+        if (endpoints.isNotEmpty()) resolve()
+        keepWarm()
         AppLog.info(
             AppLog.Section.Connection,
             "Firefox VPN relay listening on 127.0.0.1:${server.localPort} through " +
@@ -287,8 +254,6 @@ object FirefoxVpnRelay {
         }
         serverSocket = null
         acceptThread = null
-        cloudflareAddress = null
-        cloudflareActive = false
         endpoints = emptyList()
         activeEndpoint = null
         verifiedRoutes = emptyList()
@@ -322,7 +287,7 @@ object FirefoxVpnRelay {
         warmThread?.interrupt()
         warmThread = null
         drainWarm()
-        if (!cloudflareActive) keepWarm()
+        keepWarm()
         AppLog.info(AppLog.Section.Connection, "Firefox VPN: refreshed idle relay sockets after network handover")
     }
 
@@ -364,13 +329,7 @@ object FirefoxVpnRelay {
         val pool: ExecutorService = Executors.newCachedThreadPool { runnable ->
             Thread(runnable, "firefox-vpn-probe").apply { isDaemon = true }
         }
-        val configuredTarget = RemoteControl.mozillaProbeTargetOr(PROBE_TARGET).trim()
-        val alternateTarget = if (configuredTarget.equals(FALLBACK_PROBE_TARGET, ignoreCase = true)) {
-            PROBE_TARGET
-        } else {
-            FALLBACK_PROBE_TARGET
-        }
-        val probeTargets = listOf(configuredTarget, alternateTarget).distinct()
+        val probeTargets = listOf(PROBE_TARGET, FALLBACK_PROBE_TARGET)
         val jobs = mutableListOf<Future<Probe>>()
         try {
             val token = bearerToken
@@ -534,15 +493,9 @@ object FirefoxVpnRelay {
      * a block on one website is not mistaken for a dead route.
      */
     fun measure(endpoint: Endpoint, token: String, timeoutMillis: Int = PROBE_TIMEOUT_MILLIS): Int? {
-        val configured = RemoteControl.mozillaProbeTargetOr(PROBE_TARGET).trim()
-        val fallback = if (configured.equals(FALLBACK_PROBE_TARGET, ignoreCase = true)) {
-            PROBE_TARGET
-        } else {
-            FALLBACK_PROBE_TARGET
-        }
         val targets = listOfNotNull(
-            pageTarget(configured, "/generate_204"),
-            pageTarget(fallback, "/generate_204"),
+            pageTarget(PROBE_TARGET, "/generate_204"),
+            pageTarget(FALLBACK_PROBE_TARGET, "/generate_204"),
         ).distinctBy { it.authority.lowercase() }
         if (targets.isEmpty()) return null
 
@@ -661,7 +614,7 @@ object FirefoxVpnRelay {
         warmPort = endpoint.port
         warmThread?.interrupt()
         warmThread = thread(name = "firefox-vpn-warm", isDaemon = true) {
-            while (running && !cloudflareActive) {
+            while (running) {
                 val now = System.currentTimeMillis()
                 var ready = 0
                 val kept = mutableListOf<Warm>()
@@ -683,7 +636,7 @@ object FirefoxVpnRelay {
                     warmInFlight.incrementAndGet()
                     val made = dialTls(warmHost, warmPort)
                     warmInFlight.decrementAndGet()
-                    if (made != null && running && !cloudflareActive) {
+                    if (made != null && running) {
                         warm.add(Warm(made, warmHost, warmPort, System.currentTimeMillis()))
                     } else {
                         close(made)
@@ -837,94 +790,8 @@ object FirefoxVpnRelay {
     internal fun connectRequest(target: String, token: String): String =
         connectRequest(target, token, activeEndpoint?.host.orEmpty(), shape)
 
-    /** Opens a tunnel over the currently preferred route, falling back once if it fails. */
-    private fun openTunnel(target: String): Tunnel? {
-        if (cloudflareActive) {
-            val workerTunnel = openCloudflareTunnel(target)
-            if (workerTunnel != null) return workerTunnel
-
-            val workerProblem = FirefoxVpnCloudflare.problem ?: "the Worker did not carry the tunnel"
-            AppLog.info(
-                AppLog.Section.Connection,
-                "Firefox VPN: Worker route failed ($workerProblem); trying direct access"
-            )
-            cloudflareActive = false
-            val directTunnel = openDirectWithFailover(target)
-            if (directTunnel != null) {
-                keepWarm()
-                AppLog.info(AppLog.Section.Connection, "Firefox VPN: direct route recovered the tunnel")
-                return directTunnel
-            }
-
-            val directProblem = problem
-            cloudflareActive = cloudflareAddress != null
-            problem = buildString {
-                append(workerProblem)
-                if (!directProblem.isNullOrBlank()) append("; direct fallback: ").append(directProblem)
-            }
-            return null
-        }
-
-        val directTunnel = openDirectWithFailover(target)
-        if (directTunnel != null) return directTunnel
-
-        val directProblem = problem.orEmpty()
-        if (cloudflareAddress == null || !shouldTryWorker(directProblem)) return null
-
-        AppLog.info(
-            AppLog.Section.Connection,
-            "Firefox VPN: direct route failed ($directProblem); trying the configured Worker"
-        )
-        val workerTunnel = openCloudflareTunnel(target)
-        if (workerTunnel != null) {
-            cloudflareActive = true
-            warmThread?.interrupt()
-            warmThread = null
-            drainWarm()
-            return workerTunnel
-        }
-        problem = directProblem.ifBlank { FirefoxVpnCloudflare.problem.orEmpty() }
-        return null
-    }
-
-    /** Opens the user's Worker route; success means its authenticated CONNECT returned 200. */
-    private fun openCloudflareTunnel(target: String): Tunnel? {
-        val address = cloudflareAddress ?: return null
-        val endpoint = activeEndpoint ?: run {
-            noteFailure("no address to dial")
-            return null
-        }
-        val context = appContext ?: run {
-            problem = "the relay has no application context"
-            return null
-        }
-        val started = System.nanoTime()
-        val pipe = FirefoxVpnCloudflare.openTunnel(
-            address = address,
-            context = context,
-            proxyHost = endpoint.host,
-            proxyPort = endpoint.port,
-            target = target,
-            token = bearerToken,
-            hostHeader = if (shape.hostIsTarget) target else endpoint.host,
-            withAgent = shape.withAgent
-        ) ?: run {
-            problem = FirefoxVpnCloudflare.problem ?: "the Worker carried nothing"
-            return null
-        }
-        endpointFailures.recordSuccess(endpoint)
-        failures.set(0)
-        problem = null
-        AppLog.debug(
-            AppLog.Section.Connection,
-            "Firefox VPN: Worker tunnel opened in ${((System.nanoTime() - started) / 1_000_000L)}ms"
-        )
-        return object : Tunnel {
-            override val input: InputStream get() = pipe.input
-            override val output: OutputStream get() = pipe.output
-            override fun close() = pipe.close()
-        }
-    }
+    /** Opens the proxy tunnel directly, moving only to previously verified endpoints. */
+    private fun openTunnel(target: String): Tunnel? = openDirectWithFailover(target)
 
     /** Repeats the same request only when a repeated failure switched endpoints. */
     private fun openDirectWithFailover(target: String): Tunnel? {
@@ -1032,7 +899,7 @@ object FirefoxVpnRelay {
         if (FirefoxProxyFailurePolicy.isTargetPolicyRejection(reason)) {
             // A destination denied by Mozilla is not evidence that the proxy or
             // the rest of the tunnel is down. Keep the route and avoid a futile
-            // country/Worker switch for this one rejected request.
+            // endpoint switch for this one rejected request.
             if (now - lastDestinationPolicyLogAt > 30_000L) {
                 lastDestinationPolicyLogAt = now
                 AppLog.info(
@@ -1060,9 +927,6 @@ object FirefoxVpnRelay {
     private fun isEndpointFailure(reason: String): Boolean =
         FirefoxProxyFailurePolicy.isEndpointFailure(reason)
 
-    private fun shouldTryWorker(reason: String): Boolean =
-        FirefoxProxyFailurePolicy.shouldTryWorker(reason)
-
     /** Switches only to a spare which already passed the same authenticated CONNECT probe. */
     private fun rotate() {
         val current = activeEndpoint ?: return
@@ -1080,7 +944,7 @@ object FirefoxVpnRelay {
         activeEndpoint = next.endpoint
         shape = next.shape
         drainWarm()
-        if (running && !cloudflareActive) keepWarm()
+        if (running) keepWarm()
         AppLog.info(AppLog.Section.Connection, "Firefox VPN: switched to verified endpoint ${next.endpoint}")
     }
 

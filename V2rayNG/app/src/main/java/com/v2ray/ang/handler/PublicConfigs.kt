@@ -95,8 +95,8 @@ object PublicConfigs {
 
     /** Where the presence of a line is checked, and how long that is waited for. */
     private val LINE_PROBE_ENDPOINTS = listOf(
-        "1.1.1.1" to 443,
         "8.8.8.8" to 443,
+        "8.8.4.4" to 443,
         "9.9.9.9" to 443,
     )
     private const val LINE_PROBE_MILLIS = 2200

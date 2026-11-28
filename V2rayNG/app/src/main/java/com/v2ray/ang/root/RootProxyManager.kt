@@ -332,9 +332,9 @@ object RootProxyManager {
      * routing rule, which sends it straight to the LAN resolver (ISP DNS) — causing DNS
      * poisoning, CDN mis-resolution, and the "some sites work, some don't" symptom.
      *
-     * Rewriting the destination to a public IP (the configured remote DNS or 1.1.1.1
+     * Rewriting the destination to a public IP (the configured remote DNS or 8.8.8.8
      * fallback) prevents `geoip:private` from matching, so `dns-out` can resolve via the
-     * configured remote DNS servers (e.g. Cloudflare DoH) through the proxy.
+     * configured remote DNS servers (for example, Google DoH) through the proxy.
      *
      * Uses the same resolver-selection logic as [buildLanShareSetup].
      */

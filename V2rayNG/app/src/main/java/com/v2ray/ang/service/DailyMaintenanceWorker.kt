@@ -15,14 +15,11 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.BuildConfig
-import com.v2ray.ang.R
 import com.v2ray.ang.dto.SubscriptionUpdateMessage
 import com.v2ray.ang.dto.UrlContentRequest
-import com.v2ray.ang.handler.CloudflareAssistant
 import com.v2ray.ang.handler.DailyMaintenance
 import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.handler.MmkvManager
-import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.handler.UpdateCheckerManager
 import com.v2ray.ang.handler.UpdateNotifier
@@ -96,9 +93,6 @@ class DailyMaintenanceWorker(
             }
         }
 
-        runCatching { repairCloudflareConfig() }
-            .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: Cloudflare repair failed", it) }
-
         runCatching { tuneGamingExit() }
             .onFailure { LogUtil.w(AppConfig.TAG, "Daily maintenance: gaming exit failed", it) }
 
@@ -159,36 +153,12 @@ class DailyMaintenanceWorker(
      */
     private suspend fun tuneGamingExit() {
         if (!com.v2ray.ang.handler.GamingMode.isEnabled()) return
-        com.v2ray.ang.handler.GamingExitTuner.tune(
-            context = applicationContext,
-            groupName = applicationContext.getString(R.string.cloudflare_group_name),
-            remarksSuffix = applicationContext.getString(R.string.cloudflare_copy_suffix),
-        )
+        com.v2ray.ang.handler.GamingExitTuner.tune(context = applicationContext)
     }
 
     // -------------------------------------------------------------------------
     // 3. Local, no network needed
     // -------------------------------------------------------------------------
-
-    /** Repairs the selected Cloudflare config when it stopped answering; no-op otherwise. */
-    private suspend fun repairCloudflareConfig() {
-        if (!CloudflareAssistant.isAutoEnabled()) return
-        val report = CloudflareAssistant.autoRepair(
-            context = applicationContext,
-            groupName = applicationContext.getString(R.string.cloudflare_group_name),
-            remarksSuffix = applicationContext.getString(R.string.cloudflare_copy_suffix),
-        )
-        if (!report.isCloudflare) return
-        // A repair leaves the user's own profile alone and writes a Cloudflare copy, so the tab has
-        // to be rebuilt for the new entry to show up.
-        if (report.newConfigGuid != null) SettingsChangeManager.makeSetupGroupTab()
-        LogUtil.i(
-            AppConfig.TAG,
-            "Daily maintenance: Cloudflare latency=${report.latencyMs} " +
-                    "unblocked=${report.unblocked} address=${report.switchedAddress} " +
-                    "copy=${report.newConfigName}"
-        )
-    }
 
     private fun tidyLocalData() {
         MmkvManager.removeOrphanedServerProfiles()

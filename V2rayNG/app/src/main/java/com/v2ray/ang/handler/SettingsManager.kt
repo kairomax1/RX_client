@@ -551,6 +551,7 @@ object SettingsManager {
      * Ensure default settings are present in MMKV.
      */
     private fun ensureDefaultSettings() {
+        migrateCloudflareDnsDefaults()
         // Write defaults in the exact order requested by the user
         ensureDefaultValue(AppConfig.PREF_MODE, VPN)
         ensureDefaultValue(AppConfig.PREF_VPN_DNS, AppConfig.DNS_VPN)
@@ -571,6 +572,24 @@ object SettingsManager {
         ensureDefaultValue(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_METHOD, AppConfig.OBSERVATORY_LEAST_LOAD_METHOD)
         ensureDefaultValue(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_SAMPLING, AppConfig.OBSERVATORY_LEAST_LOAD_SAMPLING)
         ensureDefaultValue(AppConfig.PREF_OBSERVATORY_LEAST_LOAD_TIMEOUT, AppConfig.OBSERVATORY_LEAST_LOAD_TIMEOUT)
+    }
+
+    /** Replace exact legacy built-in DNS defaults while preserving other user-entered resolvers. */
+    private fun migrateCloudflareDnsDefaults() {
+        val migrationKey = "rx_non_cloudflare_dns_defaults_migrated"
+        if (MmkvManager.decodeSettingsBool(migrationKey, false)) return
+
+        val remoteDns = MmkvManager.decodeSettingsString(AppConfig.PREF_REMOTE_DNS)?.trim()
+        if (remoteDns.equals("https://cloudflare-dns.com/dns-query", ignoreCase = true) ||
+            remoteDns.equals("https://1.1.1.1/dns-query", ignoreCase = true)
+        ) {
+            MmkvManager.encodeSettings(AppConfig.PREF_REMOTE_DNS, AppConfig.DNS_PROXY)
+        }
+        val vpnDns = MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_DNS)?.trim()
+        if (vpnDns == "1.1.1.1") {
+            MmkvManager.encodeSettings(AppConfig.PREF_VPN_DNS, AppConfig.DNS_VPN)
+        }
+        MmkvManager.encodeSettings(migrationKey, true)
     }
 
     private fun ensureDefaultValue(key: String, default: String) {

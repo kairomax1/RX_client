@@ -28,6 +28,15 @@ class RemoteControlTest {
     }
 
     @Test
+    fun retiredMozillaProbeTargetIsIgnoredByRemotePolicy() {
+        val parsed = RemoteControl.parse(
+            """{"schemaVersion":1,"mozilla":{"probeTarget":"https://cp.cloudflare.com"}}"""
+        )
+        assertNotNull(parsed)
+        assertEquals(RemoteControl.MozillaPolicy(), parsed!!.mozilla)
+    }
+
+    @Test
     fun customOverridesAreParsedWithoutErrors() {
         val raw = """
             {

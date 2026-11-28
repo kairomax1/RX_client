@@ -21,7 +21,7 @@ object FirefoxVpnCheck {
     /** Lightweight pages used to verify that the tunnel really carries traffic. */
     private val CHECK_URLS = listOf(
         "https://www.gstatic.com/generate_204",
-        "https://cp.cloudflare.com/generate_204",
+        "https://www.google.com/generate_204",
         "https://www.apple.com/library/test/success.html",
     )
 

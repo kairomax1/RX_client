@@ -49,6 +49,7 @@ object RemoteControl {
         val extraUrlSources: List<String> = emptyList(),
         val disabledSources: List<String> = emptyList(),
         val emergencyConfigs: List<String> = emptyList(),
+        /** Public-config safety override; Cloudflare exits stay excluded unless policy explicitly opts in. */
         val allowCloudflare: Boolean = false,
         val maxDurationSec: Long? = null,
         val verifyTimeoutMs: Long? = null,
@@ -74,7 +75,6 @@ object RemoteControl {
         val serverListUrl: String? = null,
         val extraEndpoints: List<MozillaEndpoint> = emptyList(),
         val userAgent: String? = null,
-        val probeTarget: String? = null,
         val hideQuota: Boolean = true,
     )
 
@@ -254,12 +254,11 @@ object RemoteControl {
     fun isFeatureEnabled(selector: (Features) -> Boolean): Boolean =
         runCatching { selector(current().features) }.getOrDefault(true)
 
+    /** Only the public-config selector consumes this explicit exception; default is always deny. */
     fun allowCloudflarePublicConfigs(): Boolean =
         runCatching { current().publicConfigs.allowCloudflare }.getOrDefault(false)
 
     fun mozillaUserAgentOr(defaultUa: String): String =
         current().mozilla.userAgent?.trim()?.takeIf { it.isNotEmpty() } ?: defaultUa
 
-    fun mozillaProbeTargetOr(defaultTarget: String): String =
-        current().mozilla.probeTarget?.trim()?.takeIf { it.isNotEmpty() } ?: defaultTarget
 }

@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.AppConfig
-import com.v2ray.ang.R
 import com.v2ray.ang.core.AetherEngine
 import com.v2ray.ang.handler.GamingExitTuner
 import com.v2ray.ang.handler.GamingMode
@@ -166,11 +165,7 @@ class GamingModeViewModel(application: Application) : AndroidViewModel(applicati
     private fun tuneExit() {
         viewModelScope.launch {
             runCatching {
-                GamingExitTuner.tune(
-                    context = getApplication(),
-                    groupName = getApplication<Application>().getString(R.string.cloudflare_group_name),
-                    remarksSuffix = getApplication<Application>().getString(R.string.cloudflare_copy_suffix),
-                )
+                GamingExitTuner.tune(context = getApplication())
             }.onFailure { LogUtil.w(AppConfig.TAG, "Gaming: measuring the exits failed", it) }
         }
     }

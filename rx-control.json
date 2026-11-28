@@ -45,7 +45,6 @@
     "serverListUrl": null,
     "extraEndpoints": [],
     "userAgent": null,
-    "probeTarget": null,
     "hideQuota": true
   },
   "dnsScanner": {

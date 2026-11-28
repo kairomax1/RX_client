@@ -91,7 +91,7 @@ object Tuning {
     private const val PREF_PREFIX = "pref_rx_tuning_"
 
     /** A 204: an answer with no body, so what is measured is the network, not the page. */
-    private const val PROBE_URL = "https://cp.cloudflare.com/generate_204"
+    private const val PROBE_URL = "https://www.google.com/generate_204"
 
     fun isFragmentAllowed(): Boolean = runCatching {
         MmkvManager.decodeSettingsBool(AppConfig.PREF_RX_FRAGMENT_ENABLED, true)

@@ -194,8 +194,7 @@ object FirefoxVpnManager {
                 return null
             }
             val success = result as ConnectResult.Success
-            val hasRoute = FirefoxVpnRelay.problem == null ||
-                FirefoxVpnCloudflare.relayAddressOrNull(context) != null
+            val hasRoute = FirefoxVpnRelay.problem == null
             if (hasRoute && FirefoxVpnCheck.waitUntilCarries(success.info.localPort, timeoutMillis = 8_000L)) {
                 if (country.code != preferred?.code) {
                     AppLog.info(
@@ -280,9 +279,7 @@ object FirefoxVpnManager {
         )
         if (endpoints.isEmpty()) return ConnectResult.Error("no-address")
 
-        FirefoxVpnRelay.attachContext(context)
-        val relayAddress = FirefoxVpnCloudflare.relayAddressOrNull(context)
-        val localPort = FirefoxVpnRelay.start(endpoints, pass.token, relayAddress)
+        val localPort = FirefoxVpnRelay.start(endpoints, pass.token)
         val chosen = FirefoxVpnRelay.endpoint() ?: endpoints.first()
 
         return ConnectResult.Success(

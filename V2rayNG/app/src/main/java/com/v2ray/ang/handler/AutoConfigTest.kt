@@ -50,19 +50,17 @@ object AutoConfigTest {
     private const val MAX_DOWNLOAD_MS = 3_500L
     private const val FAST_MAX_DOWNLOAD_MS = 1_600L
     private val PAYLOAD_URLS = listOf(
-        "https://speed.cloudflare.com/__down?bytes=$PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
         "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
     )
     private val FAST_PAYLOAD_URLS = listOf(
-        "https://speed.cloudflare.com/__down?bytes=$FAST_PAYLOAD_BYTES",
         "https://cachefly.cachefly.net/1mb.test",
         "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
         "https://github.githubassets.com/favicons/favicon.png",
     )
     private val REACHABILITY_URLS = listOf(
         "https://www.gstatic.com/generate_204",
-        "https://cp.cloudflare.com/generate_204",
+        "https://www.google.com/generate_204",
     )
 
     private data class Stored(val pingMs: Long = 0L, val speedKbps: Int? = null)

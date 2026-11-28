@@ -68,7 +68,6 @@ import com.v2ray.ang.handler.AppLog
 import com.v2ray.ang.handler.FirefoxVpnAuth
 import com.v2ray.ang.handler.FirefoxVpnCaptcha
 import com.v2ray.ang.handler.FirefoxVpnCheck
-import com.v2ray.ang.handler.FirefoxVpnCloudflare
 import com.v2ray.ang.handler.FirefoxVpnGuardian
 import com.v2ray.ang.handler.FirefoxVpnManager
 import com.v2ray.ang.handler.FirefoxVpnRelay
@@ -140,10 +139,6 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         val connectionInfo: FirefoxVpnManager.ConnectionInfo? = null,
         val browserUrl: String? = null,
         val browserState: String? = null,
-        val relayEnabled: Boolean = false,
-        val relayAddress: String = "",
-        val relayCode: String? = null,
-        val relayVerdict: String? = null,
         /** null while unknown, true when a real page came back, false when it did not. */
         val tested: Boolean? = null,
         val tryingCountry: String? = null,
@@ -246,8 +241,6 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 accounts = accounts,
                 activeAccountId = activeId ?: accounts.firstOrNull()?.id,
                 selectedCountryCode = countryCode,
-                relayEnabled = FirefoxVpnCloudflare.isEnabled(getApplication()),
-                relayAddress = FirefoxVpnCloudflare.address(getApplication())
             )
         }
     }
@@ -722,9 +715,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
 
         // When no address took a tunnel there is nothing to wait for: waiting
         // a quarter of a minute per location was the whole of the old wait.
-        if (FirefoxVpnRelay.problem != null &&
-            FirefoxVpnCloudflare.relayAddressOrNull(getApplication()) == null
-        ) {
+        if (FirefoxVpnRelay.problem != null) {
             AppLog.error(
                 AppLog.Section.Connection,
                 "Firefox VPN: ${info.countryName} has no address that takes a tunnel; moving on"
@@ -904,68 +895,7 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
         AppLog.info(AppLog.Section.Connection, "Firefox VPN disconnected")
     }
 
-    // ── The way out through Cloudflare ───────────────────────────
-
-    fun setRelayEnabled(enabled: Boolean) {
-        FirefoxVpnCloudflare.setEnabled(getApplication(), enabled)
-        _state.update { it.copy(relayEnabled = enabled) }
-        AppLog.info(AppLog.Section.Connection, "Cloudflare relay " + if (enabled) "on" else "off")
-    }
-
-    fun setRelayAddress(address: String) {
-        _state.update { it.copy(relayAddress = address) }
-    }
-
-    fun saveRelayAddress() {
-        FirefoxVpnCloudflare.setAddress(getApplication(), _state.value.relayAddress)
-        _state.update {
-            it.copy(
-                relayAddress = FirefoxVpnCloudflare.address(getApplication()),
-                relayVerdict = null
-            )
-        }
-    }
-
-    /**
-     * Asks the deployed Worker whether it knows this phone's key, and — when
-     * Mozilla has issued a pass — whether a real tunnel goes through it. Only
-     * that second question is worth answering with "ready".
-     */
-    fun checkRelay() {
-        val address = _state.value.relayAddress
-        if (address.isBlank()) {
-            _state.update { it.copy(relayVerdict = "missing") }
-            return
-        }
-        val account = activeAccount()
-        viewModelScope.launch {
-            val verdict = withContext(Dispatchers.IO) {
-                val pass = account?.let { FirefoxVpnManager.fetchPass(getApplication(), it) }
-                val country = _state.value.countries.firstOrNull { it.code == _state.value.selectedCountryCode }
-                    ?: FirefoxVpnServers.pickRecommended(_state.value.countries)
-                val endpoint = FirefoxVpnServers.connectEndpoint(country)
-                if (pass != null && endpoint != null) {
-                    FirefoxVpnCloudflare.check(
-                        address,
-                        getApplication(),
-                        endpoint.connectHost,
-                        endpoint.tunnelPort,
-                        pass.token
-                    )
-                } else {
-                    FirefoxVpnCloudflare.check(address, getApplication())
-                }
-            }
-            AppLog.info(AppLog.Section.Connection, "Cloudflare relay check: $verdict")
-            _state.update { it.copy(relayVerdict = verdict) }
-        }
-    }
-
-    /**
-     * One honest sentence about why nothing connected. The relay knows the
-     * last thing the proxy said; the number is all the screen needs, so the
-     * sentence can be read without knowing what a proxy is.
-     */
+    /** Explains the last direct proxy failure in user-facing language. */
     private fun explain(): String {
         val problem = FirefoxVpnRelay.problem.orEmpty()
         val code = Regex("HTTP/1\\.[01] (\\d{3})").find(problem)?.groupValues?.getOrNull(1)
@@ -986,15 +916,6 @@ class FirefoxVpnViewModel(application: Application) : AndroidViewModel(applicati
                 contextString(R.string.firefox_vpn_err_unreachable)
             else -> contextString(R.string.firefox_vpn_err_no_traffic)
         }
-    }
-
-    /** The whole Worker text, with this phone's own key already in it. */
-    fun showRelayCode() {
-        _state.update { it.copy(relayCode = FirefoxVpnCloudflare.workerCode(getApplication())) }
-    }
-
-    fun hideRelayCode() {
-        _state.update { it.copy(relayCode = null) }
     }
 
     fun clearMessages() {
@@ -1281,9 +1202,6 @@ private fun FirefoxVpnScreen(viewModel: FirefoxVpnViewModel, onBack: () -> Unit)
                         )
                     }
                 }
-
-                // The way out through Cloudflare is left out of the screen for
-                // now; the code behind it stays, ready to be shown again.
 
             }
 
@@ -1618,195 +1536,6 @@ private fun TunnelState(tested: Boolean?, country: String) {
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
             color = ink
         )
-    }
-}
-
-// ── The way out through Cloudflare ────────────────────────────────
-//
-// Kept although the screen no longer shows it: the card comes back when the
-// relay is wanted again. Nothing below is compiled away, and the handler and
-// the view model behind it are untouched.
-
-@Composable
-private fun RelayCard(
-    enabled: Boolean,
-    address: String,
-    onToggle: (Boolean) -> Unit,
-    onAddressChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onShowCode: () -> Unit,
-    onCheck: () -> Unit,
-    verdict: String?
-) {
-    val colors = MaterialTheme.colorScheme
-    Card {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = enabled, onCheckedChange = onToggle)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = stringResource(R.string.firefox_vpn_relay_intro),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 18.sp),
-                color = colors.onSurfaceVariant
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        for (step in listOf(
-            R.string.firefox_vpn_relay_step1,
-            R.string.firefox_vpn_relay_step2,
-            R.string.firefox_vpn_relay_step3
-        )) {
-            Text(
-                text = stringResource(step),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = RxPromptFont, lineHeight = 19.sp),
-                color = colors.onSurface,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-        }
-        TextButton(onClick = onShowCode, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                stringResource(R.string.firefox_vpn_relay_show_code),
-                style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont),
-                color = colors.primary
-            )
-        }
-        OutlinedTextField(
-            value = address,
-            onValueChange = onAddressChange,
-            label = { Text(stringResource(R.string.firefox_vpn_relay_address)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = onSave,
-                enabled = address.isNotBlank(),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    stringResource(R.string.firefox_vpn_relay_save),
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
-                )
-            }
-            OutlinedButton(
-                onClick = onCheck,
-                enabled = address.isNotBlank(),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    stringResource(R.string.firefox_vpn_check_relay),
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont)
-                )
-            }
-        }
-        verdict?.let { value ->
-            Spacer(Modifier.height(8.dp))
-            val text = when {
-                value == "ready" -> stringResource(R.string.firefox_vpn_relay_ready)
-                value == "wrong-key" -> stringResource(R.string.firefox_vpn_relay_wrong_key)
-                value == "missing" -> stringResource(R.string.firefox_vpn_relay_missing)
-                value.startsWith("refused") -> stringResource(
-                    R.string.firefox_vpn_relay_refused,
-                    value.removePrefix("refused: ").trim()
-                )
-                else -> value
-            }
-            val good = value == "ready"
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = RxPromptFont, lineHeight = 18.sp),
-                color = if (good) colors.primary else colors.error
-            )
-        }
-    }
-}
-
-@Composable
-private fun RelayCodeDialog(code: String, onDismiss: () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var copied by remember { mutableStateOf(false) }
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.6f))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(colors.surface)
-                .clickable(enabled = false, onClick = {})
-                .padding(16.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.firefox_vpn_relay_code_title),
-                style = MaterialTheme.typography.titleMedium.copy(fontFamily = RxPromptFont, fontSize = 18.sp),
-                color = colors.onSurface
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.firefox_vpn_relay_code_note),
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = RxPromptFont, lineHeight = 17.sp),
-                color = colors.onSurfaceVariant
-            )
-            Spacer(Modifier.height(10.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(240.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.surfaceVariant.copy(alpha = 0.4f))
-                    .verticalScroll(rememberScrollState())
-                    .padding(10.dp)
-            ) {
-                Text(
-                    text = code,
-                    fontSize = 10.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    color = colors.onSurface
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                            as android.content.ClipboardManager
-                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("relay", code))
-                        copied = true
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        text = stringResource(
-                            if (copied) R.string.firefox_vpn_relay_copied else R.string.firefox_vpn_relay_copy
-                        ),
-                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont)
-                    )
-                }
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        stringResource(R.string.firefox_vpn_web_close),
-                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = RxPromptFont)
-                    )
-                }
-            }
-        }
     }
 }
 

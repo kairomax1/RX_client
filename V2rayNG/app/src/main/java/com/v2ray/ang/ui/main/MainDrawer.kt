@@ -47,8 +47,6 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     Routing(R.drawable.ic_routing_24dp, R.string.routing_settings_title),
     /** Not a screen: opens the DNS mode card on the main screen. */
     GamingMode(R.drawable.ic_dns_mode_24dp, R.string.gaming_title),
-    Cloudflare(R.drawable.ic_cloud_download_24dp, R.string.cloudflare_title),
-    SpeedTest(R.drawable.ic_flash_on_24dp, R.string.speedtest_title),
     Settings(R.drawable.ic_settings_24dp, R.string.title_settings),
     CheckUpdate(R.drawable.ic_check_update_24dp, R.string.update_check_for_update),
     BackupRestore(R.drawable.ic_restore_24dp, R.string.title_configuration_backup_restore),
@@ -71,8 +69,6 @@ internal val quickSheetItems = listOf(
 
 private val drawerItems = listOf(
     MainDestination.PublicConfigs,
-    MainDestination.Cloudflare,
-    MainDestination.SpeedTest,
     MainDestination.IpScanner,
     MainDestination.XboxDns,
     MainDestination.FirefoxVpn,

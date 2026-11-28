@@ -47,14 +47,12 @@ import com.v2ray.ang.ui.AboutActivity
 import com.v2ray.ang.ui.backup.BackupActivity
 import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.checkupdate.CheckUpdateActivity
-import com.v2ray.ang.ui.cloudflare.CloudflareActivity
 import com.v2ray.ang.ui.ipscanner.IpScannerActivity
 import com.v2ray.ang.ui.onboarding.LanguageOnboarding
 import com.v2ray.ang.ui.onboarding.WelcomeMessage
 import com.v2ray.ang.ui.onboarding.WelcomeMessageOverlay
 import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.ui.routing.RoutingSettingActivity
-import com.v2ray.ang.ui.speedtest.SpeedTestActivity
 import com.v2ray.ang.ui.server.ProfileEditorResult
 import com.v2ray.ang.ui.server.ServerCustomConfigActivity
 import com.v2ray.ang.ui.server.ServerGroupActivity
@@ -113,13 +111,7 @@ class MainActivity : HelperBaseComponentActivity() {
             mainViewModel.refreshUiSettings()
             if (refreshGroups) mainViewModel.onAction(MainAction.RefreshGroups)
 
-            val connectGuid = result.data?.getStringExtra(IpScannerActivity.EXTRA_CONNECT_GUID)
-            if (result.resultCode == RESULT_OK && !connectGuid.isNullOrBlank()) {
-                mainViewModel.updateSelectedGuid(connectGuid)
-                requestServiceStart()
-            } else if (restartService) {
-                LauncherManager.restartService(this)
-            }
+            if (restartService) LauncherManager.restartService(this)
         }
 
     private val publicConfigsLauncher =
@@ -273,14 +265,12 @@ class MainActivity : HelperBaseComponentActivity() {
             MainDestination.Routing -> Intent(this, RoutingSettingActivity::class.java)
             // Shown as a card by the main screen; there is no activity to open.
             MainDestination.GamingMode -> return
-            MainDestination.Cloudflare -> Intent(this, CloudflareActivity::class.java)
-            MainDestination.SpeedTest -> Intent(this, SpeedTestActivity::class.java)
             MainDestination.Settings -> Intent(this, SettingsActivity::class.java)
             MainDestination.CheckUpdate -> Intent(this, CheckUpdateActivity::class.java)
             MainDestination.BackupRestore -> Intent(this, BackupActivity::class.java)
             MainDestination.XboxDns -> Intent(this, com.v2ray.ang.ui.xboxdns.XboxDnsActivity::class.java)
             MainDestination.FirefoxVpn -> Intent(this, com.v2ray.ang.ui.firefoxvpn.FirefoxVpnActivity::class.java)
-            MainDestination.IpScanner -> Intent(this, com.v2ray.ang.ui.ipscanner.IpScannerActivity::class.java)
+            MainDestination.IpScanner -> Intent(this, IpScannerActivity::class.java)
             MainDestination.Log -> Intent(this, com.v2ray.ang.ui.applog.AppLogActivity::class.java)
             MainDestination.About -> Intent(this, AboutActivity::class.java)
         }

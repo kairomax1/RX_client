@@ -1,7 +1,6 @@
 package com.v2ray.ang.handler
 
-import com.v2ray.ang.dto.entities.ProfileItem
-import com.v2ray.ang.enums.EConfigType
+import com.v2ray.ang.ui.ipscanner.IpScannerViewModel
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -11,208 +10,263 @@ import org.junit.jupiter.api.Test
 class IpScanInputTest {
 
     @Test
-    fun preparesCloudflareAndCustomScanInputsAndNoPortMode() {
-        val cloudflare = IpScanInput.prepareScan(
-            cloudflarePool = true,
-            customRange = "",
-            portEnabled = true,
-            portText = "443",
-            sniText = "Example.COM",
-            cloudflareAddresses = listOf("104.16.0.1", "104.16.0.1"),
-        ).request
-        assertEquals(listOf("104.16.0.1"), cloudflare?.addresses)
-        assertEquals(443, cloudflare?.port)
-        assertEquals("example.com", cloudflare?.sni)
+    fun parsesIndividualIpv4AddressesAndDeduplicatesOverlappingRanges() {
+        val parsed = IpScanInput.parseTargets(
+            "192.0.2.1, 192.0.2.2\n192.0.2.1",
+            requestedCount = 2,
+        )
 
-        val custom = IpScanInput.prepareScan(
-            cloudflarePool = false,
-            customRange = "192.0.2.1-192.0.2.2",
-            portEnabled = false,
-            portText = "invalid",
-            sniText = "also ignored",
-            cloudflareAddresses = emptyList(),
-        ).request
-        assertEquals(listOf("192.0.2.1", "192.0.2.2"), custom?.addresses)
-        assertEquals(null, custom?.port)
-        assertEquals(null, custom?.sni)
+        assertNull(parsed.error)
+        assertEquals(listOf("192.0.2.1", "192.0.2.2"), parsed.addresses)
     }
 
     @Test
-    fun preparationReportsEveryInvalidInputWithoutStartingAProbe() {
+    fun expandsIpv4CidrWithoutNetworkAndBroadcastAddresses() {
+        val parsed = IpScanInput.parseTargets("192.0.2.0/29", requestedCount = 6)
+
+        assertNull(parsed.error)
         assertEquals(
-            IpScanInput.ScanError.InvalidRange,
-            IpScanInput.prepareScan(false, "", true, "443", "", emptyList()).error,
+            listOf("192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5", "192.0.2.6"),
+            parsed.addresses,
         )
+    }
+
+    @Test
+    fun supportsIpv4StartEndRangesAndWhitespaceAroundSeparator() {
+        val parsed = IpScanInput.parseTargets("198.51.100.3 - 198.51.100.5", requestedCount = 3)
+
+        assertNull(parsed.error)
+        assertEquals(listOf("198.51.100.3", "198.51.100.4", "198.51.100.5"), parsed.addresses)
+    }
+
+    @Test
+    fun supportsIpv6AddressesRangesAndCidrs() {
+        val cidr = IpScanInput.parseTargets("2001:db8::/126", requestedCount = 4)
+        val range = IpScanInput.parseTargets("2001:db8::5-2001:db8::7", requestedCount = 3)
+
+        assertNull(cidr.error)
+        assertEquals(4, cidr.addresses.size)
+        assertTrue(cidr.addresses.all { IpScanInput.addressOf(it)?.address?.size == 16 })
+        assertEquals(4, cidr.addresses.toSet().size)
+        assertNull(range.error)
+        assertEquals(3, range.addresses.size)
+        assertEquals(3, range.addresses.toSet().size)
+    }
+
+    @Test
+    fun supportsMixedIpv4AndIpv6Targets() {
+        val parsed = IpScanInput.parseTargets("192.0.2.10, 2001:db8::10", requestedCount = 2)
+
+        assertNull(parsed.error)
+        assertEquals(2, parsed.addresses.size)
+        assertTrue(parsed.addresses.any { ':' !in it })
+        assertTrue(parsed.addresses.any { ':' in it })
+    }
+
+    @Test
+    fun rejectsHostnamesMalformedAddressesAndInvalidRanges() {
+        listOf(
+            "example.com",
+            "256.0.0.1",
+            "192.0.2.1/33",
+            "2001:db8::/129",
+            "192.0.2.5-192.0.2.1",
+            "192.0.2.1-2001:db8::1",
+        ).forEach { invalid ->
+            assertEquals(
+                IpScanInput.ScanError.InvalidTargets,
+                IpScanInput.parseTargets(invalid, requestedCount = 1).error,
+                invalid,
+            )
+        }
+    }
+
+    @Test
+    fun reportsWhenThereAreNotEnoughUniqueAddresses() {
+        val parsed = IpScanInput.parseTargets("192.0.2.1, 192.0.2.1", requestedCount = 2)
+        assertEquals(IpScanInput.ScanError.NotEnoughAddresses, parsed.error)
+    }
+
+    @Test
+    fun parsesAndDeduplicatesCustomPorts() {
+        val parsed = IpScanInput.parsePorts(
+            selectedPorts = listOf(443, 80),
+            customPortsText = "2053, 443; 53",
+        )
+
+        assertNull(parsed.error)
+        assertEquals(listOf(443, 80, 2053, 53), parsed.ports)
+    }
+
+    @Test
+    fun rejectsInvalidOrExcessivePorts() {
         assertEquals(
-            IpScanInput.ScanError.TooManyAddresses,
-            IpScanInput.prepareScan(false, "192.0.2.0/23", true, "443", "", emptyList()).error,
+            IpScanInput.ScanError.InvalidPort,
+            IpScanInput.parsePorts(emptyList(), "0").error,
         )
         assertEquals(
             IpScanInput.ScanError.InvalidPort,
-            IpScanInput.prepareScan(false, "192.0.2.1", true, "0", "", emptyList()).error,
+            IpScanInput.parsePorts(emptyList(), "65536").error,
         )
         assertEquals(
-            IpScanInput.ScanError.InvalidSni,
-            IpScanInput.prepareScan(false, "192.0.2.1", true, "443", "bad name", emptyList()).error,
+            IpScanInput.ScanError.TooManyPorts,
+            IpScanInput.parsePorts((1..12).toList(), "13").error,
         )
     }
 
     @Test
-    fun parsesOneAddressCidrAndInclusiveRange() {
+    fun remoteTargetListsAllowCommentsButRejectHostnames() {
         assertEquals(
-            listOf("192.0.2.7"),
-            IpScanInput.parseIpv4Range(" 192.0.2.7 ").addresses,
+            "8.8.8.8\n2001:4860:4860:0:0:0:0:8888",
+            IpScanInput.normalizeRemoteList("# public targets\n8.8.8.8 # v4\n2001:4860:4860::8888\n"),
+        )
+        assertNull(IpScanInput.normalizeRemoteList("example.com\n"))
+        assertNull(IpScanInput.normalizeRemoteList("# comment only\n"))
+    }
+
+    @Test
+    fun remoteListUrlsRequireHttpsAndRejectEmbeddedCredentials() {
+        assertTrue(IpScanner.isValidRemoteListUrl("https://example.org/targets.txt"))
+        assertFalse(IpScanner.isValidRemoteListUrl("http://example.org/targets.txt"))
+        assertFalse(IpScanner.isValidRemoteListUrl("https://user:secret@example.org/targets.txt"))
+        assertFalse(IpScanner.isValidRemoteListUrl("file:///tmp/targets.txt"))
+        assertFalse(IpScanner.isValidRemoteListUrl("https://"))
+    }
+
+    @Test
+    fun builtinTargetSetsAreNumericAndContainBothIpFamilies() {
+        val addresses = IpScanner.BUILT_IN_TARGETS.flatMap { it.addresses }
+        assertEquals(16, addresses.size)
+        assertTrue(addresses.all(IpScanInput::isValidAddress))
+        assertTrue(addresses.any { ':' !in it })
+        assertTrue(addresses.any { ':' in it })
+        assertEquals(addresses.size, addresses.toSet().size)
+    }
+
+    @Test
+    fun prepareScanEnforcesCountPortsAndProbeLimits() {
+        assertEquals(
+            IpScanInput.ScanError.InvalidCount,
+            IpScanner.prepareScan("192.0.2.1", "not-a-number", IpScanner.Mode.NONE, emptyList(), "").error,
         )
         assertEquals(
-            listOf("192.0.2.4", "192.0.2.5", "192.0.2.6", "192.0.2.7"),
-            IpScanInput.parseIpv4Range("192.0.2.5/30").addresses,
+            IpScanInput.ScanError.CountOutOfRange,
+            IpScanner.prepareScan("192.0.2.1", "257", IpScanner.Mode.NONE, emptyList(), "").error,
         )
         assertEquals(
-            listOf("198.51.100.2", "198.51.100.3", "198.51.100.4"),
-            IpScanInput.parseIpv4Range("198.51.100.2-198.51.100.4").addresses,
+            IpScanInput.ScanError.NoPorts,
+            IpScanner.prepareScan("192.0.2.1", "1", IpScanner.Mode.TCP, emptyList(), "").error,
         )
-    }
-
-    @Test
-    fun rejectsInvalidAndReversedRanges() {
-        listOf(
-            "",
-            "example.com",
-            "256.1.1.1",
-            "1.2.3",
-            "1.2.3.4/33",
-            "1.2.3.4/24/25",
-            "1.2.3.5-1.2.3.4",
-        ).forEach { input ->
-            assertEquals(IpScanInput.RangeError.Invalid, IpScanInput.parseIpv4Range(input).error, input)
-        }
-    }
-
-    @Test
-    fun boundsLargeRangesBeforeBuildingAddressList() {
-        assertEquals(IpScanInput.RangeError.TooMany, IpScanInput.parseIpv4Range("192.0.2.0/23").error)
-        assertEquals(256, IpScanInput.parseIpv4Range("192.0.2.0/24").addresses.size)
-    }
-
-    @Test
-    fun normalizesDnsNamesAndRejectsIpLiteralsAndInvalidLabels() {
-        assertEquals("example.com", IpScanInput.normalizeSni(" Example.COM. "))
-        assertEquals("xn--bcher-kva.example", IpScanInput.normalizeSni("bücher.example"))
-        assertNull(IpScanInput.normalizeSni(""))
-        assertNull(IpScanInput.normalizeSni("192.0.2.1"))
-        assertNull(IpScanInput.normalizeSni("bad name.example"))
-        assertFalse(IpScanInput.isValidIpv4("192.0.2.256"))
-    }
-
-    @Test
-    fun ipCopyChangesOnlyTheCopyAndKeepsProtocolAndHostSettings() {
-        val source = ProfileItem.create(EConfigType.VLESS).apply {
-            remarks = "Personal"
-            server = "node.example"
-            serverPort = "8443"
-            sni = "old.example"
-            host = "ws.example"
-        }
-
-        val copy = IpScanner.copyProfileForAddress(
-            source = source,
-            address = "203.0.113.7",
-            port = 443,
-            sni = " New.Example ",
-            groupId = "ip-scan-group",
-            copySuffix = "(IP scan)",
-        )
-
-        assertEquals(EConfigType.VLESS, copy?.configType)
-        assertEquals("203.0.113.7", copy?.server)
-        assertEquals("443", copy?.serverPort)
-        assertEquals("new.example", copy?.sni)
-        assertEquals("ws.example", copy?.host)
-        assertEquals("ip-scan-group", copy?.subscriptionId)
-        assertEquals("Personal (IP scan)", copy?.remarks)
-        assertEquals("node.example", source.server)
-        assertEquals("8443", source.serverPort)
-        assertEquals("old.example", source.sni)
-    }
-
-    @Test
-    fun ipCopyPreservesImplicitHostnameWhenReplacingTheServerWithAnIp() {
-        val source = ProfileItem.create(EConfigType.VLESS).apply {
-            server = "node.example"
-            serverPort = "443"
-        }
-        val copy = IpScanner.copyProfileForAddress(
-            source = source,
-            address = "203.0.113.8",
-            port = null,
-            sni = null,
-            groupId = "ip-scan-group",
-            copySuffix = "(IP scan)",
-        )
-
-        assertEquals("node.example", copy?.sni)
-        assertEquals("node.example", copy?.host)
-        assertNull(source.sni)
-        assertNull(source.host)
-        assertEquals("node.example", source.server)
-    }
-
-    @Test
-    fun ipCopyPreservesUnsetPortAndSniAndRejectsInvalidAddress() {
-        val source = ProfileItem.create(EConfigType.VMESS).apply {
-            server = "node.example"
-            serverPort = "443"
-            sni = "node.example"
-        }
-        val copy = IpScanner.copyProfileForAddress(
-            source = source,
-            address = "203.0.113.8",
-            port = null,
-            sni = null,
-            groupId = "ip-scan-group",
-            copySuffix = "(IP scan)",
-        )
-
-        assertEquals("443", copy?.serverPort)
-        assertEquals("node.example", copy?.sni)
-        assertEquals(null, IpScanner.copyProfileForAddress(
-            source = source,
-            address = "203.0.113.256",
-            port = 443,
-            sni = null,
-            groupId = "ip-scan-group",
-            copySuffix = "(IP scan)",
-        ))
-    }
-
-    @Test
-    fun proxyChainSpecPlacesTheScannedIpAsTheEntryHop() {
-        val exit = ProfileItem.create(EConfigType.VLESS).apply { remarks = "Exit" }
-        val current = ProfileItem.create(EConfigType.VMESS).apply { remarks = "Current" }
-        val existingEntry = ProfileItem.create(EConfigType.TROJAN).apply { remarks = "Entry" }
-        val scannedIp = ProfileItem.create(EConfigType.SOCKS).apply { remarks = "Scanned IP" }
-
         assertEquals(
-            "Scanned IP,Entry,Current,Exit",
-            IpScanner.buildProxyChainSpec(listOf(exit, current, existingEntry), scannedIp),
+            IpScanInput.ScanError.TooManyProbes,
+            IpScanner.prepareScan(
+                "2001:db8::/120",
+                "256",
+                IpScanner.Mode.TCP,
+                IpScanner.PRESET_PORTS,
+                "",
+            ).error,
         )
-        assertNull(
-            IpScanner.buildProxyChainSpec(
-                listOf(ProfileItem.create(EConfigType.VLESS).apply { remarks = "Exit, alternate" }),
-                scannedIp,
+        val noPortRequest = IpScanner.prepareScan("192.0.2.1", "1", IpScanner.Mode.NONE, emptyList(), "")
+        assertNull(noPortRequest.error)
+        assertEquals(emptyList<Int>(), noPortRequest.request?.ports)
+    }
+
+    @Test
+    fun viewModelInitialStateUsesManualTargetsAndBoundedDefaults() {
+        val state = IpScannerViewModel.UiState()
+
+        assertEquals(IpScanner.TargetSource.MANUAL, state.targetSource)
+        assertEquals("", state.addressText)
+        assertEquals("16", state.countText)
+        assertEquals(IpScanner.Mode.TCP, state.mode)
+        assertEquals(IpScanner.DEFAULT_PORTS, state.selectedPorts)
+        assertEquals(IpScanner.BUILT_IN_TARGETS.map { it.id }.toSet(), state.selectedBuiltInTargetIds)
+        assertTrue(state.loadingNetworkInfo)
+        assertFalse(state.scanning)
+        assertTrue(state.results.isEmpty())
+    }
+
+    @Test
+    fun resolvesManualBuiltinAndRemoteTargetSources() {
+        val manual = IpScanner.resolveTargetInput(
+            IpScanner.TargetSource.MANUAL,
+            "192.0.2.1",
+            emptySet(),
+            "ignored remote list",
+        )
+        val builtin = IpScanner.resolveTargetInput(
+            IpScanner.TargetSource.BUILT_IN,
+            "ignored manual targets",
+            setOf("quad9-dns"),
+            "ignored remote list",
+        )
+        val remote = IpScanner.resolveTargetInput(
+            IpScanner.TargetSource.REMOTE,
+            "ignored manual targets",
+            emptySet(),
+            "198.51.100.1\n2001:db8::1",
+        )
+
+        assertEquals("192.0.2.1", manual.addressText)
+        assertNull(manual.error)
+        assertEquals(IpScanner.BUILT_IN_TARGETS.single { it.id == "quad9-dns" }.addresses.joinToString("\n"), builtin.addressText)
+        assertNull(builtin.error)
+        assertEquals("198.51.100.1\n2001:db8::1", remote.addressText)
+        assertNull(remote.error)
+    }
+
+    @Test
+    fun sourceAndInputSelectionHelpersHandleValidEmptyAndUnknownChoices() {
+        assertEquals(
+            IpScanInput.ScanError.NoBuiltInTargets,
+            IpScanner.resolveTargetInput(IpScanner.TargetSource.BUILT_IN, "", emptySet(), "").error,
+        )
+        assertEquals(
+            IpScanInput.ScanError.RemoteListNotLoaded,
+            IpScanner.resolveTargetInput(IpScanner.TargetSource.REMOTE, "", emptySet(), " ").error,
+        )
+        assertEquals(
+            emptySet<String>(),
+            IpScanner.toggleBuiltInTarget(setOf("google-dns"), "google-dns"),
+        )
+        assertEquals(
+            setOf("quad9-dns"),
+            IpScanner.toggleBuiltInTarget(emptySet(), "quad9-dns"),
+        )
+        assertEquals(
+            emptySet<String>(),
+            IpScanner.toggleBuiltInTarget(emptySet(), "unknown-target"),
+        )
+        assertEquals(listOf(443, 80, 2053), IpScanner.togglePresetPort(listOf(443, 80), 2053))
+        assertEquals(listOf(80), IpScanner.togglePresetPort(listOf(443, 80), 443))
+        assertEquals(listOf(443), IpScanner.togglePresetPort(listOf(443), 22))
+    }
+
+    @Test
+    fun inputSanitizersBoundCountAndPortText() {
+        assertEquals("123", IpScanner.sanitizeCountText("1a2c3456"))
+        assertEquals("", IpScanner.sanitizeCountText("letters"))
+        assertEquals("53, 2053\n8443", IpScanner.sanitizeCustomPortsText("53, 2053\n8443"))
+        assertEquals("123", IpScanner.sanitizeCustomPortsText("a1b2c3"))
+    }
+
+    @Test
+    fun closedTcpPortStillCountsAsAnAddressThatResponded() {
+        val result = IpScanner.AddressResult(
+            address = "192.0.2.1",
+            probes = listOf(
+                IpScanner.ProbeResult(
+                    address = "192.0.2.1",
+                    mode = IpScanner.Mode.TCP,
+                    port = 443,
+                    status = IpScanner.Status.CLOSED,
+                    latencyMs = 2,
+                ),
             ),
         )
-    }
 
-    @Test
-    fun optimizationPrefersBalancedSpeedThenEdgeResponse() {
-        val bestBySpeed = IpScanner.EdgeCandidate("192.0.2.2", 80, 20.0, 10.0)
-        val bestByLatency = IpScanner.EdgeCandidate("192.0.2.1", 15, 12.0, 12.0)
-        assertEquals(bestBySpeed, IpScanner.bestEdgeCandidate(listOf(bestByLatency, bestBySpeed)))
-
-        val noSpeedFast = IpScanner.EdgeCandidate("192.0.2.3", 10)
-        val noSpeedSlow = IpScanner.EdgeCandidate("192.0.2.4", 40)
-        assertEquals(noSpeedFast, IpScanner.bestEdgeCandidate(listOf(noSpeedSlow, noSpeedFast)))
-        assertTrue(IpScanner.bestEdgeCandidate(emptyList()) == null)
+        assertTrue(result.found)
+        assertFalse(result.probes.any { it.status == IpScanner.Status.OPEN })
     }
 }

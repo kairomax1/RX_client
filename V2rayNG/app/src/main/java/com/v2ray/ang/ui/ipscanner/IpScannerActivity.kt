@@ -1,8 +1,10 @@
 package com.v2ray.ang.ui.ipscanner
 
-import android.app.Activity
-import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.widget.Toast
 import androidx.activity.viewModels
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,7 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,17 +29,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.IpScanInput
 import com.v2ray.ang.handler.IpScanner
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -50,45 +54,34 @@ class IpScannerActivity : BaseComponentActivity() {
 
     private val viewModel: IpScannerViewModel by viewModels()
 
-    override fun onResume() {
-        super.onResume()
-        viewModel.refreshSource()
-    }
-
     @Composable
     override fun ScreenContent() {
         val state by viewModel.state.collectAsStateWithLifecycle()
         val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
 
-        LaunchedEffect(state.connectReadyGuid) {
-            val guid = state.connectReadyGuid ?: return@LaunchedEffect
-            setResult(
-                Activity.RESULT_OK,
-                Intent().putExtra(EXTRA_CONNECT_GUID, guid),
-            )
-            finish()
-        }
-
         IpScannerScreen(
             state = state,
             isLoading = isLoading,
             onBack = { finish() },
-            onSelectTarget = viewModel::selectTarget,
-            onRangeChanged = viewModel::updateCustomRange,
-            onPortModeChanged = viewModel::setPortEnabled,
-            onPortChanged = viewModel::updatePort,
-            onSniChanged = viewModel::updateSni,
+            onRefreshNetworkInfo = viewModel::refreshNetworkInfo,
+            onTargetSourceChanged = viewModel::updateTargetSource,
+            onAddressesChanged = viewModel::updateAddresses,
+            onBuiltInTargetToggle = viewModel::toggleBuiltInTarget,
+            onRemoteUrlChanged = viewModel::updateRemoteUrl,
+            onLoadRemoteList = viewModel::loadRemoteTargetList,
+            onCountChanged = viewModel::updateCount,
+            onModeChanged = viewModel::updateMode,
+            onPresetPortToggle = viewModel::togglePresetPort,
+            onCustomPortsChanged = viewModel::updateCustomPorts,
             onScan = viewModel::scan,
-            onSelectResult = viewModel::selectResult,
-            onCheckSni = viewModel::checkSni,
-            onMeasureSpeed = viewModel::measureSpeed,
-            onUseIp = viewModel::useSelectedIp,
-            onConnect = viewModel::connectToIp,
+            onCopy = ::copyIp,
         )
     }
 
-    companion object {
-        const val EXTRA_CONNECT_GUID = "com.v2ray.ang.ipscanner.CONNECT_GUID"
+    private fun copyIp(address: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText("IP", address))
+        Toast.makeText(this, R.string.ipscan_copied, Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -98,32 +91,40 @@ fun IpScannerScreen(
     state: IpScannerViewModel.UiState,
     isLoading: Boolean,
     onBack: () -> Unit,
-    onSelectTarget: (Boolean) -> Unit,
-    onRangeChanged: (String) -> Unit,
-    onPortModeChanged: (Boolean) -> Unit,
-    onPortChanged: (String) -> Unit,
-    onSniChanged: (String) -> Unit,
+    onRefreshNetworkInfo: () -> Unit,
+    onTargetSourceChanged: (IpScanner.TargetSource) -> Unit,
+    onAddressesChanged: (String) -> Unit,
+    onBuiltInTargetToggle: (String) -> Unit,
+    onRemoteUrlChanged: (String) -> Unit,
+    onLoadRemoteList: () -> Unit,
+    onCountChanged: (String) -> Unit,
+    onModeChanged: (IpScanner.Mode) -> Unit,
+    onPresetPortToggle: (Int) -> Unit,
+    onCustomPortsChanged: (String) -> Unit,
     onScan: () -> Unit,
-    onSelectResult: (String) -> Unit,
-    onCheckSni: () -> Unit,
-    onMeasureSpeed: () -> Unit,
-    onUseIp: () -> Unit,
-    onConnect: (String) -> Unit,
+    onCopy: (String) -> Unit,
 ) {
     val errorRes = when (state.error) {
-        IpScannerViewModel.InputError.InvalidRange -> R.string.ipscan_error_range
-        IpScannerViewModel.InputError.TooManyAddresses -> R.string.ipscan_error_too_many
-        IpScannerViewModel.InputError.InvalidPort -> R.string.ipscan_error_port
-        IpScannerViewModel.InputError.InvalidSni -> R.string.ipscan_error_sni
-        IpScannerViewModel.InputError.NoSelection -> R.string.ipscan_error_no_selection
-        IpScannerViewModel.InputError.NoConfig -> R.string.ipscan_no_config
-        IpScannerViewModel.InputError.ScanFailed -> R.string.ipscan_error_scan_failed
-        IpScannerViewModel.InputError.ApplyFailed -> R.string.ipscan_apply_failed
-        IpScannerViewModel.InputError.NoWorkingConfig -> R.string.ipscan_connect_no_method
+        IpScanInput.ScanError.InvalidTargets -> R.string.ipscan_error_targets
+        IpScanInput.ScanError.InvalidCount -> R.string.ipscan_error_count
+        IpScanInput.ScanError.CountOutOfRange -> R.string.ipscan_error_count_range
+        IpScanInput.ScanError.NotEnoughAddresses -> R.string.ipscan_error_not_enough
+        IpScanInput.ScanError.InvalidPort -> R.string.ipscan_error_port
+        IpScanInput.ScanError.TooManyPorts -> R.string.ipscan_error_too_many_ports
+        IpScanInput.ScanError.NoPorts -> R.string.ipscan_error_no_ports
+        IpScanInput.ScanError.TooManyProbes -> R.string.ipscan_error_too_many_probes
+        IpScanInput.ScanError.ScanFailed -> R.string.ipscan_error_scan_failed
+        IpScanInput.ScanError.NoBuiltInTargets -> R.string.ipscan_error_no_builtin
+        IpScanInput.ScanError.RemoteListNotLoaded -> R.string.ipscan_error_remote_not_loaded
         null -> null
     }
-    val selected = state.selectedResult
-
+    val remoteListErrorRes = when (state.remoteListError) {
+        IpScanner.RemoteListError.INVALID_URL -> R.string.ipscan_remote_error_url
+        IpScanner.RemoteListError.DOWNLOAD_FAILED -> R.string.ipscan_remote_error_download
+        IpScanner.RemoteListError.TOO_LARGE -> R.string.ipscan_remote_error_too_large
+        IpScanner.RemoteListError.INVALID_CONTENT -> R.string.ipscan_remote_error_content
+        null -> null
+    }
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         topBar = {
@@ -143,92 +144,211 @@ fun IpScannerScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            item(key = "target-label") {
-                PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_target_label))
+            item(key = "network-info") {
+                NetworkInfoCard(
+                    publicIp = state.publicIp,
+                    operator = state.operator,
+                    loading = state.loadingNetworkInfo,
+                    onRefresh = onRefreshNetworkInfo,
+                )
             }
-            item(key = "target-choices") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilterChip(
-                        selected = state.cloudflarePool,
-                        onClick = { onSelectTarget(true) },
-                        enabled = !state.scanning && !state.applying && !state.connecting,
-                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_cloudflare)) },
-                    )
-                    FilterChip(
-                        selected = !state.cloudflarePool,
-                        onClick = { onSelectTarget(false) },
-                        enabled = !state.scanning && !state.applying && !state.connecting,
-                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_custom)) },
-                    )
+            item(key = "count") {
+                OutlinedTextField(
+                    value = state.countText,
+                    onValueChange = onCountChanged,
+                    enabled = !state.scanning,
+                    label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_count)) },
+                    supportingText = {
+                        Text(androidx.compose.ui.res.stringResource(R.string.ipscan_count_hint))
+                    },
+                    isError = state.error == IpScanInput.ScanError.InvalidCount ||
+                        state.error == IpScanInput.ScanError.CountOutOfRange,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item(key = "target-source-header") {
+                PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_target_source))
+            }
+            item(key = "target-source-options") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TargetSourceChip(IpScanner.TargetSource.MANUAL, state.targetSource, !state.scanning, onTargetSourceChanged)
+                    TargetSourceChip(IpScanner.TargetSource.BUILT_IN, state.targetSource, !state.scanning, onTargetSourceChanged)
+                    TargetSourceChip(IpScanner.TargetSource.REMOTE, state.targetSource, !state.scanning, onTargetSourceChanged)
                 }
             }
-            if (!state.cloudflarePool) {
-                item(key = "custom-range") {
+            when (state.targetSource) {
+                IpScanner.TargetSource.MANUAL -> item(key = "manual-targets") {
                     OutlinedTextField(
-                        value = state.customRange,
-                        onValueChange = onRangeChanged,
-                        enabled = !state.scanning && !state.applying && !state.connecting,
-                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_range)) },
+                        value = state.addressText,
+                        onValueChange = onAddressesChanged,
+                        enabled = !state.scanning,
+                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_targets)) },
                         supportingText = {
-                            Text(androidx.compose.ui.res.stringResource(R.string.ipscan_range_hint))
+                            Text(androidx.compose.ui.res.stringResource(R.string.ipscan_targets_hint))
                         },
-                        isError = state.error == IpScannerViewModel.InputError.InvalidRange ||
-                            state.error == IpScannerViewModel.InputError.TooManyAddresses,
+                        isError = state.error == IpScanInput.ScanError.InvalidTargets ||
+                            state.error == IpScanInput.ScanError.NotEnoughAddresses,
+                        minLines = 2,
+                        maxLines = 4,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                IpScanner.TargetSource.BUILT_IN -> {
+                    item(key = "builtin-header") {
+                        PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_builtin_targets))
+                    }
+                    item(key = "builtin-hint") {
+                        Text(
+                            text = androidx.compose.ui.res.stringResource(R.string.ipscan_builtin_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    item(key = "builtin-options") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            IpScanner.BUILT_IN_TARGETS.forEach { targetSet ->
+                                FilterChip(
+                                    selected = targetSet.id in state.selectedBuiltInTargetIds,
+                                    onClick = { onBuiltInTargetToggle(targetSet.id) },
+                                    enabled = !state.scanning,
+                                    label = {
+                                        Text(androidx.compose.ui.res.stringResource(builtInLabel(targetSet.id)))
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                IpScanner.TargetSource.REMOTE -> {
+                    item(key = "remote-url") {
+                        OutlinedTextField(
+                            value = state.remoteUrlText,
+                            onValueChange = onRemoteUrlChanged,
+                            enabled = !state.scanning && !state.loadingRemoteList,
+                            label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_remote_url)) },
+                            supportingText = {
+                                Text(androidx.compose.ui.res.stringResource(R.string.ipscan_remote_hint))
+                            },
+                            isError = state.remoteListError == IpScanner.RemoteListError.INVALID_URL,
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    item(key = "remote-load") {
+                        RxGlassButton(
+                            onClick = onLoadRemoteList,
+                            enabled = !state.scanning && !state.loadingRemoteList,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                androidx.compose.ui.res.stringResource(
+                                    if (state.loadingRemoteList) R.string.ipscan_remote_loading
+                                    else R.string.ipscan_remote_load,
+                                ),
+                            )
+                        }
+                    }
+                    if (remoteListErrorRes != null) {
+                        item(key = "remote-error") {
+                            Text(
+                                text = androidx.compose.ui.res.stringResource(remoteListErrorRes),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    if (state.remoteTargetsText.isNotBlank()) {
+                        item(key = "remote-loaded") {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = androidx.compose.ui.res.stringResource(R.string.ipscan_remote_loaded),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                )
+                                Text(
+                                    text = state.remoteTargetsText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 5,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            item(key = "mode-header") {
+                PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_mode))
+            }
+            item(key = "mode-options") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ModeChip(IpScanner.Mode.TCP, state.mode, !state.scanning, onModeChanged)
+                    ModeChip(IpScanner.Mode.UDP, state.mode, !state.scanning, onModeChanged)
+                    ModeChip(IpScanner.Mode.NONE, state.mode, !state.scanning, onModeChanged)
+                }
+            }
+            if (state.mode != IpScanner.Mode.NONE) {
+                item(key = "preset-ports-header") {
+                    PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_ports))
+                }
+                item(key = "preset-ports") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        IpScanner.PRESET_PORTS.forEach { port ->
+                            FilterChip(
+                                selected = port in state.selectedPorts,
+                                onClick = { onPresetPortToggle(port) },
+                                enabled = !state.scanning,
+                                label = {
+                                    Text(androidx.compose.ui.res.stringResource(R.string.ipscan_port_chip, port))
+                                },
+                            )
+                        }
+                    }
+                }
+                item(key = "custom-ports") {
+                    OutlinedTextField(
+                        value = state.customPortsText,
+                        onValueChange = onCustomPortsChanged,
+                        enabled = !state.scanning,
+                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_custom_ports)) },
+                        supportingText = {
+                            Text(androidx.compose.ui.res.stringResource(R.string.ipscan_ports_hint))
+                        },
+                        isError = state.error == IpScanInput.ScanError.InvalidPort ||
+                            state.error == IpScanInput.ScanError.TooManyPorts ||
+                            state.error == IpScanInput.ScanError.NoPorts,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
-            item(key = "port-label") {
-                PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_port_mode))
-            }
-            item(key = "port-choices") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilterChip(
-                        selected = state.portEnabled,
-                        onClick = { onPortModeChanged(true) },
-                        enabled = !state.scanning && !state.applying && !state.connecting,
-                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_test_port)) },
-                    )
-                    FilterChip(
-                        selected = !state.portEnabled,
-                        onClick = { onPortModeChanged(false) },
-                        enabled = !state.scanning && !state.applying && !state.connecting,
-                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_no_port)) },
-                    )
-                }
-            }
-            if (state.portEnabled) {
-                item(key = "port-input") {
-                    OutlinedTextField(
-                        value = state.portText,
-                        onValueChange = onPortChanged,
-                        enabled = !state.scanning && !state.applying && !state.connecting,
-                        label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_port)) },
-                        isError = state.error == IpScannerViewModel.InputError.InvalidPort,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-            item(key = "sni-input") {
-                OutlinedTextField(
-                    value = state.sniText,
-                    onValueChange = onSniChanged,
-                    enabled = state.portEnabled && !state.scanning && !state.applying && !state.connecting,
-                    label = { Text(androidx.compose.ui.res.stringResource(R.string.ipscan_sni)) },
-                    isError = state.error == IpScannerViewModel.InputError.InvalidSni,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            errorRes?.let { resId ->
-                item(key = "input-error") {
+            errorRes?.let { resource ->
+                item(key = "error") {
                     Text(
-                        text = androidx.compose.ui.res.stringResource(resId),
+                        text = androidx.compose.ui.res.stringResource(resource),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -237,7 +357,7 @@ fun IpScannerScreen(
             item(key = "scan-action") {
                 RxGlassButton(
                     onClick = onScan,
-                    enabled = (!isLoading || state.scanning) && !state.applying && !state.connecting,
+                    enabled = !state.loadingRemoteList && (!isLoading || state.scanning),
                     accent = !state.scanning,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -249,7 +369,7 @@ fun IpScannerScreen(
                 }
             }
             if (state.scanning) {
-                item(key = "scan-progress") {
+                item(key = "progress") {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         LinearProgressIndicator(
                             progress = {
@@ -270,47 +390,23 @@ fun IpScannerScreen(
                     }
                 }
             }
-            item(key = "measurement-note") {
+            item(key = "network-note") {
                 Text(
-                    text = androidx.compose.ui.res.stringResource(R.string.ipscan_measurement_note),
+                    text = androidx.compose.ui.res.stringResource(R.string.ipscan_network_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             item(key = "results-header") {
-                PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_results))
-            }
-            item(key = "connect-note") {
-                Text(
-                    text = androidx.compose.ui.res.stringResource(R.string.ipscan_connect_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                PreferenceGroupHeader(
+                    title = androidx.compose.ui.res.stringResource(
+                        R.string.ipscan_results_count,
+                        state.results.size,
+                    ),
                 )
             }
-            if (state.connecting && state.connectionProgressTotal > 0) {
-                item(key = "connect-progress") {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        LinearProgressIndicator(
-                            progress = {
-                                state.connectionProgressDone.toFloat() /
-                                    state.connectionProgressTotal.coerceAtLeast(1)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(
-                            text = androidx.compose.ui.res.stringResource(
-                                R.string.ipscan_connect_progress,
-                                state.connectionProgressDone,
-                                state.connectionProgressTotal,
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
             if (state.results.isEmpty() && state.hasScanned && !state.scanning) {
-                item(key = "no-results") {
+                item(key = "empty-results") {
                     Text(
                         text = androidx.compose.ui.res.stringResource(R.string.ipscan_no_results),
                         style = MaterialTheme.typography.bodyMedium,
@@ -318,7 +414,7 @@ fun IpScannerScreen(
                     )
                 }
             } else if (state.results.isEmpty() && !state.scanning) {
-                item(key = "empty-hint") {
+                item(key = "start-hint") {
                     Text(
                         text = androidx.compose.ui.res.stringResource(R.string.ipscan_start_hint),
                         style = MaterialTheme.typography.bodyMedium,
@@ -327,41 +423,7 @@ fun IpScannerScreen(
                 }
             }
             items(state.results, key = { it.address }) { result ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ProbeResultCard(
-                        result = result,
-                        selected = result.address == state.selectedAddress,
-                        onSelect = { onSelectResult(result.address) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    RxGlassButton(
-                        onClick = { onConnect(result.address) },
-                        enabled = state.canConnectToIp && !isLoading,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
-                    ) {
-                        Text(
-                            androidx.compose.ui.res.stringResource(
-                                if (state.connecting) R.string.rx_connecting else R.string.rx_connect,
-                            ),
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-            if (selected != null) {
-                item(key = "selected-actions") {
-                    SelectedIpActions(
-                        state = state,
-                        result = selected,
-                        onCheckSni = onCheckSni,
-                        onMeasureSpeed = onMeasureSpeed,
-                        onUseIp = onUseIp,
-                    )
-                }
+                AddressResultCard(result = result, onCopy = onCopy)
             }
             item(key = "navigation-spacer") { NavigationBarsSpacer() }
         }
@@ -369,168 +431,192 @@ fun IpScannerScreen(
 }
 
 @Composable
-private fun ProbeResultCard(
-    result: IpScanner.ProbeResult,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    modifier: Modifier = Modifier,
+private fun NetworkInfoCard(
+    publicIp: String?,
+    operator: String,
+    loading: Boolean,
+    onRefresh: () -> Unit,
 ) {
-    val outline = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) { }
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        border = androidx.compose.foundation.BorderStroke(1.dp, outline),
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(result.address, style = MaterialTheme.typography.titleMedium)
-            val primaryMetric = when {
-                result.port == null -> result.reachabilityMs?.let {
-                    androidx.compose.ui.res.stringResource(R.string.ipscan_reachable_ms, it)
-                } ?: androidx.compose.ui.res.stringResource(R.string.ipscan_not_reachable)
-                result.tcpConnectMs != null -> androidx.compose.ui.res.stringResource(
-                    R.string.ipscan_tcp_ms,
-                    result.tcpConnectMs,
-                )
-                else -> androidx.compose.ui.res.stringResource(R.string.ipscan_not_reachable)
-            }
-            val tlsMetric = when (result.tlsSucceeded) {
-                true -> result.tlsHandshakeMs?.let {
-                    androidx.compose.ui.res.stringResource(R.string.ipscan_tls_ms, it)
-                }
-                false -> androidx.compose.ui.res.stringResource(R.string.ipscan_sni_failed, result.address)
-                null -> null
-            }
-            Text(
-                text = listOfNotNull(
-                    primaryMetric,
-                    tlsMetric,
-                    result.downloadMbps?.let {
-                        androidx.compose.ui.res.stringResource(R.string.ipscan_download_mbps, formatMbps(it))
-                    },
-                    result.uploadMbps?.let {
-                        androidx.compose.ui.res.stringResource(R.string.ipscan_upload_mbps, formatMbps(it))
-                    },
-                ).joinToString("  ·  "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SelectedIpActions(
-    state: IpScannerViewModel.UiState,
-    result: IpScanner.ProbeResult,
-    onCheckSni: () -> Unit,
-    onMeasureSpeed: () -> Unit,
-    onUseIp: () -> Unit,
-) {
-    PreferenceGroupHeader(title = androidx.compose.ui.res.stringResource(R.string.ipscan_selected))
     RxGlassPanel(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(result.address, style = MaterialTheme.typography.titleMedium)
-            state.sniOutcome?.takeIf { it.address == result.address }?.let { outcome ->
+            Text(
+                text = androidx.compose.ui.res.stringResource(R.string.ipscan_network_info),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = androidx.compose.ui.res.stringResource(
-                        if (outcome.succeeded) R.string.ipscan_sni_ok else R.string.ipscan_sni_failed,
-                        result.address,
-                        outcome.handshakeMs ?: 0L,
-                    ),
-                    color = if (outcome.succeeded) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = androidx.compose.ui.res.stringResource(R.string.ipscan_public_ip),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(0.75f),
                 )
-            }
-            val download = result.downloadMbps?.let {
-                androidx.compose.ui.res.stringResource(R.string.ipscan_download_mbps, formatMbps(it))
-            } ?: androidx.compose.ui.res.stringResource(R.string.ipscan_speed_unavailable)
-            val upload = result.uploadMbps?.let {
-                androidx.compose.ui.res.stringResource(R.string.ipscan_upload_mbps, formatMbps(it))
-            } ?: androidx.compose.ui.res.stringResource(R.string.ipscan_speed_unavailable)
-            Text(
-                text = "$download  ·  $upload",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RxGlassButton(
-                    onClick = onCheckSni,
-                    enabled = state.canCheckSni,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
-                ) {
-                    Text(androidx.compose.ui.res.stringResource(R.string.ipscan_check_sni))
-                }
-                RxGlassButton(
-                    onClick = onMeasureSpeed,
-                    enabled = state.canMeasureSpeed,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        androidx.compose.ui.res.stringResource(
-                            if (state.checkingSpeed) R.string.ipscan_measuring_speed
-                            else R.string.ipscan_measure_speed,
-                        ),
-                    )
-                }
-            }
-            Text(
-                text = androidx.compose.ui.res.stringResource(R.string.ipscan_speed_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            RxGlassButton(
-                onClick = onUseIp,
-                enabled = state.canApplyToConfig && !state.applying && !state.connecting && !state.scanning &&
-                    !state.checkingSni && !state.checkingSpeed,
-                accent = true,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
                 Text(
-                    androidx.compose.ui.res.stringResource(
-                        if (state.applying) R.string.ipscan_applying else R.string.ipscan_apply_ip,
-                    ),
-                )
-            }
-            Text(
-                text = if (state.canApplyToConfig) {
-                    androidx.compose.ui.res.stringResource(
-                        R.string.ipscan_apply_hint,
-                        state.sourceConfigName.orEmpty(),
-                    )
-                } else {
-                    androidx.compose.ui.res.stringResource(R.string.ipscan_no_config)
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (state.appliedConfigName != null) {
-                Text(
-                    text = state.appliedConfigPingMs?.let {
-                        androidx.compose.ui.res.stringResource(R.string.ipscan_applied_ping, it)
-                    } ?: if (state.appliedConfigPingFinished) {
-                        androidx.compose.ui.res.stringResource(R.string.ipscan_applied_ping_unavailable)
-                    } else {
-                        androidx.compose.ui.res.stringResource(R.string.ipscan_applied, state.appliedConfigName)
+                    text = when {
+                        loading -> androidx.compose.ui.res.stringResource(R.string.ipscan_public_ip_loading)
+                        publicIp != null -> publicIp
+                        else -> androidx.compose.ui.res.stringResource(R.string.ipscan_public_ip_unavailable)
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.tertiary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1.25f),
                 )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = androidx.compose.ui.res.stringResource(R.string.ipscan_operator),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(0.75f),
+                )
+                Text(
+                    text = if (operator == com.v2ray.ang.handler.NetworkOperator.UNKNOWN) {
+                        androidx.compose.ui.res.stringResource(R.string.ipscan_operator_unknown)
+                    } else {
+                        operator
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1.25f),
+                )
+            }
+            TextButton(onClick = onRefresh, enabled = !loading) {
+                Text(androidx.compose.ui.res.stringResource(R.string.ipscan_refresh))
             }
         }
     }
 }
 
-private fun formatMbps(value: Double): String = String.format(java.util.Locale.US, "%.1f", value)
+@Composable
+private fun TargetSourceChip(
+    source: IpScanner.TargetSource,
+    selected: IpScanner.TargetSource,
+    enabled: Boolean,
+    onSelect: (IpScanner.TargetSource) -> Unit,
+) {
+    val label = when (source) {
+        IpScanner.TargetSource.MANUAL -> R.string.ipscan_source_manual
+        IpScanner.TargetSource.BUILT_IN -> R.string.ipscan_source_builtin
+        IpScanner.TargetSource.REMOTE -> R.string.ipscan_source_remote
+    }
+    FilterChip(
+        selected = source == selected,
+        onClick = { onSelect(source) },
+        enabled = enabled,
+        label = { Text(androidx.compose.ui.res.stringResource(label)) },
+    )
+}
+
+private fun builtInLabel(id: String): Int = when (id) {
+    "google-dns" -> R.string.ipscan_builtin_google
+    "quad9-dns" -> R.string.ipscan_builtin_quad9
+    "opendns" -> R.string.ipscan_builtin_opendns
+    "adguard-dns" -> R.string.ipscan_builtin_adguard
+    else -> R.string.ipscan_builtin_targets
+}
+
+@Composable
+private fun ModeChip(
+    mode: IpScanner.Mode,
+    selected: IpScanner.Mode,
+    enabled: Boolean,
+    onSelect: (IpScanner.Mode) -> Unit,
+) {
+    val label = when (mode) {
+        IpScanner.Mode.TCP -> R.string.ipscan_tcp
+        IpScanner.Mode.UDP -> R.string.ipscan_udp
+        IpScanner.Mode.NONE -> R.string.ipscan_none
+    }
+    FilterChip(
+        selected = mode == selected,
+        onClick = { onSelect(mode) },
+        enabled = enabled,
+        label = { Text(androidx.compose.ui.res.stringResource(label)) },
+    )
+}
+
+@Composable
+private fun AddressResultCard(
+    result: IpScanner.AddressResult,
+    onCopy: (String) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = result.address,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { onCopy(result.address) }) {
+                    Text(androidx.compose.ui.res.stringResource(R.string.ipscan_copy))
+                }
+            }
+            result.probes.forEach { probe -> ProbeLine(probe) }
+        }
+    }
+}
+
+@Composable
+private fun ProbeLine(probe: IpScanner.ProbeResult) {
+    val label = when (probe.status) {
+        IpScanner.Status.OPEN -> R.string.ipscan_status_open
+        IpScanner.Status.RESPONSE -> R.string.ipscan_status_udp_response
+        IpScanner.Status.REACHABLE -> R.string.ipscan_status_reachable
+        IpScanner.Status.CLOSED -> R.string.ipscan_status_closed
+        IpScanner.Status.NO_RESPONSE -> when (probe.mode) {
+            IpScanner.Mode.UDP -> R.string.ipscan_status_udp_unknown
+            IpScanner.Mode.NONE -> R.string.ipscan_status_no_reply
+            IpScanner.Mode.TCP -> R.string.ipscan_status_no_reply
+        }
+        IpScanner.Status.ERROR -> R.string.ipscan_status_error
+    }
+    val modeLabel = when (probe.mode) {
+        IpScanner.Mode.TCP -> R.string.ipscan_tcp
+        IpScanner.Mode.UDP -> R.string.ipscan_udp
+        IpScanner.Mode.NONE -> R.string.ipscan_none
+    }
+    val modeText = androidx.compose.ui.res.stringResource(modeLabel)
+    val portText = probe.port?.let { androidx.compose.ui.res.stringResource(R.string.ipscan_port_number, it) }
+    val statusText = androidx.compose.ui.res.stringResource(label)
+    val latencyText = probe.latencyMs?.let { androidx.compose.ui.res.stringResource(R.string.ipscan_latency, it) }
+    val details = listOfNotNull(modeText, portText, statusText, latencyText).joinToString(" · ")
+    Text(
+        text = details,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (probe.status in setOf(
+                IpScanner.Status.OPEN,
+                IpScanner.Status.RESPONSE,
+                IpScanner.Status.REACHABLE,
+                IpScanner.Status.CLOSED,
+            )
+        ) {
+            MaterialTheme.colorScheme.tertiary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    )
+}

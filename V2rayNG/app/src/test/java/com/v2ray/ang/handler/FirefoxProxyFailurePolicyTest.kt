@@ -7,28 +7,24 @@ import org.junit.jupiter.api.Test
 class FirefoxProxyFailurePolicyTest {
 
     @Test
-    fun destinationIpPolicyDenialDoesNotMarkTheRouteDeadOrTriggerWorkerFallback() {
+    fun destinationIpPolicyDenialDoesNotMarkTheRouteDead() {
         val reason = "HTTP/1.1 502 Destination IP Prohibited"
 
         assertTrue(FirefoxProxyFailurePolicy.isTargetPolicyRejection(reason))
         assertFalse(FirefoxProxyFailurePolicy.isEndpointFailure(reason))
-        assertFalse(FirefoxProxyFailurePolicy.shouldTryWorker(reason))
     }
 
     @Test
-    fun genericBadGatewayStillCountsAsAnEndpointFailure() {
+    fun genericBadGatewayCountsAsAnEndpointFailure() {
         val reason = "HTTP/1.1 502 Bad Gateway"
 
         assertFalse(FirefoxProxyFailurePolicy.isTargetPolicyRejection(reason))
         assertTrue(FirefoxProxyFailurePolicy.isEndpointFailure(reason))
-        assertTrue(FirefoxProxyFailurePolicy.shouldTryWorker(reason))
     }
 
     @Test
     fun transportFailureStillCountsAsAnEndpointFailure() {
         val reason = "proxy handshake timed out"
-
         assertTrue(FirefoxProxyFailurePolicy.isEndpointFailure(reason))
-        assertTrue(FirefoxProxyFailurePolicy.shouldTryWorker(reason))
     }
 }

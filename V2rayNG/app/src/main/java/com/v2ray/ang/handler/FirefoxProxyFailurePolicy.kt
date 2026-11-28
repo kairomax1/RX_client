@@ -5,7 +5,7 @@ package com.v2ray.ang.handler
  *
  * Fastly can answer CONNECT with `502 Destination IP Prohibited` when that one
  * destination is disallowed. The authenticated proxy may still be healthy, so
- * this response must not quarantine the endpoint or trigger a relay fallback.
+ * this response must not quarantine the endpoint.
  */
 internal object FirefoxProxyFailurePolicy {
 
@@ -32,20 +32,6 @@ internal object FirefoxProxyFailurePolicy {
 
         val status = httpStatus.find(reason)?.groupValues?.getOrNull(1)?.toIntOrNull()
         if (status != null) return status == 421 || status in 500..599
-
-        val lower = reason.lowercase()
-        return listOf(
-            "cannot be reached", "no answer", "did not answer", "timed out", "timeout",
-            "connection reset", "connection refused", "broken pipe", "unreachable", "closed",
-            "handshake",
-        ).any(lower::contains)
-    }
-
-    fun shouldTryWorker(reason: String): Boolean {
-        if (isTargetPolicyRejection(reason)) return false
-
-        val status = httpStatus.find(reason)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (status != null) return status in 500..599
 
         val lower = reason.lowercase()
         return listOf(
