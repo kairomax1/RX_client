@@ -1,6 +1,11 @@
 name: Test Android 17 ARM64 APK installation
 
 on:
+  push:
+    branches:
+      - "arena/**"
+    paths:
+      - ".github/workflows/android17-install-test.yml"
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -25,7 +30,7 @@ jobs:
         with:
           name: RXVPN-apk
           path: apks/new
-          run-id: ${{ inputs.artifact_run_id }}
+          run-id: ${{ github.event.inputs.artifact_run_id || '46127785552' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download the previous public release for upgrade testing
