@@ -522,15 +522,42 @@ object IpScanInput {
         return TargetParseResult(addresses = addresses.toList())
     }
 
-    /** Strips line comments from a downloaded list and validates every remaining entry. */
+    /** Strips line comments, canonicalizes numeric targets, and validates a downloaded list. */
     fun normalizeRemoteList(input: String): String? {
         if (input.isBlank() || input.length > MAX_INPUT_LENGTH) return null
-        val normalized = input.lineSequence()
+        val cleaned = input.lineSequence()
             .map { it.substringBefore('#').trim() }
             .filter { it.isNotEmpty() }
             .joinToString("\n")
+            .replace(Regex("\\s+-\\s+"), "-")
+        val tokens = cleaned.split(Regex("[,;\\s]+"))
+            .filter { it.isNotBlank() }
+        if (tokens.isEmpty() || tokens.size > MAX_INPUT_TOKENS) return null
+        val normalized = tokens.map { normalizeTargetToken(it) ?: return null }
+            .joinToString("\n")
         if (normalized.isBlank() || normalized.length > MAX_INPUT_LENGTH) return null
         return normalized.takeIf { parseTargets(it, 1).error == null }
+    }
+
+    private fun normalizeTargetToken(token: String): String? {
+        val slash = token.indexOf('/')
+        if (slash >= 0) {
+            if (slash == token.lastIndex || token.indexOf('/', slash + 1) >= 0) return null
+            val address = normalizeAddress(token.substring(0, slash)) ?: return null
+            val prefix = token.substring(slash + 1).toIntOrNull() ?: return null
+            val maxPrefix = if (':' in address) 128 else 32
+            if (prefix !in 0..maxPrefix) return null
+            return "$address/$prefix"
+        }
+
+        val separator = token.indexOf('-')
+        if (separator >= 0) {
+            if (separator == 0 || separator == token.lastIndex || token.indexOf('-', separator + 1) >= 0) return null
+            val first = normalizeAddress(token.substring(0, separator)) ?: return null
+            val last = normalizeAddress(token.substring(separator + 1)) ?: return null
+            return "$first-$last"
+        }
+        return normalizeAddress(token)
     }
 
     fun parsePorts(selectedPorts: Collection<Int>, customPortsText: String): PortParseResult {

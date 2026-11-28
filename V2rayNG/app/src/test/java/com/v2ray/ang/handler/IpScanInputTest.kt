@@ -120,6 +120,10 @@ class IpScanInputTest {
             "8.8.8.8\n2001:4860:4860:0:0:0:0:8888",
             IpScanInput.normalizeRemoteList("# public targets\n8.8.8.8 # v4\n2001:4860:4860::8888\n"),
         )
+        assertEquals(
+            "192.0.2.0/24\n2001:db8:0:0:0:0:0:1-2001:db8:0:0:0:0:0:5",
+            IpScanInput.normalizeRemoteList("192.0.2.0/24\n2001:db8::1 - 2001:db8::5"),
+        )
         assertNull(IpScanInput.normalizeRemoteList("example.com\n"))
         assertNull(IpScanInput.normalizeRemoteList("# comment only\n"))
     }
