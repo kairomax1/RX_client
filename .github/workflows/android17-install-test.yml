@@ -1,0 +1,76 @@
+name: Test Android 17 ARM64 APK installation
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful build run that contains the RXVPN-apk artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  android17-arm64:
+    name: Fresh install and in-place update on Android 17 ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download candidate APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: RXVPN-apk
+          path: apks/new
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download the previous public release for upgrade testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p apks/old
+          gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" \
+            --pattern RXVPN_1.0.1_arm64-v8a.apk --dir apks/old
+          ls -lh apks/new apks/old
+
+      - name: Enable emulator acceleration
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod a+rw /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo '::warning::No /dev/kvm; Android 17 ARM64 emulator may be slow'
+          fi
+
+      - name: Install fresh and update without removing user data
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 37
+          target: google_apis
+          arch: arm64-v8a
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -euo pipefail
+            APK=apks/new/RXVPN_1.2.1_arm64-v8a.apk
+            OLD=apks/old/RXVPN_1.0.1_arm64-v8a.apk
+            SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+            ABI=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
+            echo "Android API $SDK; ABIs: $ABI"
+            [ "$SDK" = "37" ] || { echo "Expected API 37, got $SDK"; exit 1; }
+
+            echo 'Fresh-install test'
+            adb install "$APK"
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb uninstall com.mobix.vpn
+
+            echo 'Upgrade test: install the public 1.0.1 build, then replace it in place'
+            adb install "$OLD"
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb install -r "$APK"
+            adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
+            adb shell pm path com.mobix.vpn
