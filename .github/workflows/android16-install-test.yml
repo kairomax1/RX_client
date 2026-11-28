@@ -1,4 +1,4 @@
-name: Test Android 16 APK installation
+name: Test Android 16 ARM64 APK installation
 
 on:
   push:
@@ -18,9 +18,9 @@ permissions:
   actions: read
 
 jobs:
-  android16:
-    name: Fresh install and in-place update on Android 16 emulator
-    runs-on: ubuntu-latest
+  android16-arm64:
+    name: Fresh install and in-place update on Android 16 ARM64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -33,34 +33,37 @@ jobs:
           run-id: ${{ github.event.inputs.artifact_run_id || '46127785552' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download the previous public release for upgrade testing
+      - name: Download the previous public ARM64 release for upgrade testing
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p apks/old
           gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" \
-            --pattern RXVPN_1.0.1_universal.apk --pattern RXVPN_1.0.1_arm64-v8a.apk \
-            --dir apks/old
+            --pattern RXVPN_1.0.1_arm64-v8a.apk --dir apks/old
           ls -lh apks/new apks/old
 
       - name: Enable emulator acceleration
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          uname -a
+          if [ -e /dev/kvm ]; then
+            ls -l /dev/kvm
+            sudo chmod a+rw /dev/kvm
+          else
+            echo '::warning::ARM runner has no /dev/kvm; emulator acceleration may be unavailable'
+          fi
 
       - name: Install fresh and update without removing user data
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
           target: google_apis
-          arch: x86_64
+          arch: arm64-v8a
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             set -eu
-            APK=apks/new/RXVPN_1.2.1_universal.apk
-            OLD=apks/old/RXVPN_1.0.1_universal.apk
+            APK=apks/new/RXVPN_1.2.1_arm64-v8a.apk
+            OLD=apks/old/RXVPN_1.0.1_arm64-v8a.apk
             SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
             ABI=$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')
             echo "::notice title=Emulator::Android API $SDK; ABIs: $ABI"
@@ -91,30 +94,14 @@ jobs:
               fi
             }
 
-            echo 'Fresh-install test (universal APK)'
-            install_apk 'fresh universal install' "$APK"
+            echo 'Fresh-install test: candidate arm64 APK'
+            install_apk 'fresh arm64 install' "$APK"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb uninstall com.mobix.vpn
 
             echo 'Upgrade test: install public 1.0.1, then update in place'
             install_apk 'baseline 1.0.1 install' "$OLD"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-            update_apk 'universal 1.2.1 update' "$APK"
+            update_apk 'candidate arm64 update' "$APK"
             adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
             adb shell pm path com.mobix.vpn
-
-            case ",$ABI," in
-              *,arm64-v8a,*)
-                ARM64=apks/new/RXVPN_1.2.1_arm64-v8a.apk
-                OLD_ARM64=apks/old/RXVPN_1.0.1_arm64-v8a.apk
-                echo 'This emulator supports ARM64; also test the exact arm64-v8a APK'
-                adb uninstall com.mobix.vpn
-                install_apk 'fresh arm64 install' "$ARM64"
-                adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-                adb uninstall com.mobix.vpn
-                install_apk 'baseline arm64 1.0.1 install' "$OLD_ARM64"
-                update_apk 'arm64 1.2.1 update' "$ARM64"
-                adb shell dumpsys package com.mobix.vpn | grep -E 'versionCode=|versionName='
-                ;;
-              *) echo '::warning::Emulator has no ARM64 native bridge; only the universal APK was installed' ;;
-            esac
